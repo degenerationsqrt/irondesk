@@ -230,174 +230,306 @@ const mk = (ex, sets, reps, opts = {}) => ({
   reps,
   ...opts
 });
-const PROGRAMS = {
-  home: [{
-    id: "Chest",
-    type: "heavy",
-    rows: [mk("Bench Press", 4, 4, {
-      heavy: true,
-      lift: "bench",
-      note: "Rest 3 min"
-    }), mk("Incline DB Press", 3, 5, {
-      heavy: true,
-      note: "Upper chest"
-    }), mk("Flat DB Press", 3, 6, {
-      note: "Stretch at bottom"
-    }), mk("Weighted Dip", 2, 6, {
-      note: "Optional finisher"
-    })]
+/* ============ PERIODIZATION ENGINE ============ */
+/* 6-week undulating block: 5 progressive weeks + deload, then auto-regenerates */
+const WEEK_SCHEMES = [{
+  label: "Heavy",
+  comp: {
+    sets: 4,
+    reps: 4,
+    pct: 0.87
+  },
+  acc: {
+    sets: 3,
+    reps: 7
+  },
+  iso: {
+    sets: 3,
+    reps: 12
+  },
+  cardioMul: 1.0,
+  drop: false,
+  note: "Low reps, long rest — strength base."
+}, {
+  label: "Volume",
+  comp: {
+    sets: 4,
+    reps: 6,
+    pct: 0.80
+  },
+  acc: {
+    sets: 3,
+    reps: 9
+  },
+  iso: {
+    sets: 3,
+    reps: 14
+  },
+  cardioMul: 1.0,
+  drop: true,
+  note: "More reps, accumulate volume."
+}, {
+  label: "Hypertrophy",
+  comp: {
+    sets: 4,
+    reps: 8,
+    pct: 0.74
+  },
+  acc: {
+    sets: 4,
+    reps: 11
+  },
+  iso: {
+    sets: 4,
+    reps: 15
+  },
+  cardioMul: 1.1,
+  drop: true,
+  note: "Growth focus — chase the pump."
+}, {
+  label: "Metabolite",
+  comp: {
+    sets: 3,
+    reps: 10,
+    pct: 0.68
+  },
+  acc: {
+    sets: 3,
+    reps: 14
+  },
+  iso: {
+    sets: 3,
+    reps: 18
+  },
+  cardioMul: 1.3,
+  drop: true,
+  note: "High reps, short rest, big burn."
+}, {
+  label: "Peak",
+  comp: {
+    sets: 5,
+    reps: 3,
+    pct: 0.90
+  },
+  acc: {
+    sets: 3,
+    reps: 6
+  },
+  iso: {
+    sets: 3,
+    reps: 12
+  },
+  cardioMul: 0.8,
+  drop: false,
+  note: "Heaviest week — push the top sets."
+}, {
+  label: "Deload",
+  comp: {
+    sets: 2,
+    reps: 5,
+    pct: 0.60
+  },
+  acc: {
+    sets: 2,
+    reps: 10
+  },
+  iso: {
+    sets: 2,
+    reps: 12
+  },
+  cardioMul: 0.5,
+  drop: false,
+  note: "Recover. Light & easy — leave fresh."
+}];
+
+/* V-taper bias: every day ends with a side-delt finisher (high frequency = width).
+   Shoulders + Back get extra width volume. Each slot has rotating variations per block. */
+const DAY_TEMPLATES = [{
+  id: "Chest",
+  type: "heavy",
+  cardio: ["Incline Walk", 12],
+  abs: true,
+  slots: [{
+    role: "comp",
+    lift: "bench",
+    v: ["Bench Press", "Incline Barbell Press", "Close-Grip Bench"],
+    vg: ["Bench Press", "Incline Smith Press", "Close-Grip Bench"]
   }, {
-    id: "Arms",
-    type: "pump",
-    rows: [mk("EZ Bar Curl", 3, 10, {
-      note: "Strict"
-    }), mk("Tricep Pushdown", 3, 12, {
-      drop: true,
-      note: "Superset w/ curls"
-    }), mk("Hammer Curl", 3, 12, {
-      drop: true
-    }), mk("Overhead Tricep Ext", 3, 12, {
-      note: "Full stretch"
-    }), mk("Wide-Grip Curl", 2, 15, {
-      note: "Burnout"
-    }), mk("Cable Kickback", 2, 15, {
-      drop: true
-    })]
+    role: "acc",
+    v: ["Incline DB Press", "Weighted Dip", "Flat DB Press"],
+    vg: ["Incline DB Press", "Leverage Chest Press", "Weighted Dip"]
   }, {
-    id: "Back",
-    type: "heavy",
-    rows: [mk("Deadlift", 4, 3, {
-      heavy: true,
-      lift: "deadlift",
-      note: "Bar speed fast or stop"
-    }), mk("Barbell Bent-Over Row", 4, 5, {
-      heavy: true,
-      note: "No jerk"
-    }), mk("Weighted Pull-up", 3, 5, {
-      note: "Full hang"
-    }), mk("One-Arm DB Row", 3, 6, {
-      note: "Stretch each rep"
-    })]
-  }, {
-    id: "Shoulders",
-    type: "pump",
-    rows: [mk("Lateral Raises", 4, 15, {
-      drop: true,
-      note: "No swing"
-    }), mk("DB Arnold Press", 3, 12, {
-      note: "Full ROM"
-    }), mk("Cable Rear Delt Fly", 3, 15), mk("Reverse Pec Deck", 3, 15, {
-      drop: true
-    }), mk("Shoulder Shrugs", 3, 15, {
-      note: "Traps"
-    }), mk("Upright Row", 2, 15, {
-      note: "Burnout"
-    })]
-  }, {
-    id: "Legs",
-    type: "heavy",
-    rows: [mk("Back Squat", 4, 4, {
-      heavy: true,
-      lift: "squat",
-      note: "Pins set · rest 3 min"
-    }), mk("Romanian Deadlift", 3, 6, {
-      heavy: true,
-      note: "Hamstrings"
-    }), mk("Front Squat", 3, 6, {
-      note: "Quad focus"
-    }), mk("Leg Curl", 3, 8)]
-  }, {
-    id: "Calves+Abs",
-    type: "pump",
-    rows: [mk("Standing Calf Raise", 4, 15, {
-      drop: true,
-      note: "Pause at top"
-    }), mk("Seated Calf Raise", 3, 20, {
-      note: "Soleus"
-    }), mk("Hanging Leg Raise", 3, 15, {
-      note: "Slow negative"
-    }), mk("Cable Crunch", 3, 15, {
-      drop: true
-    }), mk("Weighted Sit-Ups", 3, 20), mk("Air Bike", 2, 30, {
-      note: "Burnout"
-    })]
-  }],
-  gym: [{
-    id: "Chest",
-    type: "heavy",
-    rows: [mk("Bench Press", 4, 4, {
-      heavy: true,
-      lift: "bench",
-      note: "Rest 3 min"
-    }), mk("Incline Smith Press", 3, 6, {
-      heavy: true
-    }), mk("Pec Deck / Cable Fly", 3, 10, {
-      drop: true
-    }), mk("Weighted Dip", 2, 8)]
-  }, {
-    id: "Arms",
-    type: "pump",
-    rows: [mk("Cable Tricep Pushdown", 3, 12, {
-      drop: true
-    }), mk("EZ Bar Curl", 3, 10), mk("Cable Curl", 3, 12, {
-      drop: true,
-      note: "Constant tension"
-    }), mk("Overhead Cable Ext", 3, 12), mk("Machine Preacher Curl", 2, 15, {
-      note: "Burnout"
-    }), mk("Rope Hammer Curl", 2, 15, {
-      drop: true
-    })]
-  }, {
-    id: "Back",
-    type: "heavy",
-    rows: [mk("Deadlift", 4, 3, {
-      heavy: true,
-      lift: "deadlift",
-      note: "Bar speed fast or stop"
-    }), mk("Lat Pulldown", 4, 8, {
-      heavy: true,
-      note: "Full stretch"
-    }), mk("Seated Cable Row", 3, 8), mk("Machine Row", 3, 10, {
-      drop: true
-    }), mk("Straight-Arm Pulldown", 2, 15)]
-  }, {
-    id: "Shoulders",
-    type: "pump",
-    rows: [mk("Cable Lateral Raise", 4, 15, {
-      drop: true,
-      note: "Constant tension"
-    }), mk("Machine Shoulder Press", 3, 12), mk("Reverse Pec Deck", 3, 15, {
-      drop: true
-    }), mk("Cable Rear Delt Fly", 3, 15), mk("Machine Shrugs", 3, 15), mk("Cable Upright Row", 2, 15, {
-      note: "Burnout"
-    })]
-  }, {
-    id: "Legs",
-    type: "heavy",
-    rows: [mk("Back Squat", 4, 4, {
-      heavy: true,
-      lift: "squat",
-      note: "Rest 3 min"
-    }), mk("Leg Press", 3, 8, {
-      heavy: true,
-      note: "Full depth"
-    }), mk("Hack Squat", 3, 8), mk("Lying Leg Curl", 3, 10, {
-      drop: true
-    }), mk("Leg Extension", 3, 12, {
-      drop: true
-    })]
-  }, {
-    id: "Calves+Abs",
-    type: "pump",
-    rows: [mk("Standing Calf Machine", 4, 15, {
-      drop: true
-    }), mk("Seated Calf Machine", 3, 20), mk("Cable Crunch", 3, 15, {
-      drop: true
-    }), mk("Captain's Chair Leg Raise", 3, 15), mk("Weighted Sit-Ups", 3, 20), mk("Air Bike", 2, 30, {
-      note: "Burnout"
-    })]
+    role: "iso",
+    v: ["DB Fly", "Cable Fly", "Floor Fly"],
+    vg: ["Pec Deck", "Cable Fly", "High Cable Fly"]
   }]
-};
+}, {
+  id: "Arms",
+  type: "pump",
+  cardio: ["Bike", 22],
+  abs: true,
+  slots: [{
+    role: "acc",
+    v: ["EZ Bar Curl", "Barbell Curl", "Wide-Grip Curl"],
+    vg: ["EZ Bar Curl", "Cable Curl", "Machine Curl"]
+  }, {
+    role: "iso",
+    v: ["Tricep Pushdown", "Overhead DB Ext", "Skullcrusher"],
+    vg: ["Cable Pushdown", "Overhead Cable Ext", "Machine Dip"]
+  }, {
+    role: "iso",
+    v: ["Hammer Curl", "Incline DB Curl", "Concentration Curl"],
+    vg: ["Rope Hammer Curl", "Cable Curl", "Preacher Machine"]
+  }]
+}, {
+  id: "Back",
+  type: "heavy",
+  cardio: ["Incline Walk", 12],
+  abs: true,
+  width: true,
+  slots: [{
+    role: "comp",
+    lift: "deadlift",
+    v: ["Deadlift", "Rack Pull", "Trap-Bar Deadlift"],
+    vg: ["Deadlift", "Rack Pull", "Trap-Bar Deadlift"]
+  }, {
+    role: "acc",
+    v: ["Weighted Pull-up", "Wide-Grip Pull-up", "Neutral Pull-up"],
+    vg: ["Lat Pulldown", "Wide Pulldown", "Neutral Pulldown"],
+    width: true
+  }, {
+    role: "acc",
+    v: ["Barbell Row", "Pendlay Row", "One-Arm DB Row"],
+    vg: ["Seated Cable Row", "Machine Row", "Chest-Supported Row"]
+  }, {
+    role: "iso",
+    v: ["Straight-Arm Pullover", "DB Pullover", "Rear Delt Row"],
+    vg: ["Straight-Arm Pulldown", "Cable Pullover", "Rope Face Pull"],
+    width: true
+  }]
+}, {
+  id: "Shoulders",
+  type: "pump",
+  cardio: ["Bike", 22],
+  abs: true,
+  width: true,
+  slots: [{
+    role: "comp",
+    lift: "ohp",
+    v: ["Overhead Press", "Push Press", "Seated DB Press"],
+    vg: ["Overhead Press", "Machine Shoulder Press", "Seated DB Press"]
+  }, {
+    role: "iso",
+    v: ["Lateral Raise", "Leaning Cable Lateral", "DB Lateral Raise"],
+    vg: ["Cable Lateral Raise", "Machine Lateral Raise", "DB Lateral Raise"],
+    width: true
+  }, {
+    role: "iso",
+    v: ["Rear Delt Fly", "Bent-Over Reverse Fly", "Cable Rear Delt"],
+    vg: ["Reverse Pec Deck", "Cable Rear Delt Fly", "Face Pull"],
+    width: true
+  }, {
+    role: "iso",
+    v: ["Upright Row", "DB Shrug", "Cable Shrug"],
+    vg: ["Cable Upright Row", "Machine Shrug", "DB Shrug"]
+  }]
+}, {
+  id: "Legs",
+  type: "heavy",
+  cardio: ["Incline Walk", 12],
+  abs: true,
+  slots: [{
+    role: "comp",
+    lift: "squat",
+    v: ["Back Squat", "Front Squat", "Pause Squat"],
+    vg: ["Back Squat", "Hack Squat", "Front Squat"]
+  }, {
+    role: "acc",
+    v: ["Romanian Deadlift", "Stiff-Leg Deadlift", "Good Morning"],
+    vg: ["Romanian Deadlift", "Leg Press", "Lying Leg Curl"]
+  }, {
+    role: "acc",
+    v: ["Walking Lunge", "Bulgarian Split Squat", "Goblet Squat"],
+    vg: ["Leg Extension", "Hack Squat", "Walking Lunge"]
+  }, {
+    role: "iso",
+    v: ["Standing Calf Raise", "Seated Calf Raise", "Single-Leg Calf"],
+    vg: ["Standing Calf Machine", "Seated Calf Machine", "Leg-Press Calf"]
+  }]
+}, {
+  id: "Conditioning",
+  type: "pump",
+  cardio: ["Mixed Intervals", 25],
+  abs: true,
+  slots: [{
+    role: "iso",
+    v: ["Lateral Raise Burnout", "Cable Lateral 21s", "Partial Laterals"],
+    vg: ["Cable Lateral Burnout", "Machine Lateral 21s", "Partial Laterals"],
+    width: true
+  }, {
+    role: "iso",
+    v: ["Face Pull", "Band Pull-Apart", "Rear Delt Cable"],
+    vg: ["Face Pull", "Reverse Pec Deck", "Rear Delt Cable"],
+    width: true
+  }]
+}];
+const AB_POOL = ["Hanging Leg Raise", "Cable Crunch", "Weighted Sit-Up", "Captain's Chair Raise", "Ab Wheel", "Decline Sit-Up", "Cable Woodchop", "Plank (weighted)"];
+function pick(arr, n) {
+  return arr[(n % arr.length + arr.length) % arr.length];
+}
+
+/* Build one day's full workout for a given block + week */
+function generateDay(dayId, mode, blockNum, weekIdx, tm, roundLoad) {
+  const t = DAY_TEMPLATES.find(d => d.id === dayId) || DAY_TEMPLATES[0];
+  const wk = WEEK_SCHEMES[(weekIdx % 6 + 6) % 6];
+  const gym = mode === "gym";
+  const rows = t.slots.map((slot, si) => {
+    const pool = gym && slot.vg ? slot.vg : slot.v;
+    const ex = pick(pool, blockNum - 1 + si);
+    const sc = slot.role === "comp" ? wk.comp : slot.role === "acc" ? wk.acc : wk.iso;
+    const target = slot.lift ? roundLoad(tm(slot.lift) * (slot.role === "comp" ? wk.comp.pct : 1)) : null;
+    return {
+      ex,
+      role: slot.role,
+      lift: slot.lift || null,
+      heavy: slot.role === "comp" && wk.label !== "Deload",
+      drop: wk.drop && slot.role === "iso",
+      sets: sc.sets,
+      reps: sc.reps,
+      target,
+      note: slot.width ? "V-taper width" : ""
+    };
+  });
+  // daily ab + side-delt taper finisher (every day)
+  rows.push({
+    ex: pick(AB_POOL, blockNum + DAY_TEMPLATES.indexOf(t)),
+    role: "ab",
+    sets: 3,
+    reps: wk.label === "Deload" ? 12 : 15,
+    target: null,
+    heavy: false,
+    drop: false,
+    note: "Core"
+  });
+  const cardioMin = Math.round(t.cardio[1] * wk.cardioMul / 5) * 5;
+  rows.push({
+    ex: `${t.cardio[0]} — ${cardioMin} min`,
+    role: "cardio",
+    sets: 1,
+    reps: cardioMin,
+    target: null,
+    heavy: false,
+    drop: false,
+    note: t.type === "heavy" ? "Zone 2 — keep it easy" : "Moderate"
+  });
+  return {
+    id: t.id,
+    type: t.type,
+    scheme: wk,
+    rows
+  };
+}
+const DAY_IDS = DAY_TEMPLATES.map(d => d.id);
 const RULES = ["Heavy compounds (3–5 reps) are the muscle-protecting signal. Never drop-set them.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Drop sets only on isolation last sets. Max 2–3 per session.", "Rate of loss ~1–2 lb/week. Faster = lean mass going.", "Safety pins set before every heavy solo bench or squat.", "All reps clean → +5 lb upper / +10 lb lower. Miss → repeat."];
 
 /* ============ THEME ============ */
@@ -426,6 +558,10 @@ function IronDesk() {
   const [bwLog, setBwLog] = useState([]);
   const [cardioLog, setCardioLog] = useState([]);
   const [active, setActive] = useState(null); // live workout
+  const [progress, setProgress] = useState({
+    blockNum: 1,
+    week: 1
+  });
   const [loaded, setLoaded] = useState(false);
   const [flash, setFlash] = useState("");
   useEffect(() => {
@@ -443,6 +579,7 @@ function IronDesk() {
           s.bwLog && setBwLog(s.bwLog);
           s.cardioLog && setCardioLog(s.cardioLog);
           s.active && setActive(s.active);
+          s.progress && setProgress(s.progress);
         } else {
           // migrate from v2 if present
           try {
@@ -473,13 +610,14 @@ function IronDesk() {
         sessions,
         bwLog,
         cardioLog,
-        active
+        active,
+        progress
       }));
     } catch (e) {}
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, loaded]);
+  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, loaded]);
   const note = m => {
     setFlash(m);
     setTimeout(() => setFlash(""), 1600);
@@ -667,9 +805,15 @@ function IronDesk() {
     setSessions,
     prMap,
     note,
-    setTab
+    setTab,
+    progress
   }), tab === "program" && /*#__PURE__*/React.createElement(ProgramTab, {
-    mode
+    mode,
+    tm,
+    roundLoad,
+    progress,
+    setProgress,
+    note
   }), tab === "history" && /*#__PURE__*/React.createElement(History, {
     sessions,
     setSessions
@@ -713,9 +857,10 @@ function Today({
   setSessions,
   prMap,
   note,
-  setTab
+  setTab,
+  progress
 }) {
-  const program = PROGRAMS[mode];
+  const scheme = WEEK_SCHEMES[((progress.week - 1) % 6 + 6) % 6];
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
   useEffect(() => {
@@ -736,25 +881,27 @@ function Today({
       }
     };
   }, [timer]);
-  const start = day => {
-    const d = program.find(x => x.id === day);
-    const targetFor = row => row.lift ? roundLoad(tm(row.lift) * 0.87) : null;
+  const start = dayId => {
+    const d = generateDay(dayId, mode, progress.blockNum, progress.week - 1, tm, roundLoad);
     setActive({
       id: uid(),
       date: today(),
-      dayId: day,
+      dayId,
       mode,
+      blockNum: progress.blockNum,
+      week: progress.week,
       start: Date.now(),
       entries: d.rows.map(r => ({
         ex: r.ex,
         heavy: !!r.heavy,
         drop: !!r.drop,
+        role: r.role,
         note: r.note || "",
         lift: r.lift || null,
-        target: targetFor(r),
+        target: r.target,
         targetReps: r.reps,
         sets: Array(r.sets).fill(null).map(() => ({
-          w: targetFor(r) || "",
+          w: r.target || "",
           r: r.reps,
           done: false
         }))
@@ -779,7 +926,7 @@ function Today({
     const s = en.sets[si];
     const nowDone = !s.done;
     setSet(ei, si, "done", nowDone);
-    if (nowDone) setTimer(en.heavy ? 180 : 60);
+    if (nowDone && en.role !== "cardio" && en.role !== "ab") setTimer(en.heavy ? 180 : 60);
   };
   const addSet = ei => {
     const a = {
@@ -839,16 +986,48 @@ function Today({
     sessions.forEach(s => {
       if (!lastByDay[s.dayId]) lastByDay[s.dayId] = s.date;
     });
-    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: C.panel,
+        border: `1px solid ${C.line}`,
+        borderRadius: 14,
+        padding: "14px",
+        marginBottom: 14,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      className: "ttl",
+      style: {
+        fontSize: 13,
+        color: C.dim,
+        letterSpacing: 1
+      }
+    }, "BLOCK ", progress.blockNum, " \xB7 WEEK ", progress.week, "/6"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 17,
+        fontWeight: 700,
+        color: scheme.label === "Deload" ? C.blue : C.red
+      },
+      className: "ttl"
+    }, scheme.label)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.dim,
+        textAlign: "right",
+        maxWidth: 180
+      }
+    }, scheme.note)), /*#__PURE__*/React.createElement(Panel, {
       title: "Start a Workout",
-      sub: `${mode === "gym" ? "Gym" : "Home"} program · pick today's muscle`
+      sub: `${mode === "gym" ? "Gym" : "Home"} · V-taper block · pick today's day`
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "grid",
         gridTemplateColumns: "1fr 1fr",
         gap: 8
       }
-    }, program.map(d => /*#__PURE__*/React.createElement("button", {
+    }, DAY_TEMPLATES.map(d => /*#__PURE__*/React.createElement("button", {
       key: d.id,
       onClick: () => start(d.id),
       style: {
@@ -862,7 +1041,7 @@ function Today({
     }, /*#__PURE__*/React.createElement("div", {
       className: "ttl",
       style: {
-        fontSize: 15,
+        fontSize: 14.5,
         fontWeight: 700,
         color: C.txt
       }
@@ -874,7 +1053,7 @@ function Today({
         letterSpacing: 0.8,
         marginTop: 2
       }
-    }, d.type === "heavy" ? "HEAVY" : "PUMP"), /*#__PURE__*/React.createElement("div", {
+    }, d.type === "heavy" ? "HEAVY" : "PUMP", d.width ? " · WIDTH" : ""), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 10.5,
         color: C.dim,
@@ -884,7 +1063,7 @@ function Today({
       sessions: sessions
     }));
   }
-  const day = program.find(d => d.id === active.dayId);
+  const day = DAY_TEMPLATES.find(d => d.id === active.dayId);
   const doneCount = active.entries.reduce((a, en) => a + en.sets.filter(s => s.done).length, 0);
   const totalCount = active.entries.reduce((a, en) => a + en.sets.length, 0);
   return /*#__PURE__*/React.createElement(React.Fragment, null, timer > 0 && /*#__PURE__*/React.createElement("div", {
@@ -973,13 +1152,19 @@ function Today({
     color: C.red
   }, "HEAVY"), en.drop && /*#__PURE__*/React.createElement(Badge, {
     color: C.blue
-  }, "DROP")), /*#__PURE__*/React.createElement("span", {
+  }, "DROP"), en.role === "cardio" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.green
+  }, "CARDIO"), en.role === "ab" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.gold
+  }, "CORE"), en.note === "V-taper width" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.blue
+  }, "WIDTH")), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: C.gold,
       fontWeight: 700
     }
-  }, en.sets.length, "\xD7", en.targetReps)), (en.note || en.target) && /*#__PURE__*/React.createElement("div", {
+  }, en.role === "cardio" ? `${en.targetReps} min` : `${en.sets.length}×${en.targetReps}`)), (en.note || en.target) && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.dim,
@@ -1125,72 +1310,209 @@ function WeekSummary({
 
 /* ============ PROGRAM ============ */
 function ProgramTab({
-  mode
+  mode,
+  tm,
+  roundLoad,
+  progress,
+  setProgress,
+  note
 }) {
-  const program = PROGRAMS[mode];
-  const [day, setDay] = useState(program[0].id);
-  const cur = program.find(d => d.id === day) || program[0];
+  const [day, setDay] = useState(DAY_IDS[0]);
+  const gen = generateDay(day, mode, progress.blockNum, progress.week - 1, tm, roundLoad);
+  const scheme = gen.scheme;
+  const advanceWeek = () => {
+    if (progress.week < 6) {
+      setProgress({
+        ...progress,
+        week: progress.week + 1
+      });
+      note(`Week ${progress.week + 1}`);
+    } else {
+      setProgress({
+        blockNum: progress.blockNum + 1,
+        week: 1
+      });
+      note(`Block ${progress.blockNum + 1} generated`);
+    }
+  };
+  const backWeek = () => {
+    if (progress.week > 1) setProgress({
+      ...progress,
+      week: progress.week - 1
+    });else if (progress.blockNum > 1) setProgress({
+      blockNum: progress.blockNum - 1,
+      week: 6
+    });
+  };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
-    title: `6-Day Split — ${mode === "gym" ? "Gym" : "Home"}`,
-    sub: "One muscle per day \xB7 heavy and pump days alternate"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 6,
-      flexWrap: "wrap"
-    }
-  }, program.map(d => /*#__PURE__*/React.createElement("button", {
-    key: d.id,
-    onClick: () => setDay(d.id),
-    className: "ttl",
-    style: {
-      background: day === d.id ? d.type === "heavy" ? C.red : C.blue : C.panel2,
-      color: day === d.id ? "#fff" : C.dim,
-      border: `1px solid ${C.line}`,
-      borderRadius: 8,
-      padding: "8px 12px",
-      fontSize: 12,
-      fontWeight: 600,
-      cursor: "pointer"
-    }
-  }, d.id)))), /*#__PURE__*/React.createElement(Panel, {
-    title: cur.id,
-    sub: cur.type === "heavy" ? "HEAVY DAY · low reps, long rest, leave a rep in the tank" : "PUMP DAY · high reps, short rest, chase the burn"
-  }, cur.rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      padding: "10px 0",
-      borderBottom: i < cur.rows.length - 1 ? `1px solid ${C.line}` : "none"
-    }
+    title: "Current Block",
+    sub: "6-week wave \xB7 5 progressive weeks + deload, then auto-regenerates with new variations"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
-      alignItems: "baseline"
+      alignItems: "center",
+      marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 14,
-      fontWeight: 600
-    }
-  }, r.ex, r.heavy && /*#__PURE__*/React.createElement(Badge, {
-    color: C.red
-  }, "HEAVY"), r.drop && /*#__PURE__*/React.createElement(Badge, {
-    color: C.blue
-  }, "DROP")), /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "ttl",
     style: {
-      fontSize: 14,
-      fontWeight: 700,
-      color: C.gold
+      fontSize: 13,
+      color: C.dim,
+      letterSpacing: 1
     }
-  }, r.sets, "\xD7", r.reps)), r.note && /*#__PURE__*/React.createElement("div", {
+  }, "BLOCK ", progress.blockNum, " \xB7 WEEK ", progress.week, "/6"), /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 20,
+      fontWeight: 700,
+      color: scheme.label === "Deload" ? C.blue : C.red
+    }
+  }, scheme.label), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11.5,
       color: C.dim,
       marginTop: 2
     }
-  }, r.note)))), /*#__PURE__*/React.createElement(Panel, {
+  }, scheme.note))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      marginBottom: 12
+    }
+  }, WEEK_SCHEMES.map((w, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      flex: 1,
+      height: 6,
+      borderRadius: 3,
+      background: i < progress.week ? w.label === "Deload" ? C.blue : C.red : C.panel2
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: backWeek,
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "\u2039 Back"), /*#__PURE__*/React.createElement("button", {
+    onClick: advanceWeek,
+    style: {
+      flex: 2,
+      padding: "11px",
+      background: progress.week >= 6 ? C.gold : C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontSize: 13,
+      fontWeight: 700,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, progress.week >= 6 ? "Start Next Block →" : "Advance Week →"))), /*#__PURE__*/React.createElement(Panel, {
+    title: `Preview — ${mode === "gym" ? "Gym" : "Home"}`,
+    sub: "Exercises rotate each block \xB7 cardio + core every day \xB7 width work biased for the V-taper"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 12
+    }
+  }, DAY_IDS.map(id => {
+    const dt = DAY_TEMPLATES.find(d => d.id === id);
+    return /*#__PURE__*/React.createElement("button", {
+      key: id,
+      onClick: () => setDay(id),
+      className: "ttl",
+      style: {
+        background: day === id ? dt.type === "heavy" ? C.red : C.blue : C.panel2,
+        color: day === id ? "#fff" : C.dim,
+        border: `1px solid ${C.line}`,
+        borderRadius: 8,
+        padding: "8px 11px",
+        fontSize: 11.5,
+        fontWeight: 600,
+        cursor: "pointer"
+      }
+    }, id);
+  })), gen.rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      padding: "10px 0",
+      borderBottom: i < gen.rows.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600,
+      flex: 1
+    }
+  }, r.ex, r.heavy && /*#__PURE__*/React.createElement(Badge, {
+    color: C.red
+  }, "HEAVY"), r.drop && /*#__PURE__*/React.createElement(Badge, {
+    color: C.blue
+  }, "DROP"), r.role === "cardio" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.green
+  }, "CARDIO"), r.role === "ab" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.gold
+  }, "CORE"), r.note === "V-taper width" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.blue
+  }, "WIDTH")), /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 13.5,
+      fontWeight: 700,
+      color: C.gold,
+      whiteSpace: "nowrap"
+    }
+  }, r.role === "cardio" ? `${r.reps} min` : `${r.sets}×${r.reps}`, r.target ? ` · ${r.target}` : ""))))), /*#__PURE__*/React.createElement(Panel, {
+    title: "How the wave works",
+    sub: "Why it changes every week but still builds"
+  }, WEEK_SCHEMES.map((w, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "6px 0",
+      borderBottom: i < WEEK_SCHEMES.length - 1 ? `1px solid ${C.line}` : "none",
+      opacity: i + 1 === progress.week ? 1 : 0.55
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 18,
+      color: w.label === "Deload" ? C.blue : C.red,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", null, w.label), " \u2014 ", w.note)))), /*#__PURE__*/React.createElement(Panel, {
     title: "Golden Rules",
     sub: "The strategy in six lines"
   }, RULES.map((r, i) => /*#__PURE__*/React.createElement("div", {
@@ -1322,7 +1644,8 @@ function Trends({
   const [sel, setSel] = useState("bench");
   const [bw, setBw] = useState({
     date: today(),
-    weight: 239
+    weight: 242,
+    bf: ""
   });
   const [cd, setCd] = useState({
     date: today(),
@@ -1358,13 +1681,20 @@ function Trends({
     }));
   }, [sessions]);
   const bwData = useMemo(() => [...bwLog].sort((a, b) => a.date.localeCompare(b.date)), [bwLog]);
+  const compData = useMemo(() => bwData.filter(x => Number(x.bf) > 0).map(x => ({
+    date: x.date,
+    lean: Math.round(x.weight * (1 - x.bf / 100)),
+    fat: Math.round(x.weight * x.bf / 100)
+  })), [bwData]);
   const addBw = () => {
     if (!Number(bw.weight)) return;
-    setBwLog([{
+    const entry = {
       id: uid(),
       date: bw.date,
       weight: Number(bw.weight)
-    }, ...bwLog.filter(x => x.date !== bw.date)]);
+    };
+    if (Number(bw.bf) > 0) entry.bf = Number(bw.bf);
+    setBwLog([entry, ...bwLog.filter(x => x.date !== bw.date)]);
   };
   const addCd = () => {
     if (!Number(cd.minutes)) return;
@@ -1480,14 +1810,15 @@ function Trends({
     fill: C.gold,
     radius: [4, 4, 0, 0]
   })))), /*#__PURE__*/React.createElement(Panel, {
-    title: "Bodyweight",
-    sub: "Target ~1\u20132 lb/week down"
+    title: "Bodyweight & Composition",
+    sub: "Add body fat % too (from your scale) \u2014 lean mass auto-calculates"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
       alignItems: "flex-end",
-      marginBottom: 10
+      marginBottom: 10,
+      flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement("input", {
     type: "date",
@@ -1504,12 +1835,41 @@ function Trends({
       weight: v
     }),
     suffix: "lb"
+  }), /*#__PURE__*/React.createElement(MiniIn, {
+    value: bw.bf,
+    onChange: v => setBw({
+      ...bw,
+      bf: v
+    }),
+    suffix: "%bf"
   }), /*#__PURE__*/React.createElement("button", {
     onClick: addBw,
     style: btnSm()
-  }, "+ Log")), bwData.length >= 2 && /*#__PURE__*/React.createElement(ResponsiveContainer, {
+  }, "+ Log")), Number(bw.weight) > 0 && Number(bw.bf) > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.dim,
+      marginBottom: 10
+    }
+  }, "\u2192 lean ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.green
+    }
+  }, Math.round(bw.weight * (1 - bw.bf / 100)), " lb"), " \xB7 fat ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.red
+    }
+  }, Math.round(bw.weight * bw.bf / 100), " lb")), bwData.length >= 2 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "4px 0 2px"
+    }
+  }, "Bodyweight"), /*#__PURE__*/React.createElement(ResponsiveContainer, {
     width: "100%",
-    height: 160
+    height: 150
   }, /*#__PURE__*/React.createElement(LineChart, {
     data: bwData,
     margin: {
@@ -1542,12 +1902,77 @@ function Trends({
     dot: {
       r: 3
     }
-  }))), bwData.slice(-3).reverse().map(x => /*#__PURE__*/React.createElement("div", {
+  })))), compData.length >= 2 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "12px 0 2px"
+    }
+  }, "Composition \xB7 lean (green) vs fat (red)"), /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 160
+  }, /*#__PURE__*/React.createElement(LineChart, {
+    data: compData,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -16,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    tickFormatter: d => d.slice(5)
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    domain: ["dataMin - 6", "dataMax + 6"]
+  }), /*#__PURE__*/React.createElement(Tooltip, ttStyle), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "lean",
+    stroke: C.green,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    },
+    name: "Lean"
+  }), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "fat",
+    stroke: C.red,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    },
+    name: "Fat"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 6,
+      textAlign: "center"
+    }
+  }, "Lean flat while fat drops = recomp working.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, bwData.slice(-4).reverse().map(x => /*#__PURE__*/React.createElement("div", {
     key: x.id,
     style: {
       display: "flex",
-      gap: 10,
-      padding: "5px 0",
+      gap: 8,
+      alignItems: "center",
+      padding: "6px 0",
       fontSize: 13,
       borderBottom: `1px solid ${C.line}`
     }
@@ -1560,15 +1985,26 @@ function Trends({
     style: {
       fontWeight: 600
     }
-  }, x.weight, " lb"), /*#__PURE__*/React.createElement("button", {
+  }, x.weight, " lb"), Number(x.bf) > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.gold,
+      fontSize: 12
+    }
+  }, x.bf, "%"), Number(x.bf) > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.green,
+      fontSize: 12
+    }
+  }, Math.round(x.weight * (1 - x.bf / 100)), " lean"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setBwLog(bwLog.filter(b => b.id !== x.id)),
     style: {
       background: "none",
       border: "none",
       color: C.dim,
-      cursor: "pointer"
+      cursor: "pointer",
+      fontSize: 15
     }
-  }, "\xD7")))), /*#__PURE__*/React.createElement(Panel, {
+  }, "\xD7"))))), /*#__PURE__*/React.createElement(Panel, {
     title: "Cardio",
     sub: "Mostly zone 2 \u2014 protect leg recovery"
   }, /*#__PURE__*/React.createElement("div", {
