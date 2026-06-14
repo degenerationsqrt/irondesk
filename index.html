@@ -36,6 +36,20 @@ window.onerror = function(msg, srcUrl, line){
   ];
   var cdns = ["https://cdn.jsdelivr.net/", "https://unpkg.com/"];
 
+  var firebaseLibs = [
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"
+  ];
+  var firebaseConfig = {
+    apiKey: "AIzaSyCahMEkILe_yGm74AZv1271Q7uGLi6Tu6k",
+    authDomain: "irondesk-54651.firebaseapp.com",
+    projectId: "irondesk-54651",
+    storageBucket: "irondesk-54651.firebasestorage.app",
+    messagingSenderId: "719297846505",
+    appId: "1:719297846505:web:73d891e9ae812f6a886478"
+  };
+
   function load(url){ return new Promise(function(res, rej){
     var s = document.createElement('script');
     s.src = url; s.onload = function(){ res(); }; s.onerror = function(){ rej(new Error('failed '+url)); };
@@ -54,7 +68,15 @@ window.onerror = function(msg, srcUrl, line){
       });
   }
 
+  function loadFirebase(i){
+    if (i >= firebaseLibs.length) return Promise.resolve();
+    return load(firebaseLibs[i]).then(function(){ return loadFirebase(i + 1); }).catch(function(){ return; });
+  }
+
   loadLib(0).then(function(){
+    return loadFirebase(0);
+  }).then(function(){
+    try { if (window.firebase && !window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig); } catch(e) {}
     try { runApp(); }
     catch(e){ window.onerror(e.message, 'app', 0); }
   }).catch(function(e){
@@ -546,7 +568,166 @@ const C = {
   dim: "#8a8a93"
 };
 
-/* ============ APP ============ */
+/* ============ FIREBASE (connected layer) ============ */
+/* window.firebase is initialized by the HTML host before the app runs.
+   In the Claude artifact sandbox it's absent, so the Crew tab degrades gracefully. */
+var FB = function () {
+  var ready = typeof window !== "undefined" && !!window.firebase && window.firebase.apps && window.firebase.apps.length > 0;
+  function auth() {
+    return window.firebase.auth();
+  }
+  function db() {
+    return window.firebase.firestore();
+  }
+  return {
+    ready: ready,
+    onAuth: function (cb) {
+      if (!ready) {
+        cb(null);
+        return function () {};
+      }
+      return auth().onAuthStateChanged(cb);
+    },
+    signUp: function (email, pw, name) {
+      return auth().createUserWithEmailAndPassword(email, pw).then(function (c) {
+        return c.user.updateProfile({
+          displayName: name
+        }).then(function () {
+          return db().collection("users").doc(c.user.uid).set({
+            name: name,
+            email: email
+          }, {
+            merge: true
+          });
+        }).then(function () {
+          return c.user;
+        });
+      });
+    },
+    signIn: function (email, pw) {
+      return auth().signInWithEmailAndPassword(email, pw);
+    },
+    signOut: function () {
+      return auth().signOut();
+    },
+    createGroup: function (uid, name, groupName) {
+      var code = Math.random().toString(36).slice(2, 8).toUpperCase();
+      var ref = db().collection("groups").doc();
+      return ref.set({
+        name: groupName,
+        code: code,
+        owner: uid,
+        createdAt: Date.now()
+      }).then(function () {
+        return ref.collection("members").doc(uid).set({
+          name: name,
+          updatedAt: Date.now()
+        });
+      }).then(function () {
+        return {
+          groupId: ref.id,
+          code: code,
+          name: groupName
+        };
+      });
+    },
+    joinGroup: function (uid, name, code) {
+      return db().collection("groups").where("code", "==", code.toUpperCase()).limit(1).get().then(function (qs) {
+        if (qs.empty) throw new Error("No group with that code");
+        var doc = qs.docs[0];
+        return doc.ref.collection("members").doc(uid).set({
+          name: name,
+          updatedAt: Date.now()
+        }).then(function () {
+          return {
+            groupId: doc.id,
+            code: code.toUpperCase(),
+            name: doc.data().name
+          };
+        });
+      });
+    },
+    watchMembers: function (groupId, cb) {
+      return db().collection("groups").doc(groupId).collection("members").onSnapshot(function (qs) {
+        cb(qs.docs.map(function (d) {
+          return Object.assign({
+            uid: d.id
+          }, d.data());
+        }));
+      }, function () {
+        cb([]);
+      });
+    },
+    watchFeed: function (groupId, cb) {
+      return db().collection("groups").doc(groupId).collection("feed").orderBy("ts", "desc").limit(40).onSnapshot(function (qs) {
+        cb(qs.docs.map(function (d) {
+          return Object.assign({
+            id: d.id
+          }, d.data());
+        }));
+      }, function () {
+        cb([]);
+      });
+    },
+    syncStats: function (groupId, uid, stats) {
+      if (!ready || !groupId) return Promise.resolve();
+      return db().collection("groups").doc(groupId).collection("members").doc(uid).set(Object.assign({
+        updatedAt: Date.now()
+      }, stats), {
+        merge: true
+      });
+    },
+    pushPRs: function (groupId, uid, name, prs) {
+      if (!ready || !groupId || !prs || !prs.length) return Promise.resolve();
+      var batch = db().batch();
+      prs.forEach(function (p) {
+        var ref = db().collection("groups").doc(groupId).collection("feed").doc();
+        batch.set(ref, {
+          uid: uid,
+          name: name,
+          ex: p.ex,
+          e1rm: p.e1rm,
+          ts: Date.now()
+        });
+      });
+      return batch.commit();
+    }
+  };
+}();
+function computeStats(sessions, maxes) {
+  var best = {
+    bench: 0,
+    squat: 0,
+    ohp: 0,
+    deadlift: 0
+  };
+  sessions.forEach(function (s) {
+    s.entries.forEach(function (en) {
+      if (en.lift && best.hasOwnProperty(en.lift)) en.sets.forEach(function (st) {
+        var e = Math.round(epley(st.w, st.r));
+        if (e > best[en.lift]) best[en.lift] = e;
+      });
+    });
+  });
+  ["bench", "squat", "ohp", "deadlift"].forEach(function (k) {
+    if (!best[k]) best[k] = maxes[k] || 0;
+  });
+  var cut = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  var wk = sessions.filter(function (s) {
+    return s.date >= cut;
+  });
+  return {
+    bench: best.bench,
+    squat: best.squat,
+    ohp: best.ohp,
+    deadlift: best.deadlift,
+    weekVolume: wk.reduce(function (a, s) {
+      return a + s.volume;
+    }, 0),
+    weekSessions: wk.length
+  };
+}
+const CREW_KEY = "irondesk:crew";
 function IronDesk() {
   const [tab, setTab] = useState("today");
   const [mode, setMode] = useState("home");
@@ -562,6 +743,12 @@ function IronDesk() {
     blockNum: 1,
     week: 1
   });
+  const crewRef = useRef({
+    uid: null,
+    name: null,
+    groupId: null
+  });
+  const lastPushed = useRef(null);
   const [loaded, setLoaded] = useState(false);
   const [flash, setFlash] = useState("");
   useEffect(() => {
@@ -618,6 +805,18 @@ function IronDesk() {
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
   }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, loaded]);
+
+  // push PRs + stats to the crew group when a new session lands
+  useEffect(() => {
+    if (!FB.ready || !loaded) return;
+    const c = crewRef.current;
+    if (c.uid && c.groupId && sessions[0] && sessions[0].id !== lastPushed.current) {
+      lastPushed.current = sessions[0].id;
+      FB.pushPRs(c.groupId, c.uid, c.name, sessions[0].prs || []).catch(function () {});
+      FB.syncStats(c.groupId, c.uid, computeStats(sessions, maxes)).catch(function () {});
+    }
+    /* eslint-disable-next-line */
+  }, [sessions, loaded]);
   const note = m => {
     setFlash(m);
     setTimeout(() => setFlash(""), 1600);
@@ -687,7 +886,7 @@ function IronDesk() {
     };
     rd.readAsText(file);
   };
-  const TABS = [["today", "Today"], ["program", "Program"], ["history", "History"], ["trends", "Trends"], ["tools", "Tools"], ["settings", "Settings"]];
+  const TABS = [["today", "Today"], ["program", "Program"], ["crew", "Crew"], ["history", "History"], ["trends", "Trends"], ["tools", "Tools"], ["settings", "Settings"]];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -813,6 +1012,11 @@ function IronDesk() {
     roundLoad,
     progress,
     setProgress,
+    note
+  }), tab === "crew" && /*#__PURE__*/React.createElement(Crew, {
+    sessions,
+    maxes,
+    crewRef,
     note
   }), tab === "history" && /*#__PURE__*/React.createElement(History, {
     sessions,
@@ -2419,6 +2623,536 @@ function Settings({
   }, "IronDesk Pro \xB7 loads round to ", mode === "gym" ? "2.5" : "5", " lb in ", mode, " mode \xB7 Epley e1RM, best at 1\u20138 reps", /*#__PURE__*/React.createElement("br", null), "auto-saves everything \xB7 not medical advice"));
 }
 
+/* ============ CREW (connected) ============ */
+function Crew({
+  sessions,
+  maxes,
+  crewRef,
+  note
+}) {
+  const [user, setUser] = useState(undefined); // undefined = loading
+  const [grp, setGrp] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(CREW_KEY) || "null");
+    } catch (e) {
+      return null;
+    }
+  });
+  const [members, setMembers] = useState([]);
+  const [feed, setFeed] = useState([]);
+  const [form, setForm] = useState({
+    email: "",
+    pw: "",
+    name: "",
+    mode: "login"
+  });
+  const [grpForm, setGrpForm] = useState({
+    name: "",
+    code: ""
+  });
+  const [board, setBoard] = useState("bench");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!FB.ready) {
+      setUser(null);
+      return;
+    }
+    return FB.onAuth(setUser);
+  }, []);
+
+  // keep crewRef live for PR pushes from finished workouts
+  useEffect(() => {
+    crewRef.current = {
+      uid: user ? user.uid : null,
+      name: user ? user.displayName || "Lifter" : null,
+      groupId: grp ? grp.groupId : null
+    };
+  }, [user, grp, crewRef]);
+
+  // subscribe to group data + push our latest stats
+  useEffect(() => {
+    if (!FB.ready || !user || !grp) return;
+    const u1 = FB.watchMembers(grp.groupId, setMembers);
+    const u2 = FB.watchFeed(grp.groupId, setFeed);
+    FB.syncStats(grp.groupId, user.uid, Object.assign({
+      name: user.displayName || "Lifter"
+    }, computeStats(sessions, maxes))).catch(function () {});
+    return function () {
+      u1 && u1();
+      u2 && u2();
+    };
+  }, [user, grp, sessions, maxes]);
+  const saveGrp = g => {
+    setGrp(g);
+    try {
+      localStorage.setItem(CREW_KEY, JSON.stringify(g));
+    } catch (e) {}
+  };
+  const doAuth = () => {
+    setErr("");
+    setBusy(true);
+    const p = form.mode === "signup" ? FB.signUp(form.email.trim(), form.pw, form.name.trim() || "Lifter") : FB.signIn(form.email.trim(), form.pw);
+    p.then(function () {
+      setBusy(false);
+    }).catch(function (e) {
+      setErr(e.message || "Failed");
+      setBusy(false);
+    });
+  };
+  const doCreate = () => {
+    if (!grpForm.name.trim()) {
+      setErr("Name your group");
+      return;
+    }
+    setErr("");
+    setBusy(true);
+    FB.createGroup(user.uid, user.displayName || "Lifter", grpForm.name.trim()).then(function (g) {
+      saveGrp(g);
+      setBusy(false);
+      note("Group created");
+    }).catch(function (e) {
+      setErr(e.message);
+      setBusy(false);
+    });
+  };
+  const doJoin = () => {
+    if (!grpForm.code.trim()) {
+      setErr("Enter a code");
+      return;
+    }
+    setErr("");
+    setBusy(true);
+    FB.joinGroup(user.uid, user.displayName || "Lifter", grpForm.code.trim()).then(function (g) {
+      saveGrp(g);
+      setBusy(false);
+      note("Joined!");
+    }).catch(function (e) {
+      setErr(e.message);
+      setBusy(false);
+    });
+  };
+  if (!FB.ready) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      title: "Crew",
+      sub: "Connected features"
+    }, /*#__PURE__*/React.createElement(Empty, {
+      text: "Crew features run in the installed app on your phone, not this preview. Open IronDesk from your home screen to log in and connect with your group."
+    }));
+  }
+  if (user === undefined) return /*#__PURE__*/React.createElement(Panel, {
+    title: "Crew",
+    sub: "Connecting\u2026"
+  }, /*#__PURE__*/React.createElement(Empty, {
+    text: "Loading\u2026"
+  }));
+
+  // --- not logged in ---
+  if (!user) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      title: form.mode === "signup" ? "Create Account" : "Log In",
+      sub: "Connect with your crew \u2014 your workout data stays private to you"
+    }, form.mode === "signup" && /*#__PURE__*/React.createElement(Field, {
+      label: "Display name"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: form.name,
+      onChange: e => setForm({
+        ...form,
+        name: e.target.value
+      }),
+      placeholder: "How you show up",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Email"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: form.email,
+      onChange: e => setForm({
+        ...form,
+        email: e.target.value
+      }),
+      autoCapitalize: "none",
+      style: inp("100%")
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Password"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "password",
+      value: form.pw,
+      onChange: e => setForm({
+        ...form,
+        pw: e.target.value
+      }),
+      style: inp("100%")
+    }))), err && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: C.red,
+        fontSize: 12,
+        marginTop: 8
+      }
+    }, err), /*#__PURE__*/React.createElement("button", {
+      onClick: doAuth,
+      disabled: busy,
+      style: {
+        width: "100%",
+        marginTop: 14,
+        padding: "13px",
+        background: C.red,
+        border: "none",
+        borderRadius: 10,
+        color: "#fff",
+        fontFamily: "'Oswald'",
+        fontSize: 14,
+        fontWeight: 700,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        cursor: "pointer",
+        opacity: busy ? 0.6 : 1
+      }
+    }, busy ? "…" : form.mode === "signup" ? "Create Account" : "Log In"), /*#__PURE__*/React.createElement("div", {
+      onClick: () => {
+        setForm({
+          ...form,
+          mode: form.mode === "signup" ? "login" : "signup"
+        });
+        setErr("");
+      },
+      style: {
+        textAlign: "center",
+        color: C.dim,
+        fontSize: 12.5,
+        marginTop: 12,
+        cursor: "pointer"
+      }
+    }, form.mode === "signup" ? "Have an account? Log in" : "New here? Create an account"));
+  }
+
+  // --- logged in, no group ---
+  if (!grp) {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+      title: `Hey, ${user.displayName || "Lifter"}`,
+      sub: "Create a group or join one with a code"
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Create a new group"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: grpForm.name,
+      onChange: e => setGrpForm({
+        ...grpForm,
+        name: e.target.value
+      }),
+      placeholder: "e.g. HighBetaCowboys",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("button", {
+      onClick: doCreate,
+      disabled: busy,
+      style: btnFull(C.red)
+    }, "Create Group"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "center",
+        color: C.dim,
+        fontSize: 12,
+        margin: "14px 0"
+      }
+    }, "\u2014 or \u2014"), /*#__PURE__*/React.createElement(Field, {
+      label: "Join with a code"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: grpForm.code,
+      onChange: e => setGrpForm({
+        ...grpForm,
+        code: e.target.value
+      }),
+      autoCapitalize: "characters",
+      placeholder: "6-char code",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("button", {
+      onClick: doJoin,
+      disabled: busy,
+      style: btnFull(C.panel2, C.gold)
+    }, "Join Group"), err && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: C.red,
+        fontSize: 12,
+        marginTop: 10
+      }
+    }, err)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => FB.signOut(),
+      style: {
+        width: "100%",
+        padding: "11px",
+        background: "none",
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        color: C.dim,
+        fontSize: 12.5,
+        cursor: "pointer"
+      }
+    }, "Sign out"));
+  }
+
+  // --- logged in, in a group ---
+  const sorted = [...members].sort((a, b) => (b[board] || 0) - (a[board] || 0));
+  const byVol = [...members].sort((a, b) => (b.weekVolume || 0) - (a.weekVolume || 0));
+  const bySess = [...members].sort((a, b) => (b.weekSessions || 0) - (a.weekSessions || 0));
+  const lifters = members.length;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: grp.name,
+    sub: `${lifters} member${lifters !== 1 ? "s" : ""} · share code to add your crew`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      background: C.panel2,
+      border: `1px dashed ${C.gold}`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      color: C.dim,
+      letterSpacing: 1
+    }
+  }, "JOIN CODE"), /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 22,
+      fontWeight: 700,
+      color: C.gold,
+      letterSpacing: 3
+    }
+  }, grp.code)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(grp.code);
+      note("Code copied");
+    },
+    style: {
+      padding: "10px 12px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.txt,
+      fontSize: 12,
+      cursor: "pointer"
+    }
+  }, "Copy"))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Leaderboard",
+    sub: "Best estimated 1RM in the crew"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12,
+      flexWrap: "wrap"
+    }
+  }, LIFTS.map(l => /*#__PURE__*/React.createElement("button", {
+    key: l.key,
+    onClick: () => setBoard(l.key),
+    style: {
+      background: board === l.key ? LIFT_COLORS[l.key] : C.panel2,
+      color: board === l.key ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`,
+      borderRadius: 6,
+      padding: "5px 10px",
+      fontSize: 12,
+      cursor: "pointer",
+      fontWeight: 600
+    }
+  }, l.name))), sorted.length === 0 && /*#__PURE__*/React.createElement(Empty, {
+    text: "No members yet."
+  }), sorted.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "9px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 24,
+      fontSize: 16,
+      fontWeight: 700,
+      color: i === 0 ? C.gold : i === 1 ? "#bbb" : i === 2 ? "#c87" : C.dim
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: m.uid === user.uid ? 700 : 500,
+      color: m.uid === user.uid ? C.txt : C.txt
+    }
+  }, m.name, m.uid === user.uid ? " (you)" : ""), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: LIFT_COLORS[board]
+    }
+  }, m[board] || 0, " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, "lb"))))), /*#__PURE__*/React.createElement(Panel, {
+    title: "PR Feed",
+    sub: "Live \u2014 every personal record in the crew"
+  }, feed.length === 0 && /*#__PURE__*/React.createElement(Empty, {
+    text: "No PRs yet. Finish a workout that beats a best to post one."
+  }), feed.map(f => /*#__PURE__*/React.createElement("div", {
+    key: f.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "8px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 16
+    }
+  }, "\uD83C\uDFC6"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5
+    }
+  }, /*#__PURE__*/React.createElement("b", null, f.name), " \u2014 ", f.ex), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, new Date(f.ts).toLocaleDateString(), " ")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: C.green
+    }
+  }, f.e1rm, " lb")))), /*#__PURE__*/React.createElement(Panel, {
+    title: "This Week's Challenge",
+    sub: "Resets as the week rolls \u2014 most work wins"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4
+    }
+  }, "Most Volume (lb)"), byVol.slice(0, 3).map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "5px 0",
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 18,
+      color: i === 0 ? C.gold : C.dim,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1
+    }
+  }, m.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: C.gold
+    }
+  }, (m.weekVolume || 0).toLocaleString())))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4
+    }
+  }, "Most Sessions"), bySess.slice(0, 3).map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "5px 0",
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 18,
+      color: i === 0 ? C.gold : C.dim,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1
+    }
+  }, m.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: C.green
+    }
+  }, m.weekSessions || 0))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      saveGrp(null);
+      try {
+        localStorage.removeItem(CREW_KEY);
+      } catch (e) {}
+      note("Left group");
+    },
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: "none",
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, "Leave group"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      FB.signOut();
+      saveGrp(null);
+    },
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: "none",
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, "Sign out")));
+}
+
 /* ============ SHARED UI ============ */
 const inp = w => ({
   background: C.panel2,
@@ -2440,6 +3174,21 @@ const btnSm = () => ({
   fontWeight: 700,
   cursor: "pointer",
   fontSize: 12
+});
+const btnFull = (bg, txt) => ({
+  width: "100%",
+  marginTop: 10,
+  padding: "12px",
+  background: bg,
+  border: bg === C.panel2 ? `1px solid ${C.line}` : "none",
+  borderRadius: 10,
+  color: txt || "#fff",
+  fontFamily: "'Oswald'",
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  textTransform: "uppercase",
+  cursor: "pointer"
 });
 function Panel({
   title,
