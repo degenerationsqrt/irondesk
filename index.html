@@ -25,7 +25,7 @@ window.onerror = function(msg, srcUrl, line){
   var el = document.getElementById('booterr');
   if (el) el.innerHTML += '<br/>' + msg + ' (' + (srcUrl||'').split('/').pop() + ':' + line + ')';
 };
-
+ 
 /* sequential loader with CDN fallback: jsDelivr first, unpkg second */
 (function(){
   var libs = [
@@ -35,7 +35,7 @@ window.onerror = function(msg, srcUrl, line){
     ["npm/recharts@2.12.7/umd/Recharts.min.js", function(){ return window.Recharts; }, false]
   ];
   var cdns = ["https://cdn.jsdelivr.net/", "https://unpkg.com/"];
-
+ 
   var firebaseLibs = [
     "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
     "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
@@ -49,13 +49,13 @@ window.onerror = function(msg, srcUrl, line){
     messagingSenderId: "719297846505",
     appId: "1:719297846505:web:73d891e9ae812f6a886478"
   };
-
+ 
   function load(url){ return new Promise(function(res, rej){
     var s = document.createElement('script');
     s.src = url; s.onload = function(){ res(); }; s.onerror = function(){ rej(new Error('failed '+url)); };
     document.head.appendChild(s);
   }); }
-
+ 
   function loadLib(i){
     if (i >= libs.length) return Promise.resolve();
     var path = libs[i][0], check = libs[i][1], required = libs[i][2];
@@ -67,12 +67,12 @@ window.onerror = function(msg, srcUrl, line){
         return loadLib(i + 1);
       });
   }
-
+ 
   function loadFirebase(i){
     if (i >= firebaseLibs.length) return Promise.resolve();
     return load(firebaseLibs[i]).then(function(){ return loadFirebase(i + 1); }).catch(function(){ return; });
   }
-
+ 
   loadLib(0).then(function(){
     return loadFirebase(0);
   }).then(function(){
@@ -84,10 +84,10 @@ window.onerror = function(msg, srcUrl, line){
     if (el) el.innerHTML = '<br/>Could not load libraries — check your internet connection and reload.<br/>' + e.message;
   });
 })();
-
+ 
 function runApp(){
 "use strict";
-
+ 
 var useState = React.useState,
   useEffect = React.useEffect,
   useMemo = React.useMemo,
@@ -127,7 +127,7 @@ var CartesianGrid = RC.CartesianGrid || function () {
 var ResponsiveContainer = RC.ResponsiveContainer || function (p) {
   return React.createElement('div', null, p.children);
 };
-
+ 
 /* localStorage persistence (replaces Claude artifact storage) */
 window.storage = {
   get: function (key) {
@@ -145,7 +145,7 @@ window.storage = {
     });
   }
 };
-
+ 
 /* ============ MATH ============ */
 const epley = (w, r) => r <= 1 ? w : w * (1 + r / 30);
 const wForReps = (e, r) => e / (1 + r / 30);
@@ -178,7 +178,7 @@ function solveLoadout(targetTotal, bar, pairs) {
     counts
   };
 }
-
+ 
 /* ============ DATA ============ */
 const LIFTS = [{
   key: "bench",
@@ -363,7 +363,7 @@ const WEEK_SCHEMES = [{
   drop: false,
   note: "Recover. Light & easy — leave fresh."
 }];
-
+ 
 /* V-taper bias: every day ends with a side-delt finisher (high frequency = width).
    Shoulders + Back get extra width volume. Each slot has rotating variations per block. */
 const DAY_TEMPLATES = [{
@@ -499,7 +499,7 @@ const AB_POOL = ["Hanging Leg Raise", "Cable Crunch", "Weighted Sit-Up", "Captai
 function pick(arr, n) {
   return arr[(n % arr.length + arr.length) % arr.length];
 }
-
+ 
 /* Build one day's full workout for a given block + week */
 function generateDay(dayId, mode, blockNum, weekIdx, tm, roundLoad) {
   const t = DAY_TEMPLATES.find(d => d.id === dayId) || DAY_TEMPLATES[0];
@@ -553,7 +553,7 @@ function generateDay(dayId, mode, blockNum, weekIdx, tm, roundLoad) {
 }
 const DAY_IDS = DAY_TEMPLATES.map(d => d.id);
 const RULES = ["Heavy compounds (3–5 reps) are the muscle-protecting signal. Never drop-set them.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Drop sets only on isolation last sets. Max 2–3 per session.", "Rate of loss ~1–2 lb/week. Faster = lean mass going.", "Safety pins set before every heavy solo bench or squat.", "All reps clean → +5 lb upper / +10 lb lower. Miss → repeat."];
-
+ 
 /* ============ THEME ============ */
 const C = {
   bg: "#0b0b0d",
@@ -567,7 +567,7 @@ const C = {
   txt: "#f4f4f5",
   dim: "#8a8a93"
 };
-
+ 
 /* ============ FIREBASE (connected layer) ============ */
 /* window.firebase is initialized by the HTML host before the app runs.
    In the Claude artifact sandbox it's absent, so the Crew tab degrades gracefully. */
@@ -805,7 +805,7 @@ function IronDesk() {
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
   }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, loaded]);
-
+ 
   // push PRs + stats to the crew group when a new session lands
   useEffect(() => {
     if (!FB.ready || !loaded) return;
@@ -825,7 +825,7 @@ function IronDesk() {
   const setPlates = mode === "gym" ? setGymPlates : setHomePlates;
   const roundLoad = x => mode === "gym" ? Math.round(x / 2.5) * 2.5 : Math.round(x / 5) * 5;
   const tm = k => Math.round(maxes[k] * 0.9);
-
+ 
   // PR map: best e1RM per exercise across all finished sessions
   const prMap = useMemo(() => {
     const m = {};
@@ -1046,7 +1046,7 @@ function IronDesk() {
     sessions
   })));
 }
-
+ 
 /* ============ TODAY (live workout) ============ */
 function Today({
   mode,
@@ -1511,7 +1511,7 @@ function WeekSummary({
     color: C.green
   })));
 }
-
+ 
 /* ============ PROGRAM ============ */
 function ProgramTab({
   mode,
@@ -1740,7 +1740,7 @@ function ProgramTab({
     }
   }, r)))));
 }
-
+ 
 /* ============ HISTORY ============ */
 function History({
   sessions,
@@ -1836,7 +1836,7 @@ function History({
     }
   }, en.sets.map(st => `${st.w}×${st.r}`).join("  ·  ")))))))));
 }
-
+ 
 /* ============ TRENDS ============ */
 function Trends({
   sessions,
@@ -2279,7 +2279,7 @@ function Trends({
     }
   }, "\xD7")))));
 }
-
+ 
 /* ============ TOOLS ============ */
 function Tools({
   mode,
@@ -2478,7 +2478,7 @@ function Tools({
     }
   }, "1RM"))))));
 }
-
+ 
 /* ============ SETTINGS ============ */
 function Settings({
   maxes,
@@ -2622,7 +2622,7 @@ function Settings({
     }
   }, "IronDesk Pro \xB7 loads round to ", mode === "gym" ? "2.5" : "5", " lb in ", mode, " mode \xB7 Epley e1RM, best at 1\u20138 reps", /*#__PURE__*/React.createElement("br", null), "auto-saves everything \xB7 not medical advice"));
 }
-
+ 
 /* ============ CREW (connected) ============ */
 function Crew({
   sessions,
@@ -2660,7 +2660,7 @@ function Crew({
     }
     return FB.onAuth(setUser);
   }, []);
-
+ 
   // keep crewRef live for PR pushes from finished workouts
   useEffect(() => {
     crewRef.current = {
@@ -2669,7 +2669,7 @@ function Crew({
       groupId: grp ? grp.groupId : null
     };
   }, [user, grp, crewRef]);
-
+ 
   // subscribe to group data + push our latest stats
   useEffect(() => {
     if (!FB.ready || !user || !grp) return;
@@ -2746,7 +2746,7 @@ function Crew({
   }, /*#__PURE__*/React.createElement(Empty, {
     text: "Loading\u2026"
   }));
-
+ 
   // --- not logged in ---
   if (!user) {
     return /*#__PURE__*/React.createElement(Panel, {
@@ -2832,7 +2832,7 @@ function Crew({
       }
     }, form.mode === "signup" ? "Have an account? Log in" : "New here? Create an account"));
   }
-
+ 
   // --- logged in, no group ---
   if (!grp) {
     return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
@@ -2894,7 +2894,7 @@ function Crew({
       }
     }, "Sign out"));
   }
-
+ 
   // --- logged in, in a group ---
   const sorted = [...members].sort((a, b) => (b[board] || 0) - (a[board] || 0));
   const byVol = [...members].sort((a, b) => (b.weekVolume || 0) - (a.weekVolume || 0));
@@ -3152,7 +3152,7 @@ function Crew({
     }
   }, "Sign out")));
 }
-
+ 
 /* ============ SHARED UI ============ */
 const inp = w => ({
   background: C.panel2,
