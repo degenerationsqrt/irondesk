@@ -1,0 +1,6105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>IronDesk Pro</title>
+<meta name="theme-color" content="#0b0b0d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="IronDesk" />
+<meta name="mobile-web-app-capable" content="yes" />
+<style>
+  html, body { margin: 0; padding: 0; background: #0b0b0d; }
+  #root { min-height: 100vh; }
+  #boot { color: #8a8a93; font-family: -apple-system, Arial, sans-serif; text-align: center; padding: 60px 20px; font-size: 14px; line-height: 1.7; }
+  #booterr { color: #e11d2a; font-size: 12px; word-break: break-word; }
+</style>
+</head>
+<body>
+<div id="root"><div id="boot">Loading IronDesk Pro&hellip;<div id="booterr"></div></div></div>
+<script>
+window.onerror = function(msg, srcUrl, line){ var el=document.getElementById('booterr'); if(el) el.innerHTML += '<br/>'+msg+' ('+(srcUrl||'').split('/').pop()+':'+line+')'; };
+(function(){
+  var libs = [
+    ["npm/react@18.3.1/umd/react.production.min.js", function(){return window.React;}, true],
+    ["npm/react-dom@18.3.1/umd/react-dom.production.min.js", function(){return window.ReactDOM;}, true],
+    ["npm/prop-types@15.8.1/prop-types.min.js", function(){return window.PropTypes;}, false],
+    ["npm/recharts@2.12.7/umd/Recharts.min.js", function(){return window.Recharts;}, false]
+  ];
+  var cdns = ["https://cdn.jsdelivr.net/", "https://unpkg.com/"];
+  var firebaseLibs = [
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"
+  ];
+  var firebaseConfig = {
+    apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
+    authDomain: "irondesk-54651.firebaseapp.com",
+    projectId: "irondesk-54651",
+    storageBucket: "irondesk-54651.firebasestorage.app",
+    messagingSenderId: "719297846505",
+    appId: "1:719297846505:web:73d891e9ae812f6a886478"
+  };
+  function load(url){ return new Promise(function(res,rej){ var s=document.createElement('script'); s.src=url; s.onload=function(){res();}; s.onerror=function(){rej(new Error('failed '+url));}; document.head.appendChild(s); }); }
+  function loadLib(i){
+    if(i>=libs.length) return Promise.resolve();
+    var path=libs[i][0], check=libs[i][1], required=libs[i][2];
+    return load(cdns[0]+path).catch(function(){return load(cdns[1]+path);}).catch(function(e){if(required)throw e;})
+      .then(function(){ if(required && !check()) throw new Error('missing '+path); return loadLib(i+1); });
+  }
+  function loadFb(i){ if(i>=firebaseLibs.length) return Promise.resolve(); return load(firebaseLibs[i]).then(function(){return loadFb(i+1);}).catch(function(){return;}); }
+  loadLib(0).then(function(){ return loadFb(0); }).then(function(){
+    try { if(window.firebase && !window.firebase.apps.length) window.firebase.initializeApp(firebaseConfig); } catch(e){}
+    try { runApp(); } catch(e){ window.onerror(e.message,'app',0); }
+  }).catch(function(e){ var el=document.getElementById('booterr'); if(el) el.innerHTML='<br/>Could not load libraries — check your connection and reload.<br/>'+e.message; });
+})();
+function runApp(){
+var useState = React.useState,
+  useEffect = React.useEffect,
+  useMemo = React.useMemo,
+  useRef = React.useRef;
+var RC = window.Recharts || {};
+function ChartStub() {
+  return React.createElement('div', {
+    style: {
+      color: '#8a8a93',
+      fontSize: 13,
+      textAlign: 'center',
+      padding: '14px 0'
+    }
+  }, '(chart unavailable offline)');
+}
+var LineChart = RC.LineChart || ChartStub,
+  Line = RC.Line || function () {
+    return null;
+  };
+var BarChart = RC.BarChart || ChartStub,
+  Bar = RC.Bar || function () {
+    return null;
+  };
+var XAxis = RC.XAxis || function () {
+    return null;
+  },
+  YAxis = RC.YAxis || function () {
+    return null;
+  };
+var Tooltip = RC.Tooltip || function () {
+    return null;
+  },
+  CartesianGrid = RC.CartesianGrid || function () {
+    return null;
+  };
+var ResponsiveContainer = RC.ResponsiveContainer || function (p) {
+  return React.createElement('div', null, p.children);
+};
+window.storage = {
+  get: function (k) {
+    var v = localStorage.getItem(k);
+    return Promise.resolve(v == null ? null : {
+      key: k,
+      value: v
+    });
+  },
+  set: function (k, v) {
+    localStorage.setItem(k, v);
+    return Promise.resolve({
+      key: k,
+      value: v
+    });
+  }
+};
+
+/* ============ MATH ============ */
+const epley = (w, r) => r <= 1 ? w : w * (1 + r / 30);
+const wForReps = (e, r) => e / (1 + r / 30);
+const today = () => new Date().toISOString().slice(0, 10);
+const uid = () => Math.random().toString(36).slice(2, 9);
+function solveLoadout(targetTotal, bar, pairs) {
+  const perSide = Math.max(0, (targetTotal - bar) / 2);
+  const denoms = pairs.filter(p => p.weight > 0 && Math.floor(p.count / 2) > 0).map(p => ({
+    w: p.weight,
+    n: Math.floor(p.count / 2)
+  })).sort((a, b) => b.w - a.w);
+  let best = {
+    sum: 0,
+    combo: []
+  };
+  const maxD = denoms.reduce((a, d) => Math.max(a, d.w), 0);
+  const go = (i, sum, combo) => {
+    if (Math.abs(sum - perSide) < Math.abs(best.sum - perSide)) best = {
+      sum,
+      combo: [...combo]
+    };
+    if (i >= denoms.length || sum > perSide + maxD) return;
+    for (let k = denoms[i].n; k >= 0; k--) go(i + 1, sum + k * denoms[i].w, [...combo, ...Array(k).fill(denoms[i].w)]);
+  };
+  go(0, 0, []);
+  const counts = {};
+  best.combo.forEach(w => counts[w] = (counts[w] || 0) + 1);
+  return {
+    total: bar + best.sum * 2,
+    counts
+  };
+}
+
+/* ============ DATA ============ */
+const LIFTS = [{
+  key: "bench",
+  name: "Bench Press"
+}, {
+  key: "squat",
+  name: "Squat"
+}, {
+  key: "ohp",
+  name: "Overhead Press"
+}, {
+  key: "deadlift",
+  name: "Deadlift"
+}];
+const LIFT_COLORS = {
+  bench: "#e11d2a",
+  squat: "#d9a441",
+  ohp: "#3b9ae1",
+  deadlift: "#4ade80"
+};
+const D_MAXES = {
+  bench: 405,
+  squat: 500,
+  ohp: 225,
+  deadlift: 495
+};
+const D_HOME = [{
+  weight: 45,
+  count: 6
+}, {
+  weight: 55,
+  count: 2
+}, {
+  weight: 35,
+  count: 2
+}, {
+  weight: 25,
+  count: 4
+}, {
+  weight: 10,
+  count: 2
+}, {
+  weight: 5,
+  count: 0
+}, {
+  weight: 2.5,
+  count: 0
+}];
+const D_GYM = [{
+  weight: 45,
+  count: 20
+}, {
+  weight: 35,
+  count: 4
+}, {
+  weight: 25,
+  count: 6
+}, {
+  weight: 10,
+  count: 6
+}, {
+  weight: 5,
+  count: 4
+}, {
+  weight: 2.5,
+  count: 4
+}];
+const mk = (ex, sets, reps, opts = {}) => ({
+  ex,
+  sets,
+  reps,
+  ...opts
+});
+/* ============ GOAL-DRIVEN ENGINE ============ */
+/* Merged movement library. eq: where the move is doable — "both" | "gym" | "home" */
+const LIB = {
+  Shoulders: [{
+    n: "Lateral Raises",
+    eq: "both"
+  }, {
+    n: "DB Arnold Press",
+    eq: "both"
+  }, {
+    n: "Military Press",
+    eq: "both"
+  }, {
+    n: "Front Raise",
+    eq: "both"
+  }, {
+    n: "Upright Row",
+    eq: "both"
+  }, {
+    n: "Shoulder Shrugs",
+    eq: "both"
+  }, {
+    n: "Cable Lateral Raise",
+    eq: "gym"
+  }, {
+    n: "Cable Rear Delt Fly",
+    eq: "gym"
+  }, {
+    n: "Reverse Pec Deck",
+    eq: "gym"
+  }, {
+    n: "DB Rear Lateral Raise",
+    eq: "both"
+  }, {
+    n: "Reverse Fly (incline)",
+    eq: "both"
+  }],
+  Chest: [{
+    n: "Incline DB Press",
+    eq: "both"
+  }, {
+    n: "Flat DB Press",
+    eq: "both"
+  }, {
+    n: "Decline DB Press",
+    eq: "both"
+  }, {
+    n: "DB Fly",
+    eq: "both"
+  }, {
+    n: "Neutral-Grip DB Press",
+    eq: "both"
+  }, {
+    n: "Push-Up (weighted)",
+    eq: "home"
+  }, {
+    n: "Leverage Incline Press",
+    eq: "gym"
+  }, {
+    n: "High Cable Fly",
+    eq: "gym"
+  }, {
+    n: "Pec-Deck Fly",
+    eq: "gym"
+  }, {
+    n: "Machine Incline Press",
+    eq: "gym"
+  }],
+  Back: [{
+    n: "Bent-Over Row",
+    eq: "both"
+  }, {
+    n: "One-Arm DB Row",
+    eq: "both"
+  }, {
+    n: "Pull-up",
+    eq: "both"
+  }, {
+    n: "Neutral-Grip Pull-up",
+    eq: "both"
+  }, {
+    n: "Reverse Shrug",
+    eq: "both"
+  }, {
+    n: "Band Row",
+    eq: "home"
+  }, {
+    n: "Lat Pulldown",
+    eq: "gym"
+  }, {
+    n: "Seated Cable Row",
+    eq: "gym"
+  }, {
+    n: "Straight-Arm Pulldown",
+    eq: "gym"
+  }, {
+    n: "Close-Grip Pulldown",
+    eq: "gym"
+  }],
+  Legs: [{
+    n: "Back Squat",
+    eq: "both"
+  }, {
+    n: "Front Squat",
+    eq: "both"
+  }, {
+    n: "Goblet Squat",
+    eq: "both"
+  }, {
+    n: "Walking Lunge",
+    eq: "both"
+  }, {
+    n: "Bulgarian Split Squat",
+    eq: "both"
+  }, {
+    n: "Step-Up",
+    eq: "both"
+  }, {
+    n: "Leg Press",
+    eq: "gym"
+  }, {
+    n: "Hack Squat",
+    eq: "gym"
+  }, {
+    n: "Leg Extension",
+    eq: "gym"
+  }, {
+    n: "Smith Lunge",
+    eq: "gym"
+  }],
+  Glutes: [{
+    n: "Hip Thrust",
+    eq: "both"
+  }, {
+    n: "Glute Bridge",
+    eq: "both"
+  }, {
+    n: "Sumo Squat",
+    eq: "both"
+  }, {
+    n: "Romanian Deadlift",
+    eq: "both"
+  }, {
+    n: "Curtsy Lunge",
+    eq: "both"
+  }, {
+    n: "Banded Kickback",
+    eq: "home"
+  }, {
+    n: "Cable Kickback",
+    eq: "gym"
+  }, {
+    n: "Hip Abduction Machine",
+    eq: "gym"
+  }, {
+    n: "Smith Hip Thrust",
+    eq: "gym"
+  }],
+  Hams: [{
+    n: "Romanian Deadlift",
+    eq: "both"
+  }, {
+    n: "Stiff-Leg Deadlift",
+    eq: "both"
+  }, {
+    n: "Good Morning",
+    eq: "both"
+  }, {
+    n: "Nordic Curl",
+    eq: "home"
+  }, {
+    n: "Lying Leg Curl",
+    eq: "gym"
+  }, {
+    n: "Seated Leg Curl",
+    eq: "gym"
+  }],
+  Arms: [{
+    n: "EZ Bar Curl",
+    eq: "both"
+  }, {
+    n: "Hammer Curl",
+    eq: "both"
+  }, {
+    n: "Wide-Grip Curl",
+    eq: "both"
+  }, {
+    n: "Skullcrusher",
+    eq: "both"
+  }, {
+    n: "Overhead Tricep Ext",
+    eq: "both"
+  }, {
+    n: "Concentration Curl",
+    eq: "both"
+  }, {
+    n: "Cable Pushdown",
+    eq: "gym"
+  }, {
+    n: "Cable Curl",
+    eq: "gym"
+  }, {
+    n: "Cable Kickback",
+    eq: "gym"
+  }],
+  Calves: [{
+    n: "Standing Calf Raise",
+    eq: "both"
+  }, {
+    n: "Single-Leg Calf Raise",
+    eq: "both"
+  }, {
+    n: "Calf Machine Raise",
+    eq: "gym"
+  }, {
+    n: "Seated Calf Raise",
+    eq: "gym"
+  }],
+  Core: [{
+    n: "Hanging Leg Raise",
+    eq: "both"
+  }, {
+    n: "Weighted Sit-Up",
+    eq: "both"
+  }, {
+    n: "Air Bike",
+    eq: "both"
+  }, {
+    n: "Side Crunch",
+    eq: "both"
+  }, {
+    n: "Russian Twist",
+    eq: "both"
+  }, {
+    n: "Plank",
+    eq: "both"
+  }, {
+    n: "Side Bend",
+    eq: "both"
+  }, {
+    n: "Cable Crunch",
+    eq: "gym"
+  }, {
+    n: "Cable Woodchop",
+    eq: "gym"
+  }],
+  Delts: [{
+    n: "Cable Lateral Raise",
+    eq: "gym"
+  }, {
+    n: "DB Rear Lateral Raise",
+    eq: "both"
+  }, {
+    n: "Reverse Pec Deck",
+    eq: "gym"
+  }, {
+    n: "Cable Rear Delt Fly",
+    eq: "gym"
+  }, {
+    n: "Reverse Fly (incline)",
+    eq: "both"
+  }, {
+    n: "Leaning Cable Lateral",
+    eq: "gym"
+  }, {
+    n: "Face Pull",
+    eq: "gym"
+  }, {
+    n: "Front Raise",
+    eq: "both"
+  }, {
+    n: "3-Way DB Raise",
+    eq: "both"
+  }, {
+    n: "Band Pull-Apart",
+    eq: "both"
+  }]
+};
+
+/* rep styles per goal */
+const STYLES = {
+  strength: {
+    comp: {
+      sets: 4,
+      reps: 5,
+      pct: 0.85
+    },
+    acc: {
+      sets: 3,
+      reps: 8
+    },
+    iso: {
+      sets: 3,
+      reps: 12
+    }
+  },
+  hypertrophy: {
+    comp: {
+      sets: 4,
+      reps: 8,
+      pct: 0.75
+    },
+    acc: {
+      sets: 3,
+      reps: 12
+    },
+    iso: {
+      sets: 3,
+      reps: 15
+    }
+  },
+  tone: {
+    comp: {
+      sets: 3,
+      reps: 15,
+      pct: 0.55
+    },
+    acc: {
+      sets: 3,
+      reps: 18
+    },
+    iso: {
+      sets: 3,
+      reps: 20
+    }
+  }
+};
+
+/* day focuses: which library groups a day pulls from, how many, and the heavy compound lift */
+const FOCUS = {
+  Shoulders: {
+    title: "Shoulders",
+    lift: "ohp",
+    pools: [["Shoulders", 4]]
+  },
+  Back: {
+    title: "Back",
+    lift: "deadlift",
+    pools: [["Back", 4]]
+  },
+  Chest: {
+    title: "Chest",
+    lift: "bench",
+    pools: [["Chest", 4]]
+  },
+  Legs: {
+    title: "Legs",
+    lift: "squat",
+    pools: [["Legs", 3], ["Calves", 1]]
+  },
+  Glutes: {
+    title: "Glutes & Hams",
+    lift: "squat",
+    pools: [["Glutes", 3], ["Hams", 1]]
+  },
+  Arms: {
+    title: "Arms",
+    lift: null,
+    pools: [["Arms", 5]]
+  },
+  Upper: {
+    title: "Upper Body",
+    lift: "bench",
+    pools: [["Chest", 2], ["Back", 2], ["Shoulders", 1]]
+  },
+  Lower: {
+    title: "Lower Body",
+    lift: "squat",
+    pools: [["Glutes", 2], ["Legs", 2], ["Hams", 1]]
+  },
+  FullBody: {
+    title: "Full Body",
+    lift: "squat",
+    pools: [["Legs", 1], ["Back", 1], ["Chest", 1], ["Shoulders", 1]]
+  },
+  Push: {
+    title: "Push",
+    lift: "bench",
+    pools: [["Chest", 2], ["Shoulders", 2]]
+  },
+  Pull: {
+    title: "Pull",
+    lift: "deadlift",
+    pools: [["Back", 3], ["Arms", 1]]
+  },
+  Delts: {
+    title: "Delts & Core",
+    lift: null,
+    pools: [["Delts", 4]]
+  },
+  Cond: {
+    title: "Conditioning",
+    lift: null,
+    pools: [["Legs", 1], ["Shoulders", 1]]
+  }
+};
+
+/* goals → suggested weekly split (FOCUS keys) + rep style */
+const GOALS = {
+  vtaper: {
+    label: "Build Muscle · V-Taper",
+    style: "hypertrophy",
+    week: ["Shoulders", "Back", "Chest", "Legs", "Arms", "Delts"]
+  },
+  glutes: {
+    label: "Glutes & Legs",
+    style: "hypertrophy",
+    week: ["Glutes", "Legs", "Glutes", "Upper", "Lower", "Cond"]
+  },
+  tone: {
+    label: "Tone & Sculpt",
+    style: "tone",
+    week: ["Upper", "Lower", "FullBody", "Upper", "Lower", "Cond"]
+  },
+  strength: {
+    label: "Full-Body Strength",
+    style: "strength",
+    week: ["Push", "Pull", "Legs", "Push", "Pull", "Legs"]
+  },
+  recomp: {
+    label: "Lean Out · Recomp",
+    style: "hypertrophy",
+    week: ["Upper", "Lower", "Cond", "Upper", "Lower", "Cond"]
+  }
+};
+const GENDER_DEFAULT_GOAL = {
+  women: "glutes",
+  men: "vtaper"
+};
+const CARDIO_BY_FOCUS = {
+  heavy: ["Incline Walk", 12],
+  pump: ["Bike", 20],
+  cond: ["Mixed Intervals", 25]
+};
+
+/* Only these true barbell lifts can be a day's heavy anchor with a %1RM load.
+   Everything else is accessory/isolation: rep-targeted, athlete fills the weight. */
+const COMPOUNDS = {
+  bench: ["Bench Press", "Incline Barbell Press", "Close-Grip Bench Press"],
+  squat: ["Back Squat", "Front Squat", "Pause Squat"],
+  ohp: ["Overhead Press", "Push Press", "Standing Military Press"],
+  deadlift: ["Deadlift", "Barbell Row", "Romanian Deadlift"]
+};
+function pick(arr, n) {
+  return arr[(n % arr.length + arr.length) % arr.length];
+}
+function poolFor(group, mode) {
+  return LIB[group].filter(m => m.eq === "both" || m.eq === mode);
+}
+
+/* Build one day's workout from goal + focus + location + week (for variation + deload) */
+function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, styleOverride) {
+  const f = FOCUS[focusKey] || FOCUS.Upper;
+  const goal = GOALS[goalKey] || GOALS.vtaper;
+  const style = STYLES[styleOverride] ? styleOverride : goal.style;
+  const deload = (weekIdx % 6 + 6) % 6 === 5;
+  const st = STYLES[style];
+  const rows = [];
+  let slotN = blockNum * 7 + weekIdx; // rotates exercises each week/block
+
+  // 1) Heavy anchor — ONLY a real barbell compound gets a calculated %1RM load.
+  if (f.lift && COMPOUNDS[f.lift]) {
+    const compName = pick(COMPOUNDS[f.lift], slotN++);
+    const target = roundLoad(tm(f.lift) * st.comp.pct * (deload ? 0.85 : 1));
+    rows.push({
+      ex: compName,
+      role: "comp",
+      lift: f.lift,
+      heavy: !deload && style === "strength",
+      drop: false,
+      sets: deload ? Math.max(2, st.comp.sets - 1) : st.comp.sets,
+      reps: st.comp.reps,
+      target,
+      note: ""
+    });
+  }
+
+  // 2) Accessories + isolation from the focus pools — NO computed load, athlete enters weight.
+  f.pools.forEach(([group, count]) => {
+    const pool = poolFor(group, mode);
+    for (let i = 0; i < count; i++) {
+      const ex = pick(pool, slotN++);
+      const sc = i === 0 ? st.acc : st.iso;
+      rows.push({
+        ex: ex.n,
+        role: i === 0 ? "acc" : "iso",
+        lift: null,
+        db: /\bDB\b|Dumbbell/i.test(ex.n),
+        heavy: false,
+        drop: style !== "strength" && !deload && i > 0,
+        sets: deload ? Math.max(2, sc.sets - 1) : sc.sets,
+        reps: sc.reps,
+        target: null,
+        note: group === "Glutes" ? "Glute focus" : ""
+      });
+    }
+  });
+
+  // 3) daily core (reps only, no weight) + cardio (minutes only)
+  // daily core — steps one per day through the catalog so every day in the week differs
+  const focusIdx = (GOALS[goalKey] || GOALS.vtaper).week.indexOf(focusKey);
+  const coreSeed = blockNum + weekIdx + (focusIdx >= 0 ? focusIdx : 0);
+  rows.push({
+    ex: pick(poolFor("Core", mode), coreSeed).n,
+    role: "ab",
+    sets: 3,
+    reps: deload ? 12 : 15,
+    target: null,
+    heavy: false,
+    drop: false,
+    note: "Bodyweight — reps only"
+  });
+  const isHeavy = style === "strength";
+  const cardio = focusKey === "Cond" ? CARDIO_BY_FOCUS.cond : isHeavy ? CARDIO_BY_FOCUS.heavy : CARDIO_BY_FOCUS.pump;
+  const cmin = Math.round(cardio[1] * (deload ? 0.6 : 1) / 5) * 5;
+  rows.push({
+    ex: `${cardio[0]} — ${cmin} min`,
+    role: "cardio",
+    sets: 1,
+    reps: cmin,
+    target: null,
+    heavy: false,
+    drop: false,
+    note: isHeavy ? "Zone 2 — easy" : "Steady pace"
+  });
+  return {
+    id: f.title,
+    focusKey,
+    type: isHeavy ? "heavy" : "pump",
+    deload,
+    style,
+    rows
+  };
+}
+const RULES = ["Heavy compounds (3–5 reps) are the muscle-protecting signal. Never drop-set them.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Drop sets only on isolation last sets. Max 2–3 per session.", "Rate of loss ~1–2 lb/week. Faster = lean mass going.", "Safety pins set before every heavy solo bench or squat.", "All reps clean → +5 lb upper / +10 lb lower. Miss → repeat."];
+
+/* ============ THEME ============ */
+const C = {
+  bg: "#0b0b0d",
+  panel: "#151518",
+  panel2: "#1d1d22",
+  line: "#27272e",
+  red: "#e11d2a",
+  blue: "#3b9ae1",
+  gold: "#d9a441",
+  green: "#4ade80",
+  txt: "#f4f4f5",
+  dim: "#8a8a93"
+};
+
+/* ============ FIREBASE (connected layer) ============ */
+/* window.firebase is initialized by the HTML host before the app runs.
+   In the Claude artifact sandbox it's absent, so the Crew tab degrades gracefully. */
+var FB = function () {
+  var ready = typeof window !== "undefined" && !!window.firebase && window.firebase.apps && window.firebase.apps.length > 0;
+  function auth() {
+    return window.firebase.auth();
+  }
+  function db() {
+    return window.firebase.firestore();
+  }
+  return {
+    ready: ready,
+    onAuth: function (cb) {
+      if (!ready) {
+        cb(null);
+        return function () {};
+      }
+      return auth().onAuthStateChanged(cb);
+    },
+    signUp: function (email, pw, name) {
+      return auth().createUserWithEmailAndPassword(email, pw).then(function (c) {
+        return c.user.updateProfile({
+          displayName: name
+        }).then(function () {
+          return db().collection("users").doc(c.user.uid).set({
+            name: name,
+            email: email
+          }, {
+            merge: true
+          });
+        }).then(function () {
+          return c.user;
+        });
+      });
+    },
+    signIn: function (email, pw) {
+      return auth().signInWithEmailAndPassword(email, pw);
+    },
+    signOut: function () {
+      return auth().signOut();
+    },
+    createGroup: function (uid, name, groupName) {
+      var code = Math.random().toString(36).slice(2, 8).toUpperCase();
+      var ref = db().collection("groups").doc();
+      return ref.set({
+        name: groupName,
+        code: code,
+        owner: uid,
+        createdAt: Date.now()
+      }).then(function () {
+        return ref.collection("members").doc(uid).set({
+          name: name,
+          updatedAt: Date.now()
+        });
+      }).then(function () {
+        return {
+          groupId: ref.id,
+          code: code,
+          name: groupName
+        };
+      });
+    },
+    joinGroup: function (uid, name, code) {
+      return db().collection("groups").where("code", "==", code.toUpperCase()).limit(1).get().then(function (qs) {
+        if (qs.empty) throw new Error("No group with that code");
+        var doc = qs.docs[0];
+        return doc.ref.collection("members").doc(uid).set({
+          name: name,
+          updatedAt: Date.now()
+        }).then(function () {
+          return {
+            groupId: doc.id,
+            code: code.toUpperCase(),
+            name: doc.data().name
+          };
+        });
+      });
+    },
+    watchMembers: function (groupId, cb) {
+      return db().collection("groups").doc(groupId).collection("members").onSnapshot(function (qs) {
+        cb(qs.docs.map(function (d) {
+          return Object.assign({
+            uid: d.id
+          }, d.data());
+        }));
+      }, function () {
+        cb([]);
+      });
+    },
+    watchFeed: function (groupId, cb) {
+      return db().collection("groups").doc(groupId).collection("feed").orderBy("ts", "desc").limit(40).onSnapshot(function (qs) {
+        cb(qs.docs.map(function (d) {
+          return Object.assign({
+            id: d.id
+          }, d.data());
+        }));
+      }, function () {
+        cb([]);
+      });
+    },
+    syncStats: function (groupId, uid, stats) {
+      if (!ready || !groupId) return Promise.resolve();
+      return db().collection("groups").doc(groupId).collection("members").doc(uid).set(Object.assign({
+        updatedAt: Date.now()
+      }, stats), {
+        merge: true
+      });
+    },
+    pushPRs: function (groupId, uid, name, prs) {
+      if (!ready || !groupId || !prs || !prs.length) return Promise.resolve();
+      var batch = db().batch();
+      prs.forEach(function (p) {
+        var ref = db().collection("groups").doc(groupId).collection("feed").doc();
+        batch.set(ref, {
+          uid: uid,
+          name: name,
+          ex: p.ex,
+          e1rm: p.e1rm,
+          ts: Date.now()
+        });
+      });
+      return batch.commit();
+    }
+  };
+}();
+function computeStats(sessions, maxes) {
+  var best = {
+    bench: 0,
+    squat: 0,
+    ohp: 0,
+    deadlift: 0
+  };
+  sessions.forEach(function (s) {
+    s.entries.forEach(function (en) {
+      if (en.lift && best.hasOwnProperty(en.lift)) en.sets.forEach(function (st) {
+        var e = Math.round(epley(st.w, st.r));
+        if (e > best[en.lift]) best[en.lift] = e;
+      });
+    });
+  });
+  ["bench", "squat", "ohp", "deadlift"].forEach(function (k) {
+    if (!best[k]) best[k] = maxes[k] || 0;
+  });
+  var cut = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  var wk = sessions.filter(function (s) {
+    return s.date >= cut;
+  });
+  return {
+    bench: best.bench,
+    squat: best.squat,
+    ohp: best.ohp,
+    deadlift: best.deadlift,
+    weekVolume: wk.reduce(function (a, s) {
+      return a + s.volume;
+    }, 0),
+    weekSessions: wk.length
+  };
+}
+const CREW_KEY = "irondesk:crew";
+class Boundary extends React.Component {
+  constructor(p) {
+    super(p);
+    this.state = {
+      err: null
+    };
+  }
+  static getDerivedStateFromError(err) {
+    return {
+      err: err
+    };
+  }
+  componentDidUpdate(prev) {
+    if (prev.tabKey !== this.props.tabKey && this.state.err) this.setState({
+      err: null
+    });
+  }
+  render() {
+    if (this.state.err) {
+      return React.createElement("div", {
+        style: {
+          background: "#151518",
+          border: "1px solid #27272e",
+          borderRadius: 14,
+          padding: 18,
+          margin: "8px 0"
+        }
+      }, React.createElement("div", {
+        className: "ttl",
+        style: {
+          fontSize: 15,
+          fontWeight: 700,
+          color: "#e11d2a"
+        }
+      }, "This tab hit a snag"), React.createElement("div", {
+        style: {
+          fontSize: 12.5,
+          color: "#8a8a93",
+          marginTop: 8,
+          lineHeight: 1.5
+        }
+      }, "The rest of the app still works \u2014 switch tabs and back to retry. Details: " + (this.state.err.message || "unknown")));
+    }
+    return this.props.children;
+  }
+}
+function IronDesk() {
+  const [tab, setTab] = useState("today");
+  const [mode, setMode] = useState("home");
+  const [maxes, setMaxes] = useState(D_MAXES);
+  const [homePlates, setHomePlates] = useState(D_HOME);
+  const [gymPlates, setGymPlates] = useState(D_GYM);
+  const [bar, setBar] = useState(45);
+  const [sessions, setSessions] = useState([]);
+  const [bwLog, setBwLog] = useState([]);
+  const [cardioLog, setCardioLog] = useState([]);
+  const [active, setActive] = useState(null); // live workout
+  const [progress, setProgress] = useState({
+    blockNum: 1,
+    week: 1
+  });
+  const [gender, setGender] = useState("men");
+  const [goal, setGoal] = useState("vtaper");
+  const [styleOverride, setStyleOverride] = useState(null);
+  const [customDays, setCustomDays] = useState([]);
+  const [onboarded, setOnboarded] = useState(true);
+  const [macros, setMacros] = useState(null);
+  const crewRef = useRef({
+    uid: null,
+    name: null,
+    groupId: null
+  });
+  const lastPushed = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [flash, setFlash] = useState("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get("irondesk:v3");
+        if (r && r.value) {
+          const s = JSON.parse(r.value);
+          s.maxes && setMaxes(s.maxes);
+          s.homePlates && setHomePlates(s.homePlates);
+          s.gymPlates && setGymPlates(s.gymPlates);
+          s.bar && setBar(s.bar);
+          s.mode && setMode(s.mode);
+          s.sessions && setSessions(s.sessions);
+          s.bwLog && setBwLog(s.bwLog);
+          s.cardioLog && setCardioLog(s.cardioLog);
+          s.active && setActive(s.active);
+          s.progress && setProgress(s.progress);
+          s.gender && setGender(s.gender);
+          s.goal && setGoal(s.goal);
+          s.styleOverride && setStyleOverride(s.styleOverride);
+          s.customDays && setCustomDays(s.customDays);
+          s.macros && setMacros(s.macros);
+          if (typeof s.onboarded === "boolean") setOnboarded(s.onboarded);
+        } else {
+          // migrate from v2 if present
+          try {
+            const old = await window.storage.get("irondesk:v2");
+            if (old && old.value) {
+              const s = JSON.parse(old.value);
+              s.maxes && setMaxes(s.maxes);
+              s.plates && setHomePlates(s.plates);
+              s.gymPlates && setGymPlates(s.gymPlates);
+              s.bar && setBar(s.bar);
+              s.bwLog && setBwLog(s.bwLog);
+              s.cardioLog && setCardioLog(s.cardioLog);
+            } else {
+              setOnboarded(false); // brand-new install → offer the 5-question setup
+            }
+          } catch (e) {
+            setOnboarded(false);
+          }
+        }
+      } catch (e) {}
+      setLoaded(true);
+    })();
+  }, []);
+  const persist = async () => {
+    try {
+      await window.storage.set("irondesk:v3", JSON.stringify({
+        maxes,
+        homePlates,
+        gymPlates,
+        bar,
+        mode,
+        sessions,
+        bwLog,
+        cardioLog,
+        active,
+        progress,
+        gender,
+        goal,
+        styleOverride,
+        customDays,
+        onboarded,
+        macros
+      }));
+    } catch (e) {}
+  };
+  useEffect(() => {
+    if (loaded) persist(); /* eslint-disable-next-line */
+  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, loaded]);
+
+  // push PRs + stats to the crew group when a new session lands
+  useEffect(() => {
+    if (!FB.ready || !loaded) return;
+    const c = crewRef.current;
+    if (c.uid && c.groupId && sessions[0] && sessions[0].id !== lastPushed.current) {
+      lastPushed.current = sessions[0].id;
+      FB.pushPRs(c.groupId, c.uid, c.name, sessions[0].prs || []).catch(function () {});
+      FB.syncStats(c.groupId, c.uid, computeStats(sessions, maxes)).catch(function () {});
+    }
+    /* eslint-disable-next-line */
+  }, [sessions, loaded]);
+  const note = m => {
+    setFlash(m);
+    setTimeout(() => setFlash(""), 1600);
+  };
+  const plates = mode === "gym" ? gymPlates : homePlates;
+  const setPlates = mode === "gym" ? setGymPlates : setHomePlates;
+  const roundLoad = x => mode === "gym" ? Math.round(x / 2.5) * 2.5 : Math.round(x / 5) * 5;
+  const tm = k => Math.round(maxes[k] * 0.9);
+
+  // PR map: best e1RM per exercise across all finished sessions
+  const prMap = useMemo(() => {
+    const m = {};
+    sessions.forEach(s => s.entries.forEach(en => en.sets.forEach(st => {
+      if (!st.w || !st.r) return;
+      const e = epley(st.w, st.r);
+      if (!m[en.ex] || e > m[en.ex]) m[en.ex] = e;
+    })));
+    return m;
+  }, [sessions]);
+  const exportData = () => {
+    const data = {
+      maxes,
+      homePlates,
+      gymPlates,
+      bar,
+      mode,
+      sessions,
+      bwLog,
+      cardioLog,
+      _app: "IronDesk",
+      _v: 3,
+      _exported: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `irondesk-backup-${today()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    note("Exported");
+  };
+  const importData = file => {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const s = JSON.parse(rd.result);
+        s.maxes && setMaxes(s.maxes);
+        s.homePlates && setHomePlates(s.homePlates);
+        s.plates && setHomePlates(s.plates);
+        s.gymPlates && setGymPlates(s.gymPlates);
+        s.bar && setBar(s.bar);
+        s.mode && setMode(s.mode);
+        s.sessions && setSessions(s.sessions);
+        // v2 logs → keep bw/cardio
+        s.bwLog && setBwLog(s.bwLog);
+        s.cardioLog && setCardioLog(s.cardioLog);
+        note("Imported");
+      } catch (e) {
+        note("Import failed");
+      }
+    };
+    rd.readAsText(file);
+  };
+  const TABS = [["today", "Today"], ["program", "Program"], ["core", "Core"], ["hiit", "HIIT"], ["mma", "MMA"], ["pilates", "Pilates"], ["yoga", "Yoga"], ["macros", "Macros"], ["crew", "Crew"], ["history", "History"], ["trends", "Trends"], ["tools", "Tools"], ["ideas", "Ideas"], ["settings", "Settings"]];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: "100vh",
+      background: C.bg,
+      color: C.txt,
+      paddingBottom: 50,
+      fontFamily: "'Archivo',-apple-system,sans-serif"
+    }
+  }, /*#__PURE__*/React.createElement("style", null, `@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Archivo:wght@400;500;600;700&display=swap');
+        input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+        input[type=number]{-moz-appearance:textfield;} select{-webkit-appearance:none;appearance:none;}
+        .ttl{font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:1px;}
+        .tabbar::-webkit-scrollbar{display:none;}
+        button{transition:all .15s;}
+      `), /*#__PURE__*/React.createElement("header", {
+    style: {
+      background: "linear-gradient(150deg,#17171b 0%,#0b0b0d 70%)",
+      borderBottom: `2px solid ${C.red}`,
+      padding: "20px 18px 0"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 26,
+      fontWeight: 700,
+      lineHeight: 1
+    }
+  }, "IRON", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.red
+    }
+  }, "DESK"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      letterSpacing: 2
+    }
+  }, "PRO")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: C.dim,
+      fontSize: 11.5,
+      marginTop: 4
+    }
+  }, flash ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.green
+    }
+  }, flash) : "Strength training system")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      background: "#1f1f25",
+      borderRadius: 8,
+      padding: 3
+    }
+  }, [["home", "Home"], ["gym", "Gym"]].map(([m, l]) => /*#__PURE__*/React.createElement("button", {
+    key: m,
+    onClick: () => setMode(m),
+    className: "ttl",
+    style: {
+      padding: "6px 12px",
+      borderRadius: 6,
+      border: "none",
+      cursor: "pointer",
+      fontSize: 11,
+      fontWeight: 700,
+      background: mode === m ? C.red : "transparent",
+      color: mode === m ? "#fff" : C.dim
+    }
+  }, l)))), /*#__PURE__*/React.createElement("nav", {
+    className: "tabbar",
+    style: {
+      display: "flex",
+      gap: 0,
+      marginTop: 14,
+      overflowX: "auto"
+    }
+  }, TABS.map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => setTab(k),
+    className: "ttl",
+    style: {
+      background: "none",
+      border: "none",
+      borderBottom: tab === k ? `2px solid ${C.red}` : "2px solid transparent",
+      color: tab === k ? C.txt : C.dim,
+      padding: "9px 13px",
+      fontSize: 12.5,
+      fontWeight: 600,
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    }
+  }, l, k === "today" && active ? " ●" : "")))), /*#__PURE__*/React.createElement("main", {
+    style: {
+      maxWidth: 560,
+      margin: "0 auto",
+      padding: "16px 14px"
+    }
+  }, /*#__PURE__*/React.createElement(Boundary, {
+    tabKey: tab
+  }, tab === "today" && /*#__PURE__*/React.createElement(Today, {
+    mode,
+    maxes,
+    setMaxes,
+    tm,
+    roundLoad,
+    plates,
+    bar,
+    active,
+    setActive,
+    sessions,
+    setSessions,
+    prMap,
+    note,
+    setTab,
+    progress,
+    setProgress,
+    gender,
+    goal,
+    setGender,
+    setGoal,
+    cardioLog,
+    setCardioLog,
+    styleOverride,
+    setStyleOverride,
+    customDays,
+    setCustomDays,
+    onboarded,
+    setOnboarded
+  }), tab === "program" && /*#__PURE__*/React.createElement(ProgramTab, {
+    mode,
+    tm,
+    roundLoad,
+    progress,
+    setProgress,
+    note,
+    gender,
+    goal,
+    setGender,
+    setGoal,
+    styleOverride
+  }), tab === "core" && /*#__PURE__*/React.createElement(CoreTab, {
+    mode,
+    note
+  }), tab === "hiit" && /*#__PURE__*/React.createElement(HiitTab, {
+    note
+  }), tab === "mma" && /*#__PURE__*/React.createElement(DisciplineTab, {
+    id: "mma",
+    note: note
+  }), tab === "pilates" && /*#__PURE__*/React.createElement(DisciplineTab, {
+    id: "pilates",
+    note: note
+  }), tab === "yoga" && /*#__PURE__*/React.createElement(DisciplineTab, {
+    id: "yoga",
+    note: note
+  }), tab === "macros" && /*#__PURE__*/React.createElement(MacrosTab, {
+    macros,
+    setMacros
+  }), tab === "crew" && /*#__PURE__*/React.createElement(Crew, {
+    sessions,
+    maxes,
+    crewRef,
+    note
+  }), tab === "history" && /*#__PURE__*/React.createElement(History, {
+    sessions,
+    setSessions
+  }), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
+    sessions,
+    bwLog,
+    setBwLog,
+    cardioLog,
+    setCardioLog
+  }), tab === "tools" && /*#__PURE__*/React.createElement(Tools, {
+    mode,
+    plates,
+    bar,
+    roundLoad,
+    maxes
+  }), tab === "ideas" && /*#__PURE__*/React.createElement(IdeasTab, {
+    setTab
+  }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
+    maxes,
+    setMaxes,
+    plates,
+    setPlates,
+    bar,
+    setBar,
+    mode,
+    exportData,
+    importData,
+    sessions,
+    gender,
+    goal,
+    setGender,
+    setGoal
+  }))));
+}
+
+/* ============ TODAY (live workout) ============ */
+function Today({
+  mode,
+  maxes,
+  setMaxes,
+  tm,
+  roundLoad,
+  plates,
+  bar,
+  active,
+  setActive,
+  sessions,
+  setSessions,
+  prMap,
+  note,
+  setTab,
+  progress,
+  setProgress,
+  gender,
+  goal,
+  setGender,
+  setGoal,
+  cardioLog,
+  setCardioLog,
+  styleOverride,
+  setStyleOverride,
+  customDays,
+  setCustomDays,
+  onboarded,
+  setOnboarded
+}) {
+  const week = GOALS[goal].week;
+  const [builder, setBuilder] = useState(false);
+  const [planQ, setPlanQ] = useState(false);
+  const [timer, setTimer] = useState(0);
+  const timerRef = useRef(null);
+  useEffect(() => {
+    if (timer > 0 && !timerRef.current) {
+      timerRef.current = setInterval(() => setTimer(t => {
+        if (t <= 1) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+          return 0;
+        }
+        return t - 1;
+      }), 1000);
+    }
+    return () => {
+      if (timer === 0 && timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [timer]);
+  const start = focusKey => {
+    const d = generateDay(focusKey, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
+    setActive({
+      id: uid(),
+      date: today(),
+      dayId: d.id,
+      focusKey,
+      mode,
+      goal,
+      blockNum: progress.blockNum,
+      week: progress.week,
+      start: Date.now(),
+      entries: d.rows.map(r => ({
+        ex: r.ex,
+        heavy: !!r.heavy,
+        drop: !!r.drop,
+        role: r.role,
+        db: !!r.db,
+        note: r.note || "",
+        lift: r.lift || null,
+        target: r.target,
+        targetReps: r.reps,
+        sets: Array(r.sets).fill(null).map(() => ({
+          w: r.target || "",
+          r: r.reps,
+          done: false
+        }))
+      }))
+    });
+  };
+  const startCustom = cd => {
+    setActive({
+      id: uid(),
+      date: today(),
+      dayId: cd.name,
+      focusKey: "custom",
+      mode,
+      goal,
+      blockNum: progress.blockNum,
+      week: progress.week,
+      start: Date.now(),
+      entries: cd.rows.map(r => ({
+        ex: r.ex,
+        heavy: false,
+        drop: false,
+        role: r.role || "acc",
+        db: /\bDB\b|Dumbbell/i.test(r.ex),
+        note: "",
+        lift: null,
+        target: null,
+        targetReps: r.reps,
+        sets: Array(Number(r.sets) || 3).fill(null).map(() => ({
+          w: "",
+          r: Number(r.reps) || 10,
+          done: false
+        }))
+      }))
+    });
+  };
+  const setSet = (ei, si, field, val) => {
+    const a = {
+      ...active,
+      entries: active.entries.map((en, i) => i !== ei ? en : {
+        ...en,
+        sets: en.sets.map((s, j) => j !== si ? s : {
+          ...s,
+          [field]: val
+        })
+      })
+    };
+    setActive(a);
+  };
+  const toggleDone = (ei, si) => {
+    const en = active.entries[ei];
+    const s = en.sets[si];
+    const nowDone = !s.done;
+    setSet(ei, si, "done", nowDone);
+    if (nowDone && en.role !== "cardio" && en.role !== "ab") setTimer(en.heavy ? 180 : 60);
+  };
+  const addSet = ei => {
+    const a = {
+      ...active,
+      entries: active.entries.map((en, i) => i !== ei ? en : {
+        ...en,
+        sets: [...en.sets, {
+          w: en.sets[en.sets.length - 1]?.w || "",
+          r: en.targetReps,
+          done: false
+        }]
+      })
+    };
+    setActive(a);
+  };
+  const finish = () => {
+    const entries = active.entries.map(en => ({
+      ex: en.ex,
+      heavy: en.heavy,
+      lift: en.lift,
+      sets: en.sets.filter(s => s.done && Number(s.w) >= 0 && Number(s.r) > 0).map(s => ({
+        w: Number(s.w),
+        r: Number(s.r)
+      }))
+    })).filter(en => en.sets.length > 0);
+    if (entries.length === 0) {
+      note("Nothing logged");
+      return;
+    }
+    const volume = entries.reduce((a, en) => a + en.sets.reduce((b, s) => b + s.w * s.r, 0), 0);
+    const prs = [];
+    entries.forEach(en => {
+      const best = Math.max(...en.sets.map(s => epley(s.w, s.r)));
+      if (best > (prMap[en.ex] || 0)) prs.push({
+        ex: en.ex,
+        e1rm: Math.round(best)
+      });
+    });
+    const session = {
+      id: active.id,
+      date: active.date,
+      dayId: active.dayId,
+      mode: active.mode,
+      durationMin: Math.max(1, Math.round((Date.now() - active.start) / 60000)),
+      entries,
+      volume,
+      prs
+    };
+    setSessions([session, ...sessions]);
+    setActive(null);
+    setTimer(0);
+    note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
+    setTab("history");
+  };
+  if (!active) {
+    const lastByDay = {};
+    sessions.forEach(s => {
+      if (!lastByDay[s.dayId]) lastByDay[s.dayId] = s.date;
+    });
+    const setGenderGoal = g => {
+      setGender(g);
+      setGoal(GENDER_DEFAULT_GOAL[g]);
+    };
+    if (planQ) return /*#__PURE__*/React.createElement(PlanBuilder, {
+      setMaxes,
+      setGoal,
+      setGender,
+      setStyleOverride,
+      setOnboarded,
+      done: () => setPlanQ(false),
+      note
+    });
+    if (builder) return /*#__PURE__*/React.createElement(CustomBuilder, {
+      mode,
+      customDays,
+      setCustomDays,
+      startCustom,
+      done: () => setBuilder(false),
+      note
+    });
+    return /*#__PURE__*/React.createElement(React.Fragment, null, !onboarded && /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "linear-gradient(135deg,#e11d2a22,#0b0b0d)",
+        border: `1px solid ${C.red}`,
+        borderRadius: 14,
+        padding: 16,
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "ttl",
+      style: {
+        fontSize: 16,
+        fontWeight: 700
+      }
+    }, "New here? Build your plan"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        color: C.dim,
+        margin: "4px 0 12px",
+        lineHeight: 1.5
+      }
+    }, "Answer 5 quick questions and IronDesk builds a program to ", /*#__PURE__*/React.createElement("b", null, "your"), " level — no one else's numbers, no pressure."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPlanQ(true),
+      style: {
+        flex: 2,
+        padding: "11px",
+        background: C.red,
+        border: "none",
+        borderRadius: 10,
+        color: "#fff",
+        fontFamily: "'Oswald'",
+        fontWeight: 700,
+        fontSize: 13,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Build My Plan"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setOnboarded(true),
+      style: {
+        flex: 1,
+        padding: "11px",
+        background: C.panel2,
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        color: C.dim,
+        fontFamily: "'Oswald'",
+        fontWeight: 600,
+        fontSize: 12,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Skip"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setBuilder(true),
+      style: {
+        flex: 1,
+        padding: "12px",
+        background: C.panel2,
+        border: `1px solid ${C.gold}`,
+        borderRadius: 10,
+        color: C.gold,
+        fontFamily: "'Oswald'",
+        fontWeight: 700,
+        fontSize: 12.5,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "✎ Build Your Own"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPlanQ(true),
+      style: {
+        flex: 1,
+        padding: "12px",
+        background: C.panel2,
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        color: C.txt,
+        fontFamily: "'Oswald'",
+        fontWeight: 700,
+        fontSize: 12.5,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "⚙ Personalize (5 Q)")), customDays && customDays.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+      title: "Your Custom Workouts",
+      sub: "Built by you — tap to run"
+    }, customDays.map(cd => /*#__PURE__*/React.createElement("div", {
+      key: cd.id,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "9px 0",
+        borderBottom: `1px solid ${C.line}`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 14,
+        fontWeight: 600
+      }
+    }, cd.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.dim
+      }
+    }, cd.rows.length, " exercises")), /*#__PURE__*/React.createElement("button", {
+      onClick: () => startCustom(cd),
+      style: {
+        padding: "8px 14px",
+        background: C.red,
+        border: "none",
+        borderRadius: 8,
+        color: "#fff",
+        fontWeight: 700,
+        fontSize: 12,
+        cursor: "pointer"
+      }
+    }, "Start"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setCustomDays(customDays.filter(x => x.id !== cd.id)),
+      style: {
+        background: "none",
+        border: "none",
+        color: C.dim,
+        cursor: "pointer",
+        fontSize: 16
+      }
+    }, "×")))), /*#__PURE__*/React.createElement(Panel, {
+      title: "What are you training for?",
+      sub: "Set it once — your day and week generate from this"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: C.dim,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+        marginBottom: 6
+      }
+    }, "Profile"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        marginBottom: 14
+      }
+    }, [["women", "Women"], ["men", "Men"]].map(([g, l]) => /*#__PURE__*/React.createElement("button", {
+      key: g,
+      onClick: () => setGenderGoal(g),
+      className: "ttl",
+      style: {
+        flex: 1,
+        padding: "9px",
+        borderRadius: 8,
+        cursor: "pointer",
+        fontSize: 12.5,
+        fontWeight: 700,
+        background: gender === g ? C.red : C.panel2,
+        color: gender === g ? "#fff" : C.dim,
+        border: `1px solid ${C.line}`
+      }
+    }, l))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: C.dim,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+        marginBottom: 6
+      }
+    }, "Goal"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: 6
+      }
+    }, Object.entries(GOALS).map(([k, g]) => /*#__PURE__*/React.createElement("button", {
+      key: k,
+      onClick: () => setGoal(k),
+      style: {
+        textAlign: "left",
+        padding: "10px 12px",
+        borderRadius: 8,
+        cursor: "pointer",
+        background: goal === k ? "rgba(225,29,42,.13)" : C.panel2,
+        color: C.txt,
+        border: `1px solid ${goal === k ? C.red : C.line}`,
+        fontSize: 13.5,
+        fontWeight: goal === k ? 700 : 500
+      }
+    }, g.label)))), /*#__PURE__*/React.createElement(Panel, {
+      title: "Today's Workout",
+      sub: `${mode === "gym" ? "Gym" : "Home"} · ${GOALS[goal].label} · Block ${progress.blockNum} · Week ${progress.week}/6`
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        if (progress.week > 1) setProgress({
+          ...progress,
+          week: progress.week - 1
+        });else if (progress.blockNum > 1) setProgress({
+          blockNum: progress.blockNum - 1,
+          week: 6
+        });
+      },
+      style: {
+        flex: 1,
+        padding: "9px",
+        background: C.panel2,
+        border: `1px solid ${C.line}`,
+        borderRadius: 8,
+        color: C.dim,
+        fontFamily: "'Oswald'",
+        fontSize: 11.5,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "‹ Prev Week"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        if (progress.week < 6) {
+          setProgress({
+            ...progress,
+            week: progress.week + 1
+          });
+          note(`Week ${progress.week + 1}`);
+        } else {
+          setProgress({
+            blockNum: progress.blockNum + 1,
+            week: 1
+          });
+          note(`Block ${progress.blockNum + 1}`);
+        }
+      },
+      style: {
+        flex: 1,
+        padding: "9px",
+        background: progress.week >= 6 ? C.gold : C.red,
+        border: "none",
+        borderRadius: 8,
+        color: "#fff",
+        fontFamily: "'Oswald'",
+        fontSize: 11.5,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, progress.week >= 6 ? "Next Block ›" : "Next Week ›")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 8
+      }
+    }, week.map((fk, idx) => {
+      const f = FOCUS[fk] || FOCUS.Upper;
+      const heavy = GOALS[goal].style === "strength";
+      return /*#__PURE__*/React.createElement("button", {
+        key: idx,
+        onClick: () => start(fk),
+        style: {
+          background: C.panel2,
+          border: `1px solid ${idx === 0 ? C.gold : heavy ? C.red : C.blue}`,
+          borderRadius: 12,
+          padding: "13px 10px",
+          cursor: "pointer",
+          textAlign: "left"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 9,
+          color: C.dim,
+          letterSpacing: 0.5
+        }
+      }, "DAY ", idx + 1, idx === 0 ? " · TODAY" : ""), /*#__PURE__*/React.createElement("div", {
+        className: "ttl",
+        style: {
+          fontSize: 14,
+          fontWeight: 700,
+          color: C.txt
+        }
+      }, f.title), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontSize: 10.5,
+          color: C.dim,
+          marginTop: 3
+        }
+      }, lastByDay[f.title] ? `Last: ${lastByDay[f.title].slice(5)}` : "Tap to start"));
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.dim,
+        marginTop: 12,
+        lineHeight: 1.5
+      }
+    }, "Use Prev/Next to move through the 6-week block — exercises and loads shift each week, just like the Program tab.")), /*#__PURE__*/React.createElement(Stopwatch, null), /*#__PURE__*/React.createElement(CardioQuickLog, {
+      cardioLog: cardioLog,
+      setCardioLog: setCardioLog,
+      note: note
+    }), /*#__PURE__*/React.createElement(WeekSummary, {
+      sessions: sessions
+    }));
+  }
+  const heavyDay = GOALS[active.goal || goal].style === "strength";
+  const doneCount = active.entries.reduce((a, en) => a + en.sets.filter(s => s.done).length, 0);
+  const totalCount = active.entries.reduce((a, en) => a + en.sets.length, 0);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, timer > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "sticky",
+      top: 8,
+      zIndex: 5,
+      background: C.red,
+      borderRadius: 12,
+      padding: "12px 16px",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 14,
+      boxShadow: "0 4px 20px rgba(225,29,42,.35)"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 13,
+      fontWeight: 700,
+      color: "#fff"
+    }
+  }, "REST"), /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 26,
+      fontWeight: 700,
+      color: "#fff"
+    }
+  }, Math.floor(timer / 60), ":", String(timer % 60).padStart(2, "0")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTimer(0),
+    style: {
+      background: "rgba(0,0,0,.25)",
+      border: "none",
+      borderRadius: 6,
+      color: "#fff",
+      padding: "6px 12px",
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "SKIP")), /*#__PURE__*/React.createElement(Panel, {
+    title: `${active.dayId} — Live`,
+    sub: `${doneCount}/${totalCount} sets done · started ${new Date(active.start).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit"
+    })}`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      background: C.panel2,
+      borderRadius: 3,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      width: `${totalCount ? doneCount / totalCount * 100 : 0}%`,
+      background: heavyDay ? C.red : C.blue,
+      borderRadius: 3,
+      transition: "width .3s"
+    }
+  })), active.entries.map((en, ei) => {
+    const isCardio = en.role === "cardio",
+      isAb = en.role === "ab",
+      isDB = !!en.db;
+    return /*#__PURE__*/React.createElement("div", {
+      key: ei,
+      style: {
+        marginBottom: 18,
+        background: C.panel2,
+        borderRadius: 12,
+        padding: "12px 12px 8px",
+        border: `1px solid ${C.line}`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        marginBottom: 4
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 14.5,
+        fontWeight: 700
+      }
+    }, en.ex, en.heavy && /*#__PURE__*/React.createElement(Badge, {
+      color: C.red
+    }, "HEAVY"), en.drop && /*#__PURE__*/React.createElement(Badge, {
+      color: C.blue
+    }, "DROP"), isCardio && /*#__PURE__*/React.createElement(Badge, {
+      color: C.green
+    }, "CARDIO"), isAb && /*#__PURE__*/React.createElement(Badge, {
+      color: C.gold
+    }, "CORE"), isDB && /*#__PURE__*/React.createElement(Badge, {
+      color: C.blue
+    }, "PER DB"), en.note === "Glute focus" && /*#__PURE__*/React.createElement(Badge, {
+      color: C.gold
+    }, "GLUTES")), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: C.gold,
+        fontWeight: 700
+      }
+    }, isCardio ? `${en.targetReps} min` : `${en.sets.length}×${en.targetReps}`)), (en.note || en.target) && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.dim,
+        marginBottom: 8
+      }
+    }, en.target ? `Target ${en.target} lb · ` : "", isDB ? "Weight is per dumbbell" : en.note), en.target && !isCardio && !isAb && !isDB && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement(LoadChips, {
+      total: en.target,
+      bar: bar,
+      plates: plates
+    })), en.sets.map((s, si) => /*#__PURE__*/React.createElement("div", {
+      key: si,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "5px 0"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        width: 22,
+        fontSize: 11,
+        color: C.dim,
+        fontWeight: 700
+      }
+    }, isCardio ? "" : si + 1), isCardio ? /*#__PURE__*/React.createElement(MiniIn, {
+      value: s.r,
+      onChange: v => setSet(ei, si, "r", v),
+      suffix: "min"
+    }) : isAb ? /*#__PURE__*/React.createElement(MiniIn, {
+      value: s.r,
+      onChange: v => setSet(ei, si, "r", v),
+      suffix: "reps"
+    }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MiniIn, {
+      value: s.w,
+      onChange: v => setSet(ei, si, "w", v),
+      suffix: isDB ? "/DB" : "lb"
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: C.dim,
+        fontSize: 12
+      }
+    }, "×"), /*#__PURE__*/React.createElement(MiniIn, {
+      value: s.r,
+      onChange: v => setSet(ei, si, "r", v),
+      suffix: "reps"
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: () => toggleDone(ei, si),
+      style: {
+        width: 70,
+        padding: "8px 0",
+        borderRadius: 8,
+        border: `1px solid ${s.done ? C.green : C.line}`,
+        background: s.done ? "rgba(74,222,128,.15)" : C.panel,
+        color: s.done ? C.green : C.dim,
+        fontWeight: 700,
+        fontSize: 12,
+        cursor: "pointer"
+      }
+    }, s.done ? "✓ DONE" : "LOG"))), !isCardio && /*#__PURE__*/React.createElement("button", {
+      onClick: () => addSet(ei),
+      style: {
+        background: "none",
+        border: "none",
+        color: C.dim,
+        fontSize: 12,
+        cursor: "pointer",
+        padding: "6px 0"
+      }
+    }, "+ add set"));
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      if (window.confirm("Discard this workout?")) {
+        setActive(null);
+        setTimer(0);
+      }
+    },
+    style: {
+      flex: 1,
+      padding: "13px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontSize: 13,
+      fontWeight: 600,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Discard"), /*#__PURE__*/React.createElement("button", {
+    onClick: finish,
+    style: {
+      flex: 2,
+      padding: "13px",
+      background: C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontSize: 14,
+      fontWeight: 700,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Finish Workout"))), /*#__PURE__*/React.createElement(Stopwatch, null));
+}
+function WeekSummary({
+  sessions
+}) {
+  const cut = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const wk = sessions.filter(s => s.date >= cut);
+  const vol = wk.reduce((a, s) => a + s.volume, 0);
+  const prs = wk.reduce((a, s) => a + (s.prs?.length || 0), 0);
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: "Last 7 Days",
+    sub: "Rolling week at a glance"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement(Stat, {
+    label: "Sessions",
+    value: wk.length,
+    color: C.txt
+  }), /*#__PURE__*/React.createElement(Stat, {
+    label: "Volume (lb)",
+    value: vol.toLocaleString(),
+    color: C.gold
+  }), /*#__PURE__*/React.createElement(Stat, {
+    label: "PRs",
+    value: prs,
+    color: C.green
+  })));
+}
+
+/* ============ PROGRAM ============ */
+function ProgramTab({
+  mode,
+  tm,
+  roundLoad,
+  progress,
+  setProgress,
+  note,
+  gender,
+  goal,
+  setGender,
+  setGoal,
+  styleOverride
+}) {
+  const g = GOALS[goal];
+  const [focusKey, setFocusKey] = useState(g.week[0]);
+  const fk = g.week.includes(focusKey) ? focusKey : g.week[0];
+  const gen = generateDay(fk, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
+  const deload = gen.deload;
+  const advanceWeek = () => {
+    if (progress.week < 6) {
+      setProgress({
+        ...progress,
+        week: progress.week + 1
+      });
+      note(`Week ${progress.week + 1}`);
+    } else {
+      setProgress({
+        blockNum: progress.blockNum + 1,
+        week: 1
+      });
+      note(`Block ${progress.blockNum + 1} \u2014 new variations`);
+    }
+  };
+  const backWeek = () => {
+    if (progress.week > 1) setProgress({
+      ...progress,
+      week: progress.week - 1
+    });else if (progress.blockNum > 1) setProgress({
+      blockNum: progress.blockNum - 1,
+      week: 6
+    });
+  };
+  const setGenderGoal = gx => {
+    setGender(gx);
+    setGoal(GENDER_DEFAULT_GOAL[gx]);
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Your Plan",
+    sub: "Goal drives the exercises, reps, and weekly split"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12
+    }
+  }, [["women", "Women"], ["men", "Men"]].map(([gx, l]) => /*#__PURE__*/React.createElement("button", {
+    key: gx,
+    onClick: () => setGenderGoal(gx),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "8px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      background: gender === gx ? C.red : C.panel2,
+      color: gender === gx ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, Object.entries(GOALS).map(([k, gg]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => {
+      setGoal(k);
+      setFocusKey(gg.week[0]);
+    },
+    style: {
+      textAlign: "left",
+      padding: "10px 12px",
+      borderRadius: 8,
+      cursor: "pointer",
+      background: goal === k ? "rgba(225,29,42,.13)" : C.panel2,
+      color: C.txt,
+      border: `1px solid ${goal === k ? C.red : C.line}`,
+      fontSize: 13.5,
+      fontWeight: goal === k ? 700 : 500
+    }
+  }, gg.label)))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Block Progress",
+    sub: "6-week cycle \\u00b7 week 6 deloads, then exercises rotate fresh"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 14,
+      color: C.dim,
+      letterSpacing: 1
+    }
+  }, "BLOCK ", progress.blockNum, " \\u00b7 WEEK ", progress.week, "/6"), /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      color: deload ? C.blue : C.red
+    }
+  }, deload ? "DELOAD" : g.style.toUpperCase())), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      marginBottom: 12
+    }
+  }, [1, 2, 3, 4, 5, 6].map(i => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      flex: 1,
+      height: 6,
+      borderRadius: 3,
+      background: i <= progress.week ? i === 6 ? C.blue : C.red : C.panel2
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: backWeek,
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "\\u2039 Back"), /*#__PURE__*/React.createElement("button", {
+    onClick: advanceWeek,
+    style: {
+      flex: 2,
+      padding: "11px",
+      background: progress.week >= 6 ? C.gold : C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontSize: 13,
+      fontWeight: 700,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, progress.week >= 6 ? "Start Next Block \u2192" : "Advance Week \u2192"))), /*#__PURE__*/React.createElement(Panel, {
+    title: `Suggested Week \u2014 ${mode === "gym" ? "Gym" : "Home"}`,
+    sub: "Tap a day to preview its generated workout"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 12
+    }
+  }, g.week.map((k, i) => {
+    const f = FOCUS[k] || FOCUS.Upper;
+    return /*#__PURE__*/React.createElement("button", {
+      key: i,
+      onClick: () => setFocusKey(k),
+      className: "ttl",
+      style: {
+        background: fk === k ? C.red : C.panel2,
+        color: fk === k ? "#fff" : C.dim,
+        border: `1px solid ${C.line}`,
+        borderRadius: 8,
+        padding: "8px 11px",
+        fontSize: 11.5,
+        fontWeight: 600,
+        cursor: "pointer"
+      }
+    }, f.title);
+  })), gen.rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      padding: "10px 0",
+      borderBottom: i < gen.rows.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "baseline",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600,
+      flex: 1
+    }
+  }, r.ex, r.heavy && /*#__PURE__*/React.createElement(Badge, {
+    color: C.red
+  }, "HEAVY"), r.drop && /*#__PURE__*/React.createElement(Badge, {
+    color: C.blue
+  }, "DROP"), r.role === "cardio" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.green
+  }, "CARDIO"), r.role === "ab" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.gold
+  }, "CORE"), r.note === "Glute focus" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.gold
+  }, "GLUTES")), /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 13.5,
+      fontWeight: 700,
+      color: C.gold,
+      whiteSpace: "nowrap"
+    }
+  }, r.role === "cardio" ? `${r.reps} min` : `${r.sets}\u00d7${r.reps}`, r.target ? ` \u00b7 ${r.target}` : "")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 10
+    }
+  }, "Core logs reps and cardio logs minutes \\u2014 neither asks for plate weight.")), /*#__PURE__*/React.createElement(Panel, {
+    title: "Golden Rules",
+    sub: "The strategy in six lines"
+  }, RULES.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "7px 0",
+      borderBottom: i < RULES.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      color: C.red,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      lineHeight: 1.45
+    }
+  }, r)))));
+}
+
+/* ============ HISTORY ============ */
+function History({
+  sessions,
+  setSessions
+}) {
+  const [open, setOpen] = useState(null);
+  const del = id => {
+    if (window.confirm("Delete this session?")) setSessions(sessions.filter(s => s.id !== id));
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Workout History",
+    sub: `${sessions.length} sessions logged`
+  }, sessions.length === 0 && /*#__PURE__*/React.createElement(Empty, {
+    text: "No workouts yet — start one on the Today tab."
+  }), sessions.map(s => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      borderBottom: `1px solid ${C.line}`,
+      padding: "10px 0"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      cursor: "pointer"
+    },
+    onClick: () => setOpen(open === s.id ? null : s.id)
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700
+    }
+  }, s.dayId, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      fontWeight: 400,
+      marginLeft: 8
+    }
+  }, s.mode === "gym" ? "GYM" : "HOME"), s.prs?.length > 0 && /*#__PURE__*/React.createElement(Badge, {
+    color: C.green
+  }, s.prs.length, " PR")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, s.date, " · ", s.durationMin, " min · ", s.volume.toLocaleString(), " lb volume")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim,
+      fontSize: 12
+    }
+  }, open === s.id ? "▲" : "▼"), /*#__PURE__*/React.createElement("button", {
+    onClick: e => {
+      e.stopPropagation();
+      del(s.id);
+    },
+    style: {
+      background: "none",
+      border: "none",
+      color: C.dim,
+      fontSize: 16,
+      cursor: "pointer"
+    }
+  }, "×")), open === s.id && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8,
+      background: C.panel2,
+      borderRadius: 10,
+      padding: "10px 12px"
+    }
+  }, s.entries.map((en, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      padding: "5px 0",
+      borderBottom: i < s.entries.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600
+    }
+  }, en.ex, s.prs?.some(p => p.ex === en.ex) && /*#__PURE__*/React.createElement(Badge, {
+    color: C.green
+  }, "PR")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.dim
+    }
+  }, en.sets.map(st => `${st.w}×${st.r}`).join("  ·  ")))))))));
+}
+
+/* ============ TRENDS ============ */
+function Trends({
+  sessions,
+  bwLog,
+  setBwLog,
+  cardioLog,
+  setCardioLog
+}) {
+  const [sel, setSel] = useState("bench");
+  const [bw, setBw] = useState({
+    date: today(),
+    weight: 242,
+    bf: ""
+  });
+  const [cd, setCd] = useState({
+    date: today(),
+    type: "Bike",
+    minutes: 30
+  });
+  const liftName = LIFTS.find(l => l.key === sel)?.name;
+  const e1rmData = useMemo(() => {
+    const pts = [];
+    [...sessions].reverse().forEach(s => s.entries.forEach(en => {
+      if (en.lift === sel || en.ex === liftName) {
+        const best = Math.max(...en.sets.map(st => epley(st.w, st.r)));
+        pts.push({
+          date: s.date,
+          e1rm: Math.round(best)
+        });
+      }
+    }));
+    return pts;
+  }, [sessions, sel, liftName]);
+  const volData = useMemo(() => {
+    const byWeek = {};
+    sessions.forEach(s => {
+      const d = new Date(s.date);
+      const wk = new Date(d);
+      wk.setDate(d.getDate() - d.getDay());
+      const k = wk.toISOString().slice(5, 10);
+      byWeek[k] = (byWeek[k] || 0) + s.volume;
+    });
+    return Object.entries(byWeek).sort((a, b) => a[0].localeCompare(b[0])).slice(-8).map(([w, v]) => ({
+      week: w,
+      volume: v
+    }));
+  }, [sessions]);
+  const bwData = useMemo(() => [...bwLog].sort((a, b) => a.date.localeCompare(b.date)), [bwLog]);
+  const compData = useMemo(() => bwData.filter(x => Number(x.bf) > 0).map(x => ({
+    date: x.date,
+    lean: Math.round(x.weight * (1 - x.bf / 100)),
+    fat: Math.round(x.weight * x.bf / 100)
+  })), [bwData]);
+  const addBw = () => {
+    if (!Number(bw.weight)) return;
+    const entry = {
+      id: uid(),
+      date: bw.date,
+      weight: Number(bw.weight)
+    };
+    if (Number(bw.bf) > 0) entry.bf = Number(bw.bf);
+    setBwLog([entry, ...bwLog.filter(x => x.date !== bw.date)]);
+  };
+  const addCd = () => {
+    if (!Number(cd.minutes)) return;
+    setCardioLog([{
+      id: uid(),
+      ...cd,
+      minutes: Number(cd.minutes)
+    }, ...cardioLog]);
+  };
+  const ttStyle = {
+    contentStyle: {
+      background: C.panel,
+      border: `1px solid ${C.line}`,
+      borderRadius: 8,
+      fontSize: 12
+    },
+    labelStyle: {
+      color: C.dim
+    }
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(CardioQuickLog, {
+    cardioLog: cardioLog,
+    setCardioLog: setCardioLog,
+    note: () => {}
+  }), /*#__PURE__*/React.createElement(Panel, {
+    title: "Strength Trend",
+    sub: "e1RM from your logged sessions — flat or rising while weight drops = recomp working"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, LIFTS.map(l => /*#__PURE__*/React.createElement("button", {
+    key: l.key,
+    onClick: () => setSel(l.key),
+    style: {
+      background: sel === l.key ? LIFT_COLORS[l.key] : C.panel2,
+      color: sel === l.key ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`,
+      borderRadius: 6,
+      padding: "5px 10px",
+      fontSize: 12,
+      cursor: "pointer",
+      fontWeight: 600
+    }
+  }, l.name))), e1rmData.length < 2 ? /*#__PURE__*/React.createElement(Empty, {
+    text: "Finish 2+ workouts containing this lift."
+  }) : /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 190
+  }, /*#__PURE__*/React.createElement(LineChart, {
+    data: e1rmData,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -16,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    tickFormatter: d => d.slice(5)
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    domain: ["dataMin - 15", "dataMax + 15"]
+  }), /*#__PURE__*/React.createElement(Tooltip, ttStyle), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "e1rm",
+    stroke: LIFT_COLORS[sel],
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    }
+  })))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Weekly Volume",
+    sub: "Total pounds moved per week — watch for sudden drops (recovery) or runaway climbs"
+  }, volData.length < 2 ? /*#__PURE__*/React.createElement(Empty, {
+    text: "Finish workouts across 2+ weeks."
+  }) : /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 160
+  }, /*#__PURE__*/React.createElement(BarChart, {
+    data: volData,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -10,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "week",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    }
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    }
+  }), /*#__PURE__*/React.createElement(Tooltip, ttStyle), /*#__PURE__*/React.createElement(Bar, {
+    dataKey: "volume",
+    fill: C.gold,
+    radius: [4, 4, 0, 0]
+  })))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Bodyweight & Composition",
+    sub: "Add body fat % too (from your scale) — lean mass auto-calculates"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "flex-end",
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: bw.date,
+    onChange: e => setBw({
+      ...bw,
+      date: e.target.value
+    }),
+    style: inp(120)
+  }), /*#__PURE__*/React.createElement(MiniIn, {
+    value: bw.weight,
+    onChange: v => setBw({
+      ...bw,
+      weight: v
+    }),
+    suffix: "lb"
+  }), /*#__PURE__*/React.createElement(MiniIn, {
+    value: bw.bf,
+    onChange: v => setBw({
+      ...bw,
+      bf: v
+    }),
+    suffix: "%bf"
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addBw,
+    style: btnSm()
+  }, "+ Log")), Number(bw.weight) > 0 && Number(bw.bf) > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.dim,
+      marginBottom: 10
+    }
+  }, "→ lean ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.green
+    }
+  }, Math.round(bw.weight * (1 - bw.bf / 100)), " lb"), " · fat ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.red
+    }
+  }, Math.round(bw.weight * bw.bf / 100), " lb")), bwData.length >= 2 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "4px 0 2px"
+    }
+  }, "Bodyweight"), /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 150
+  }, /*#__PURE__*/React.createElement(LineChart, {
+    data: bwData,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -16,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    tickFormatter: d => d.slice(5)
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    domain: ["dataMin - 4", "dataMax + 4"]
+  }), /*#__PURE__*/React.createElement(Tooltip, ttStyle), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "weight",
+    stroke: C.gold,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    }
+  })))), compData.length >= 2 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "12px 0 2px"
+    }
+  }, "Composition · lean (green) vs fat (red)"), /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 160
+  }, /*#__PURE__*/React.createElement(LineChart, {
+    data: compData,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -16,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    tickFormatter: d => d.slice(5)
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    domain: ["dataMin - 6", "dataMax + 6"]
+  }), /*#__PURE__*/React.createElement(Tooltip, ttStyle), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "lean",
+    stroke: C.green,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    },
+    name: "Lean"
+  }), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "fat",
+    stroke: C.red,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    },
+    name: "Fat"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 6,
+      textAlign: "center"
+    }
+  }, "Lean flat while fat drops = recomp working.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, bwData.slice(-4).reverse().map(x => /*#__PURE__*/React.createElement("div", {
+    key: x.id,
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      padding: "6px 0",
+      fontSize: 13,
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      color: C.dim
+    }
+  }, x.date), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600
+    }
+  }, x.weight, " lb"), Number(x.bf) > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.gold,
+      fontSize: 12
+    }
+  }, x.bf, "%"), Number(x.bf) > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.green,
+      fontSize: 12
+    }
+  }, Math.round(x.weight * (1 - x.bf / 100)), " lean"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setBwLog(bwLog.filter(b => b.id !== x.id)),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.dim,
+      cursor: "pointer",
+      fontSize: 15
+    }
+  }, "×"))))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Cardio",
+    sub: "Mostly zone 2 — protect leg recovery"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "flex-end",
+      marginBottom: 10,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: cd.date,
+    onChange: e => setCd({
+      ...cd,
+      date: e.target.value
+    }),
+    style: inp(120)
+  }), /*#__PURE__*/React.createElement("select", {
+    value: cd.type,
+    onChange: e => setCd({
+      ...cd,
+      type: e.target.value
+    }),
+    style: inp(110)
+  }, ["Bike", "Incline Walk", "Run", "Rower", "Jump Rope", "Stairs", "Other"].map(t => /*#__PURE__*/React.createElement("option", {
+    key: t
+  }, t))), /*#__PURE__*/React.createElement(MiniIn, {
+    value: cd.minutes,
+    onChange: v => setCd({
+      ...cd,
+      minutes: v
+    }),
+    suffix: "min"
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addCd,
+    style: btnSm()
+  }, "+ Log")), cardioLog.slice(0, 4).map(x => /*#__PURE__*/React.createElement("div", {
+    key: x.id,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "5px 0",
+      fontSize: 13,
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1
+    }
+  }, x.type, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim,
+      fontSize: 11
+    }
+  }, " · ", x.date)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: C.gold
+    }
+  }, x.minutes, " min"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setCardioLog(cardioLog.filter(c => c.id !== x.id)),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.dim,
+      cursor: "pointer"
+    }
+  }, "×")))));
+}
+
+/* ============ TOOLS ============ */
+function Tools({
+  mode,
+  plates,
+  bar,
+  roundLoad,
+  maxes
+}) {
+  const [conv, setConv] = useState({
+    weight: 315,
+    reps: 4
+  });
+  const [warm, setWarm] = useState({
+    target: 315
+  });
+  const e = epley(Number(conv.weight) || 0, Number(conv.reps) || 1);
+  const warmups = useMemo(() => {
+    const t = Number(warm.target) || 0;
+    if (!t) return [];
+    return [{
+      pct: "bar",
+      w: bar,
+      r: 10
+    }, {
+      pct: "40%",
+      w: roundLoad(t * 0.4),
+      r: 8
+    }, {
+      pct: "60%",
+      w: roundLoad(t * 0.6),
+      r: 5
+    }, {
+      pct: "75%",
+      w: roundLoad(t * 0.75),
+      r: 3
+    }, {
+      pct: "85%",
+      w: roundLoad(t * 0.85),
+      r: 2
+    }, {
+      pct: "92%",
+      w: roundLoad(t * 0.92),
+      r: 1
+    }].filter((x, i, arr) => i === 0 || x.w > arr[i - 1].w);
+  }, [warm, bar, roundLoad]);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Warm-Up Builder",
+    sub: "Enter your top-set weight — get the full ramp"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: C.dim
+    }
+  }, "Top set"), /*#__PURE__*/React.createElement(MiniIn, {
+    value: warm.target,
+    onChange: v => setWarm({
+      target: v
+    }),
+    suffix: "lb"
+  })), warmups.map((w, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      padding: "7px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.gold
+    }
+  }, w.pct), " × ", w.r), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700
+    }
+  }, w.w, " lb")), /*#__PURE__*/React.createElement(LoadChips, {
+    total: w.w,
+    bar: bar,
+    plates: plates
+  })))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Rep ⇄ Load Converter",
+    sub: "A set you hit → est. 1RM → loads at every rep target"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: conv.weight,
+    onChange: v => setConv({
+      ...conv,
+      weight: v
+    }),
+    suffix: "lb"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim
+    }
+  }, "×"), /*#__PURE__*/React.createElement(MiniIn, {
+    value: conv.reps,
+    onChange: v => setConv({
+      ...conv,
+      reps: v
+    }),
+    suffix: "reps"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      background: "rgba(225,29,42,.13)",
+      border: `1px solid ${C.red}`,
+      borderRadius: 8,
+      padding: "7px 10px",
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      color: C.dim
+    }
+  }, "EST. 1RM"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontWeight: 700
+    }
+  }, Math.round(e)))), [3, 5, 8, 10, 12].map(r => {
+    const w = roundLoad(wForReps(e, r));
+    return /*#__PURE__*/React.createElement("div", {
+      key: r,
+      style: {
+        padding: "7px 0",
+        borderBottom: `1px solid ${C.line}`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 13
+      }
+    }, /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: C.gold
+      }
+    }, r), " reps"), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 700
+      }
+    }, w, " lb")), /*#__PURE__*/React.createElement(LoadChips, {
+      total: w,
+      bar: bar,
+      plates: plates
+    }));
+  })), /*#__PURE__*/React.createElement(Panel, {
+    title: "Training Maxes",
+    sub: "90% of 1RM — what working sets calculate from"
+  }, LIFTS.map(l => /*#__PURE__*/React.createElement("div", {
+    key: l.key,
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      padding: "7px 0",
+      borderBottom: `1px solid ${C.line}`,
+      fontSize: 14
+    }
+  }, /*#__PURE__*/React.createElement("span", null, l.name), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.gold
+    }
+  }, Math.round(maxes[l.key] * 0.9)), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim,
+      fontSize: 11
+    }
+  }, "TM"), " · ", maxes[l.key], " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim,
+      fontSize: 11
+    }
+  }, "1RM"))))));
+}
+
+/* ============ SETTINGS ============ */
+function Settings({
+  maxes,
+  setMaxes,
+  plates,
+  setPlates,
+  bar,
+  setBar,
+  mode,
+  exportData,
+  importData,
+  sessions,
+  gender,
+  goal,
+  setGender,
+  setGoal
+}) {
+  const setGenderGoal = g => {
+    setGender(g);
+    setGoal(GENDER_DEFAULT_GOAL[g]);
+  };
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Profile",
+    sub: "Drives your generated workouts — change anytime"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Training as"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 14
+    }
+  }, [["women", "Women"], ["men", "Men"]].map(([g, l]) => /*#__PURE__*/React.createElement("button", {
+    key: g,
+    onClick: () => setGenderGoal(g),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "9px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 700,
+      background: gender === g ? C.red : C.panel2,
+      color: gender === g ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Goal"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, Object.entries(GOALS).map(([k, gg]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => setGoal(k),
+    style: {
+      textAlign: "left",
+      padding: "10px 12px",
+      borderRadius: 8,
+      cursor: "pointer",
+      background: goal === k ? "rgba(225,29,42,.13)" : C.panel2,
+      color: C.txt,
+      border: `1px solid ${goal === k ? C.red : C.line}`,
+      fontSize: 13.5,
+      fontWeight: goal === k ? 700 : 500
+    }
+  }, gg.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 10
+    }
+  }, "Location (Home / Gym) is the toggle up in the header.")), /*#__PURE__*/React.createElement(Panel, {
+    title: "Your Maxes",
+    sub: "Used to set target loads on heavy lifts — leave rough if you're new"
+  }, LIFTS.map(l => /*#__PURE__*/React.createElement("div", {
+    key: l.key,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14
+    }
+  }, l.name), /*#__PURE__*/React.createElement(MiniIn, {
+    value: maxes[l.key],
+    onChange: v => setMaxes({
+      ...maxes,
+      [l.key]: v
+    }),
+    suffix: "1RM"
+  })))), /*#__PURE__*/React.createElement(Panel, {
+    title: `Plate Inventory — ${mode === "gym" ? "Gym" : "Home"}`,
+    sub: "Editing the active location only — toggle in the header to edit the other"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14
+    }
+  }, "Bar weight"), /*#__PURE__*/React.createElement(MiniIn, {
+    value: bar,
+    onChange: setBar,
+    suffix: "lb"
+  })), plates.map((p, i) => /*#__PURE__*/React.createElement("div", {
+    key: p.weight,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14
+    }
+  }, p.weight, " lb ", p.weight <= 5 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.gold,
+      fontSize: 11
+    }
+  }, "(micro)")), /*#__PURE__*/React.createElement(MiniIn, {
+    value: p.count,
+    onChange: v => {
+      const np = [...plates];
+      np[i] = {
+        ...p,
+        count: v
+      };
+      setPlates(np);
+    },
+    suffix: "total"
+  })))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Backup & Restore",
+    sub: `${sessions.length} sessions in your log — export to keep them forever`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: exportData,
+    style: {
+      flex: 1,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.gold}`,
+      borderRadius: 10,
+      color: C.gold,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "↓ Export"), /*#__PURE__*/React.createElement("label", {
+    style: {
+      flex: 1,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.txt,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer",
+      textAlign: "center"
+    }
+  }, "↑ Import", /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    accept: ".json,application/json",
+    style: {
+      display: "none"
+    },
+    onChange: e => {
+      importData(e.target.files[0]);
+      e.target.value = "";
+    }
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      color: C.dim,
+      fontSize: 11,
+      lineHeight: 1.6
+    }
+  }, "IronDesk Pro · loads round to ", mode === "gym" ? "2.5" : "5", " lb in ", mode, " mode · Epley e1RM, best at 1–8 reps", /*#__PURE__*/React.createElement("br", null), "auto-saves everything · not medical advice"));
+}
+
+/* ============ CREW (connected) ============ */
+function Crew({
+  sessions,
+  maxes,
+  crewRef,
+  note
+}) {
+  const [user, setUser] = useState(undefined); // undefined = loading
+  const [grp, setGrp] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(CREW_KEY) || "null");
+    } catch (e) {
+      return null;
+    }
+  });
+  const [members, setMembers] = useState([]);
+  const [feed, setFeed] = useState([]);
+  const [form, setForm] = useState({
+    email: "",
+    pw: "",
+    name: "",
+    mode: "login"
+  });
+  const [grpForm, setGrpForm] = useState({
+    name: "",
+    code: ""
+  });
+  const [board, setBoard] = useState("bench");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!FB.ready) {
+      setUser(null);
+      return;
+    }
+    return FB.onAuth(setUser);
+  }, []);
+
+  // keep crewRef live for PR pushes from finished workouts
+  useEffect(() => {
+    crewRef.current = {
+      uid: user ? user.uid : null,
+      name: user ? user.displayName || "Lifter" : null,
+      groupId: grp ? grp.groupId : null
+    };
+  }, [user, grp, crewRef]);
+
+  // subscribe to group data + push our latest stats
+  useEffect(() => {
+    if (!FB.ready || !user || !grp) return;
+    const u1 = FB.watchMembers(grp.groupId, setMembers);
+    const u2 = FB.watchFeed(grp.groupId, setFeed);
+    FB.syncStats(grp.groupId, user.uid, Object.assign({
+      name: user.displayName || "Lifter"
+    }, computeStats(sessions, maxes))).catch(function () {});
+    return function () {
+      u1 && u1();
+      u2 && u2();
+    };
+  }, [user, grp, sessions, maxes]);
+  const saveGrp = g => {
+    setGrp(g);
+    try {
+      localStorage.setItem(CREW_KEY, JSON.stringify(g));
+    } catch (e) {}
+  };
+  const doAuth = () => {
+    setErr("");
+    setBusy(true);
+    const p = form.mode === "signup" ? FB.signUp(form.email.trim(), form.pw, form.name.trim() || "Lifter") : FB.signIn(form.email.trim(), form.pw);
+    p.then(function () {
+      setBusy(false);
+    }).catch(function (e) {
+      setErr(e.message || "Failed");
+      setBusy(false);
+    });
+  };
+  const doCreate = () => {
+    if (!grpForm.name.trim()) {
+      setErr("Name your group");
+      return;
+    }
+    setErr("");
+    setBusy(true);
+    FB.createGroup(user.uid, user.displayName || "Lifter", grpForm.name.trim()).then(function (g) {
+      saveGrp(g);
+      setBusy(false);
+      note("Group created");
+    }).catch(function (e) {
+      setErr(e.message);
+      setBusy(false);
+    });
+  };
+  const doJoin = () => {
+    if (!grpForm.code.trim()) {
+      setErr("Enter a code");
+      return;
+    }
+    setErr("");
+    setBusy(true);
+    FB.joinGroup(user.uid, user.displayName || "Lifter", grpForm.code.trim()).then(function (g) {
+      saveGrp(g);
+      setBusy(false);
+      note("Joined!");
+    }).catch(function (e) {
+      setErr(e.message);
+      setBusy(false);
+    });
+  };
+  if (!FB.ready) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      title: "Crew",
+      sub: "Connected features"
+    }, /*#__PURE__*/React.createElement(Empty, {
+      text: "Crew features run in the installed app on your phone, not this preview. Open IronDesk from your home screen to log in and connect with your group."
+    }));
+  }
+  if (user === undefined) return /*#__PURE__*/React.createElement(Panel, {
+    title: "Crew",
+    sub: "Connecting…"
+  }, /*#__PURE__*/React.createElement(Empty, {
+    text: "Loading…"
+  }));
+
+  // --- not logged in ---
+  if (!user) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      title: form.mode === "signup" ? "Create Account" : "Log In",
+      sub: "Connect with your crew — your workout data stays private to you"
+    }, form.mode === "signup" && /*#__PURE__*/React.createElement(Field, {
+      label: "Display name"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: form.name,
+      onChange: e => setForm({
+        ...form,
+        name: e.target.value
+      }),
+      placeholder: "How you show up",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Email"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: form.email,
+      onChange: e => setForm({
+        ...form,
+        email: e.target.value
+      }),
+      autoCapitalize: "none",
+      style: inp("100%")
+    }))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Password"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "password",
+      value: form.pw,
+      onChange: e => setForm({
+        ...form,
+        pw: e.target.value
+      }),
+      style: inp("100%")
+    }))), err && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: C.red,
+        fontSize: 12,
+        marginTop: 8
+      }
+    }, err), /*#__PURE__*/React.createElement("button", {
+      onClick: doAuth,
+      disabled: busy,
+      style: {
+        width: "100%",
+        marginTop: 14,
+        padding: "13px",
+        background: C.red,
+        border: "none",
+        borderRadius: 10,
+        color: "#fff",
+        fontFamily: "'Oswald'",
+        fontSize: 14,
+        fontWeight: 700,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        cursor: "pointer",
+        opacity: busy ? 0.6 : 1
+      }
+    }, busy ? "…" : form.mode === "signup" ? "Create Account" : "Log In"), /*#__PURE__*/React.createElement("div", {
+      onClick: () => {
+        setForm({
+          ...form,
+          mode: form.mode === "signup" ? "login" : "signup"
+        });
+        setErr("");
+      },
+      style: {
+        textAlign: "center",
+        color: C.dim,
+        fontSize: 12.5,
+        marginTop: 12,
+        cursor: "pointer"
+      }
+    }, form.mode === "signup" ? "Have an account? Log in" : "New here? Create an account"));
+  }
+
+  // --- logged in, no group ---
+  if (!grp) {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+      title: `Hey, ${user.displayName || "Lifter"}`,
+      sub: "Create a group or join one with a code"
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Create a new group"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: grpForm.name,
+      onChange: e => setGrpForm({
+        ...grpForm,
+        name: e.target.value
+      }),
+      placeholder: "e.g. HighBetaCowboys",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("button", {
+      onClick: doCreate,
+      disabled: busy,
+      style: btnFull(C.red)
+    }, "Create Group"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "center",
+        color: C.dim,
+        fontSize: 12,
+        margin: "14px 0"
+      }
+    }, "— or —"), /*#__PURE__*/React.createElement(Field, {
+      label: "Join with a code"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: grpForm.code,
+      onChange: e => setGrpForm({
+        ...grpForm,
+        code: e.target.value
+      }),
+      autoCapitalize: "characters",
+      placeholder: "6-char code",
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("button", {
+      onClick: doJoin,
+      disabled: busy,
+      style: btnFull(C.panel2, C.gold)
+    }, "Join Group"), err && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: C.red,
+        fontSize: 12,
+        marginTop: 10
+      }
+    }, err)), /*#__PURE__*/React.createElement("button", {
+      onClick: () => FB.signOut(),
+      style: {
+        width: "100%",
+        padding: "11px",
+        background: "none",
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        color: C.dim,
+        fontSize: 12.5,
+        cursor: "pointer"
+      }
+    }, "Sign out"));
+  }
+
+  // --- logged in, in a group ---
+  const sorted = [...members].sort((a, b) => (b[board] || 0) - (a[board] || 0));
+  const byVol = [...members].sort((a, b) => (b.weekVolume || 0) - (a.weekVolume || 0));
+  const bySess = [...members].sort((a, b) => (b.weekSessions || 0) - (a.weekSessions || 0));
+  const lifters = members.length;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: grp.name,
+    sub: `${lifters} member${lifters !== 1 ? "s" : ""} · share code to add your crew`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      background: C.panel2,
+      border: `1px dashed ${C.gold}`,
+      borderRadius: 10,
+      padding: "10px 14px",
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      color: C.dim,
+      letterSpacing: 1
+    }
+  }, "JOIN CODE"), /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 22,
+      fontWeight: 700,
+      color: C.gold,
+      letterSpacing: 3
+    }
+  }, grp.code)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(grp.code);
+      note("Code copied");
+    },
+    style: {
+      padding: "10px 12px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.txt,
+      fontSize: 12,
+      cursor: "pointer"
+    }
+  }, "Copy"))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Leaderboard",
+    sub: "Best estimated 1RM in the crew"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12,
+      flexWrap: "wrap"
+    }
+  }, LIFTS.map(l => /*#__PURE__*/React.createElement("button", {
+    key: l.key,
+    onClick: () => setBoard(l.key),
+    style: {
+      background: board === l.key ? LIFT_COLORS[l.key] : C.panel2,
+      color: board === l.key ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`,
+      borderRadius: 6,
+      padding: "5px 10px",
+      fontSize: 12,
+      cursor: "pointer",
+      fontWeight: 600
+    }
+  }, l.name))), sorted.length === 0 && /*#__PURE__*/React.createElement(Empty, {
+    text: "No members yet."
+  }), sorted.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "9px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 24,
+      fontSize: 16,
+      fontWeight: 700,
+      color: i === 0 ? C.gold : i === 1 ? "#bbb" : i === 2 ? "#c87" : C.dim
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: m.uid === user.uid ? 700 : 500,
+      color: m.uid === user.uid ? C.txt : C.txt
+    }
+  }, m.name, m.uid === user.uid ? " (you)" : ""), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: LIFT_COLORS[board]
+    }
+  }, m[board] || 0, " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, "lb"))))), /*#__PURE__*/React.createElement(Panel, {
+    title: "PR Feed",
+    sub: "Live — every personal record in the crew"
+  }, feed.length === 0 && /*#__PURE__*/React.createElement(Empty, {
+    text: "No PRs yet. Finish a workout that beats a best to post one."
+  }), feed.map(f => /*#__PURE__*/React.createElement("div", {
+    key: f.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "8px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 16
+    }
+  }, "🏆"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5
+    }
+  }, /*#__PURE__*/React.createElement("b", null, f.name), " — ", f.ex), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, new Date(f.ts).toLocaleDateString(), " ")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: C.green
+    }
+  }, f.e1rm, " lb")))), /*#__PURE__*/React.createElement(Panel, {
+    title: "This Week's Challenge",
+    sub: "Resets as the week rolls — most work wins"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4
+    }
+  }, "Most Volume (lb)"), byVol.slice(0, 3).map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "5px 0",
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 18,
+      color: i === 0 ? C.gold : C.dim,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1
+    }
+  }, m.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: C.gold
+    }
+  }, (m.weekVolume || 0).toLocaleString())))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4
+    }
+  }, "Most Sessions"), bySess.slice(0, 3).map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: m.uid,
+    style: {
+      display: "flex",
+      gap: 10,
+      padding: "5px 0",
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 18,
+      color: i === 0 ? C.gold : C.dim,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1
+    }
+  }, m.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600,
+      color: C.green
+    }
+  }, m.weekSessions || 0))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      saveGrp(null);
+      try {
+        localStorage.removeItem(CREW_KEY);
+      } catch (e) {}
+      note("Left group");
+    },
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: "none",
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, "Leave group"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      FB.signOut();
+      saveGrp(null);
+    },
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: "none",
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, "Sign out")));
+}
+
+/* ============ STOPWATCH ============ */
+function Stopwatch() {
+  const [ms, setMs] = useState(0);
+  const [running, setRunning] = useState(false);
+  const ref = useRef(null);
+  const startRef = useRef(0);
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - ms;
+      ref.current = setInterval(() => setMs(Date.now() - startRef.current), 100);
+    }
+    return () => clearInterval(ref.current);
+    /* eslint-disable-next-line */
+  }, [running]);
+  const fmt = m => {
+    const s = Math.floor(m / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}.${Math.floor(m % 1000 / 100)}`;
+  };
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: "Stopwatch",
+    sub: "No watch? Time your sets, rest, or holds"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 46,
+      fontWeight: 700,
+      color: running ? C.green : C.txt,
+      letterSpacing: 2
+    }
+  }, fmt(ms)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setRunning(!running),
+    style: {
+      flex: 2,
+      padding: "13px",
+      background: running ? C.gold : C.green,
+      border: "none",
+      borderRadius: 10,
+      color: "#111",
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 14,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      cursor: "pointer"
+    }
+  }, running ? "Pause" : "Start"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setRunning(false);
+      setMs(0);
+    },
+    style: {
+      flex: 1,
+      padding: "13px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontWeight: 600,
+      fontSize: 13,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Reset"))));
+}
+
+/* ============ CARDIO TRACKER (rides / runs / steps) ============ */
+function CardioQuickLog({
+  cardioLog,
+  setCardioLog,
+  note
+}) {
+  const [type, setType] = useState("ride");
+  const [form, setForm] = useState({
+    date: today(),
+    minutes: "",
+    miles: "",
+    steps: ""
+  });
+  const add = () => {
+    const e = {
+      id: uid(),
+      date: form.date,
+      type
+    };
+    if (type === "steps") {
+      if (!Number(form.steps)) {
+        note("Enter steps");
+        return;
+      }
+      e.steps = Number(form.steps);
+    } else {
+      if (!Number(form.minutes) && !Number(form.miles)) {
+        note("Enter minutes or miles");
+        return;
+      }
+      e.minutes = Number(form.minutes) || 0;
+      e.miles = Number(form.miles) || 0;
+    }
+    setCardioLog([e, ...(cardioLog || [])]);
+    setForm({
+      date: form.date,
+      minutes: "",
+      miles: "",
+      steps: ""
+    });
+    note("Cardio logged");
+  };
+  const metric = type === "steps" ? "steps" : "miles";
+  const data = useMemo(() => (cardioLog || []).filter(x => x.type === type).slice().reverse().slice(-14).map(x => ({
+    date: x.date,
+    v: type === "steps" ? x.steps || 0 : x.miles || 0
+  })), [cardioLog, type]);
+  const cut = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const wk = (cardioLog || []).filter(x => x.type === type && x.date >= cut);
+  const wkMiles = wk.reduce((a, x) => a + (x.miles || 0), 0);
+  const wkMin = wk.reduce((a, x) => a + (x.minutes || 0), 0);
+  const wkSteps = wk.reduce((a, x) => a + (x.steps || 0), 0);
+  const tt = {
+    contentStyle: {
+      background: C.panel,
+      border: `1px solid ${C.line}`,
+      borderRadius: 8,
+      fontSize: 12
+    },
+    labelStyle: {
+      color: C.dim
+    }
+  };
+  const color = type === "ride" ? C.blue : type === "run" ? C.red : C.gold;
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: "Cardio Tracker",
+    sub: "Log rides, runs & steps — trend shown below"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12
+    }
+  }, [["ride", "Ride"], ["run", "Run"], ["steps", "Steps"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    onClick: () => setType(k),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "8px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      background: type === k ? color : C.panel2,
+      color: type === k ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "flex-end",
+      flexWrap: "wrap",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: form.date,
+    onChange: e => setForm({
+      ...form,
+      date: e.target.value
+    }),
+    style: inp(120)
+  }), type === "steps" ? /*#__PURE__*/React.createElement(MiniIn, {
+    value: form.steps,
+    onChange: v => setForm({
+      ...form,
+      steps: v
+    }),
+    suffix: "steps"
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MiniIn, {
+    value: form.minutes,
+    onChange: v => setForm({
+      ...form,
+      minutes: v
+    }),
+    suffix: "min"
+  }), /*#__PURE__*/React.createElement(MiniIn, {
+    value: form.miles,
+    onChange: v => setForm({
+      ...form,
+      miles: v
+    }),
+    suffix: "mi"
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: add,
+    style: btnSm()
+  }, "+ Log")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 12
+    }
+  }, type === "steps" ? /*#__PURE__*/React.createElement(Stat, {
+    label: "Steps this wk",
+    value: wkSteps.toLocaleString(),
+    color: color
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Stat, {
+    label: "Miles this wk",
+    value: wkMiles.toFixed(1),
+    color: color
+  }), /*#__PURE__*/React.createElement(Stat, {
+    label: "Minutes this wk",
+    value: wkMin,
+    color: C.green
+  })), /*#__PURE__*/React.createElement(Stat, {
+    label: "Sessions",
+    value: wk.length,
+    color: C.dim
+  })), data.length < 2 ? /*#__PURE__*/React.createElement(Empty, {
+    text: `Log 2+ ${type === "steps" ? "step days" : type + "s"} to see the trend.`
+  }) : /*#__PURE__*/React.createElement(ResponsiveContainer, {
+    width: "100%",
+    height: 160
+  }, /*#__PURE__*/React.createElement(LineChart, {
+    data: data,
+    margin: {
+      top: 6,
+      right: 8,
+      left: -8,
+      bottom: 0
+    }
+  }, /*#__PURE__*/React.createElement(CartesianGrid, {
+    stroke: C.line,
+    strokeDasharray: "2 4"
+  }), /*#__PURE__*/React.createElement(XAxis, {
+    dataKey: "date",
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    },
+    tickFormatter: d => d.slice(5)
+  }), /*#__PURE__*/React.createElement(YAxis, {
+    tick: {
+      fill: C.dim,
+      fontSize: 10
+    }
+  }), /*#__PURE__*/React.createElement(Tooltip, tt), /*#__PURE__*/React.createElement(Line, {
+    type: "monotone",
+    dataKey: "v",
+    name: metric,
+    stroke: color,
+    strokeWidth: 2.5,
+    dot: {
+      r: 3
+    }
+  }))));
+}
+
+/* ============ CORE / ABDOMINAL ============ */
+const CORE_MOVES = [{
+  n: "Hanging Leg Raise",
+  unit: "reps",
+  amt: 12
+}, {
+  n: "Weighted Sit-Up",
+  unit: "reps",
+  amt: 15
+}, {
+  n: "Air Bike",
+  unit: "reps",
+  amt: 20
+}, {
+  n: "Russian Twist",
+  unit: "reps",
+  amt: 30
+}, {
+  n: "Plank",
+  unit: "sec",
+  amt: 45
+}, {
+  n: "Side Plank (each)",
+  unit: "sec",
+  amt: 30
+}, {
+  n: "Cable Crunch",
+  unit: "reps",
+  amt: 15
+}, {
+  n: "Cable Woodchop (each)",
+  unit: "reps",
+  amt: 12
+}, {
+  n: "Side Crunch (each)",
+  unit: "reps",
+  amt: 15
+}, {
+  n: "Ab Wheel Rollout",
+  unit: "reps",
+  amt: 10
+}, {
+  n: "Hollow Body Hold",
+  unit: "sec",
+  amt: 30
+}, {
+  n: "Flutter Kicks",
+  unit: "sec",
+  amt: 30
+}, {
+  n: "V-Up",
+  unit: "reps",
+  amt: 12
+}, {
+  n: "Mountain Climbers",
+  unit: "sec",
+  amt: 40
+}, {
+  n: "Dead Bug (each)",
+  unit: "reps",
+  amt: 10
+}, {
+  n: "Reverse Crunch",
+  unit: "reps",
+  amt: 15
+}];
+function CoreTab({
+  mode,
+  note
+}) {
+  const [size, setSize] = useState(5);
+  const [rounds, setRounds] = useState(3);
+  const [seed, setSeed] = useState(1);
+  const circuit = useMemo(() => {
+    const out = [];
+    const used = {};
+    let i = seed * 3;
+    while (out.length < size && Object.keys(used).length < CORE_MOVES.length) {
+      const m = CORE_MOVES[i % CORE_MOVES.length];
+      i++;
+      if (!used[m.n]) {
+        used[m.n] = true;
+        out.push(m);
+      }
+    }
+    return out;
+  }, [size, seed]);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Core & Abs",
+    sub: "Build a circuit — do it for the round count, rest 30–45s between rounds"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Circuit length"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12
+    }
+  }, [["Quick", 3], ["Standard", 5], ["Burner", 7]].map(([l, n]) => /*#__PURE__*/React.createElement("button", {
+    key: n,
+    onClick: () => setSize(n),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "9px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      background: size === n ? C.gold : C.panel2,
+      color: size === n ? "#111" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      display: "block",
+      opacity: 0.7
+    }
+  }, n, " moves")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      alignItems: "flex-end",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Rounds"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: rounds,
+    onChange: v => setRounds(v)
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSeed(seed + 1),
+    style: {
+      flex: 1,
+      padding: "11px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.txt,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 700,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "↻ New Circuit"))), /*#__PURE__*/React.createElement(Panel, {
+    title: `Your Circuit · ${rounds} rounds`,
+    sub: "Weighted where it makes sense; bodyweight otherwise"
+  }, circuit.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "11px 0",
+      borderBottom: i < circuit.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      width: 22,
+      color: C.gold,
+      fontWeight: 700
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: 600
+    }
+  }, m.n), /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      color: C.green
+    }
+  }, m.amt, " ", m.unit)))), /*#__PURE__*/React.createElement(Stopwatch, null));
+}
+
+/* ============ HIIT (cardio machine intervals) ============ */
+const HIIT_PROTOCOLS = [{
+  id: "tabata",
+  name: "Tabata",
+  work: 20,
+  rest: 10,
+  rounds: 8,
+  note: "All-out efforts, classic fat-burner."
+}, {
+  id: "3030",
+  name: "30 / 30",
+  work: 30,
+  rest: 30,
+  rounds: 10,
+  note: "Balanced work-to-rest, very sustainable."
+}, {
+  id: "4020",
+  name: "40 / 20",
+  work: 40,
+  rest: 20,
+  rounds: 8,
+  note: "Longer pushes, shorter recovery."
+}, {
+  id: "6060",
+  name: "60 / 60",
+  work: 60,
+  rest: 60,
+  rounds: 8,
+  note: "Threshold intervals, big engine builder."
+}, {
+  id: "sprint",
+  name: "Sprint 15/45",
+  work: 15,
+  rest: 45,
+  rounds: 10,
+  note: "Max sprints, full recovery — power."
+}];
+const MACHINES = ["Bike", "Treadmill", "Rower", "Elliptical", "Stair"];
+function HiitTab({
+  note
+}) {
+  const [machine, setMachine] = useState("Bike");
+  const [proto, setProto] = useState(HIIT_PROTOCOLS[1]);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "HIIT — Cardio Machine",
+    sub: "Pick a machine and a protocol, then run the interval timer"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Machine"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 14
+    }
+  }, MACHINES.map(m => /*#__PURE__*/React.createElement("button", {
+    key: m,
+    onClick: () => setMachine(m),
+    className: "ttl",
+    style: {
+      padding: "8px 12px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      background: machine === m ? C.blue : C.panel2,
+      color: machine === m ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, m))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Protocol"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, HIIT_PROTOCOLS.map(p => /*#__PURE__*/React.createElement("button", {
+    key: p.id,
+    onClick: () => setProto(p),
+    style: {
+      textAlign: "left",
+      padding: "11px 12px",
+      borderRadius: 8,
+      cursor: "pointer",
+      background: proto.id === p.id ? "rgba(79,209,255,.12)" : C.panel2,
+      border: `1px solid ${proto.id === p.id ? C.blue : C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 14,
+      fontWeight: 700
+    }
+  }, p.name), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: C.gold,
+      fontWeight: 700
+    }
+  }, p.work, "s / ", p.rest, "s × ", p.rounds)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 2
+    }
+  }, p.note, " · ~", Math.round((p.work + p.rest) * p.rounds / 60), " min"))))), /*#__PURE__*/React.createElement(IntervalTimer, {
+    key: proto.id,
+    proto: proto,
+    machine: machine,
+    note: note
+  }));
+}
+function IntervalTimer({
+  proto,
+  machine,
+  note
+}) {
+  const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState("ready"); // ready | work | rest | done
+  const [round, setRound] = useState(1);
+  const [left, setLeft] = useState(proto.work);
+  const ref = useRef(null);
+  const beep = freq => {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.frequency.value = freq;
+      o.type = "sine";
+      g.gain.setValueAtTime(0.25, ctx.currentTime);
+      o.start();
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      o.stop(ctx.currentTime + 0.25);
+    } catch (e) {}
+  };
+  useEffect(() => {
+    if (!running) return;
+    ref.current = setInterval(() => {
+      setLeft(l => {
+        if (l > 1) {
+          if (l <= 4) beep(600);
+          return l - 1;
+        }
+        // phase transition
+        setPhase(ph => {
+          if (ph === "work") {
+            if (round >= proto.rounds) {
+              beep(300);
+              setRunning(false);
+              return "done";
+            }
+            beep(440);
+            return "rest";
+          } else {
+            setRound(r => r + 1);
+            beep(880);
+            return "work";
+          }
+        });
+        return -1; // will be corrected by the phase effect below
+      });
+    }, 1000);
+    return () => clearInterval(ref.current);
+    /* eslint-disable-next-line */
+  }, [running, round]);
+  // when phase changes, reset the seconds for the new phase
+  useEffect(() => {
+    if (phase === "work") setLeft(proto.work);else if (phase === "rest") setLeft(proto.rest);else if (phase === "done") {
+      note && note("HIIT complete! 🔥");
+    }
+    /* eslint-disable-next-line */
+  }, [phase]);
+  const startStop = () => {
+    if (phase === "ready" || phase === "done") {
+      setPhase("work");
+      setRound(1);
+      setLeft(proto.work);
+      setRunning(true);
+      beep(880);
+    } else setRunning(!running);
+  };
+  const reset = () => {
+    setRunning(false);
+    setPhase("ready");
+    setRound(1);
+    setLeft(proto.work);
+    if (ref.current) clearInterval(ref.current);
+  };
+  const bg = phase === "work" ? C.red : phase === "rest" ? C.blue : phase === "done" ? C.green : C.panel2;
+  const label = phase === "work" ? "WORK" : phase === "rest" ? "REST" : phase === "done" ? "DONE" : "READY";
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: `${machine} · ${proto.name}`,
+    sub: `${proto.work}s work / ${proto.rest}s rest × ${proto.rounds} rounds`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: bg,
+      borderRadius: 14,
+      padding: "22px 16px",
+      textAlign: "center",
+      transition: "background .3s"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      color: "#fff",
+      letterSpacing: 3
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 60,
+      fontWeight: 700,
+      color: "#fff",
+      lineHeight: 1.1
+    }
+  }, Math.max(0, left)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: "rgba(255,255,255,.85)"
+    }
+  }, "Round ", Math.min(round, proto.rounds), " of ", proto.rounds)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: startStop,
+    style: {
+      flex: 2,
+      padding: "13px",
+      background: running ? C.gold : C.green,
+      border: "none",
+      borderRadius: 10,
+      color: "#111",
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 14,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      cursor: "pointer"
+    }
+  }, running ? "Pause" : phase === "ready" || phase === "done" ? "Start" : "Resume"), /*#__PURE__*/React.createElement("button", {
+    onClick: reset,
+    style: {
+      flex: 1,
+      padding: "13px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontWeight: 600,
+      fontSize: 13,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Reset")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim,
+      marginTop: 10,
+      textAlign: "center"
+    }
+  }, "Beeps on the last 3 seconds and at every switch. Keep your phone unlocked for sound."));
+}
+
+/* ============ PLAN BUILDER (5 questions) ============ */
+const EST_MAXES = {
+  new: {
+    bench: 95,
+    squat: 135,
+    ohp: 65,
+    deadlift: 155
+  },
+  some: {
+    bench: 155,
+    squat: 205,
+    ohp: 95,
+    deadlift: 245
+  },
+  experienced: {
+    bench: 225,
+    squat: 315,
+    ohp: 135,
+    deadlift: 335
+  },
+  advanced: {
+    bench: 305,
+    squat: 405,
+    ohp: 175,
+    deadlift: 455
+  }
+};
+function PlanBuilder({
+  setMaxes,
+  setGoal,
+  setGender,
+  setStyleOverride,
+  setOnboarded,
+  done,
+  note
+}) {
+  const [step, setStep] = useState(0);
+  const [a, setA] = useState({
+    exp: "some",
+    goal: "vtaper",
+    gender: "men",
+    style: "hypertrophy",
+    knows: "estimate",
+    maxes: {
+      bench: "",
+      squat: "",
+      ohp: "",
+      deadlift: ""
+    }
+  });
+  const Q = [{
+    key: "exp",
+    title: "How much lifting experience do you have?",
+    opts: [["new", "New — just starting"], ["some", "Some — a few months in"], ["experienced", "Experienced — a few years"], ["advanced", "Advanced — many years"]]
+  }, {
+    key: "gender",
+    title: "Who's this plan for?",
+    opts: [["women", "Women"], ["men", "Men"]]
+  }, {
+    key: "goal",
+    title: "What's your main goal?",
+    opts: [["vtaper", "Build muscle · V-taper"], ["glutes", "Glutes & legs"], ["tone", "Tone & sculpt"], ["strength", "Get stronger"], ["recomp", "Lean out · recomp"]]
+  }, {
+    key: "style",
+    title: "How do you like to train?",
+    opts: [["strength", "Heavy — low reps, long rests"], ["hypertrophy", "Balanced — moderate reps"], ["tone", "Light — high reps, short rests"]]
+  }, {
+    key: "knows",
+    title: "Your starting weights",
+    opts: [["estimate", "Estimate for me — I'm not sure"], ["enter", "I'll enter my own"]]
+  }];
+  const finish = () => {
+    setGender(a.gender);
+    setGoal(a.goal);
+    setStyleOverride(a.style);
+    if (a.knows === "enter") {
+      const m = {};
+      ["bench", "squat", "ohp", "deadlift"].forEach(k => {
+        m[k] = Number(a.maxes[k]) || EST_MAXES[a.exp][k];
+      });
+      setMaxes(m);
+    } else setMaxes({
+      ...EST_MAXES[a.exp]
+    });
+    setOnboarded(true);
+    note("Your plan is ready!");
+    done();
+  };
+  const cur = Q[step];
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: `Build My Plan · ${step + 1}/5`,
+    sub: "Quick questions — this sets everything to your level"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 14
+    }
+  }, cur.title), cur.key !== "knows" || true ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    }
+  }, cur.opts.map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setA({
+      ...a,
+      [cur.key]: v
+    }),
+    style: {
+      textAlign: "left",
+      padding: "12px 14px",
+      borderRadius: 10,
+      cursor: "pointer",
+      background: a[cur.key] === v ? "rgba(225,29,42,.14)" : C.panel2,
+      border: `1px solid ${a[cur.key] === v ? C.red : C.line}`,
+      color: C.txt,
+      fontSize: 14,
+      fontWeight: a[cur.key] === v ? 700 : 500
+    }
+  }, l))) : null, cur.key === "knows" && a.knows === "enter" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 8
+    }
+  }, [["bench", "Bench"], ["squat", "Squat"], ["ohp", "Overhead Press"], ["deadlift", "Deadlift"]].map(([k, l]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13
+    }
+  }, l), /*#__PURE__*/React.createElement(MiniIn, {
+    value: a.maxes[k],
+    onChange: v => setA({
+      ...a,
+      maxes: {
+        ...a.maxes,
+        [k]: v
+      }
+    }),
+    suffix: "1RM"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, "Leave any blank and I'll estimate it from your experience.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      marginTop: 16
+    }
+  }, step > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setStep(step - 1),
+    style: {
+      flex: 1,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontWeight: 600,
+      fontSize: 12.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "‹ Back"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => step < 4 ? setStep(step + 1) : finish(),
+    style: {
+      flex: 2,
+      padding: "12px",
+      background: C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 13,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, step < 4 ? "Next ›" : "Build My Plan ✓")), /*#__PURE__*/React.createElement("button", {
+    onClick: done,
+    style: {
+      width: "100%",
+      marginTop: 10,
+      background: "none",
+      border: "none",
+      color: C.dim,
+      fontSize: 12,
+      cursor: "pointer"
+    }
+  }, "Cancel"));
+}
+
+/* ============ CUSTOM WORKOUT BUILDER ============ */
+function CustomBuilder({
+  mode,
+  customDays,
+  setCustomDays,
+  startCustom,
+  done,
+  note
+}) {
+  const groups = Object.keys(LIB);
+  const [name, setName] = useState("");
+  const [rows, setRows] = useState([]);
+  const [grp, setGrp] = useState(groups[0]);
+  const [ex, setEx] = useState("");
+  const [sets, setSets] = useState(3);
+  const [reps, setReps] = useState(10);
+  const poolNames = poolFor(grp, mode).map(x => x.n);
+  const addRow = () => {
+    const name2 = ex || poolNames[0];
+    if (!name2) return;
+    setRows([...rows, {
+      ex: name2,
+      sets: Number(sets) || 3,
+      reps: Number(reps) || 10,
+      role: grp === "Core" ? "ab" : "acc"
+    }]);
+    setEx("");
+  };
+  const save = run => {
+    if (!rows.length) {
+      note("Add at least one exercise");
+      return;
+    }
+    const cd = {
+      id: uid(),
+      name: name.trim() || "My Workout",
+      rows
+    };
+    setCustomDays([cd, ...(customDays || [])]);
+    note("Saved");
+    if (run) startCustom(cd);
+    done();
+  };
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: "Build Your Own",
+    sub: "Pick exercises, sets and reps — make the workout you want"
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Workout name"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "e.g. My Push Day",
+    style: inp("100%")
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      background: C.panel2,
+      borderRadius: 10,
+      padding: 12,
+      border: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 6
+    }
+  }, "Add an exercise"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("select", {
+    value: grp,
+    onChange: e => {
+      setGrp(e.target.value);
+      setEx("");
+    },
+    style: {
+      ...inp("40%"),
+      padding: "9px 8px"
+    }
+  }, groups.map(g => /*#__PURE__*/React.createElement("option", {
+    key: g,
+    value: g
+  }, g))), /*#__PURE__*/React.createElement("select", {
+    value: ex,
+    onChange: e => setEx(e.target.value),
+    style: {
+      ...inp("60%"),
+      padding: "9px 8px"
+    }
+  }, poolNames.map(n => /*#__PURE__*/React.createElement("option", {
+    key: n,
+    value: n
+  }, n)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: sets,
+    onChange: setSets,
+    suffix: "sets"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim
+    }
+  }, "×"), /*#__PURE__*/React.createElement(MiniIn, {
+    value: reps,
+    onChange: setReps,
+    suffix: "reps"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addRow,
+    style: btnSm()
+  }, "+ Add"))), rows.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, rows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "8px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: 600
+    }
+  }, r.ex), /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      fontSize: 13,
+      color: C.gold,
+      fontWeight: 700
+    }
+  }, r.sets, "×", r.reps), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setRows(rows.filter((_, j) => j !== i)),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.dim,
+      cursor: "pointer",
+      fontSize: 16
+    }
+  }, "×")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: done,
+    style: {
+      flex: 1,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontFamily: "'Oswald'",
+      fontWeight: 600,
+      fontSize: 12.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => save(false),
+    style: {
+      flex: 1,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.gold}`,
+      borderRadius: 10,
+      color: C.gold,
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 12.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => save(true),
+    style: {
+      flex: 1.4,
+      padding: "12px",
+      background: C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 12.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "Save & Start")));
+}
+
+/* ============ MACROS / NUTRITION ============ */
+const ACTIVITY = [["sed", "Sedentary", 1.2], ["light", "Lightly active", 1.375], ["mod", "Moderately active", 1.55], ["very", "Very active", 1.725], ["ath", "Athlete", 1.9]];
+function MacrosTab({
+  macros,
+  setMacros
+}) {
+  const [f, setF] = useState(macros || {
+    sex: "male",
+    age: 30,
+    ft: 6,
+    in: 3,
+    weight: 242,
+    goalWeight: 225,
+    activity: "mod",
+    pace: 1
+  });
+  const kg = f.weight * 0.4536;
+  const cm = ((Number(f.ft) || 0) * 12 + (Number(f.in) || 0)) * 2.54;
+  const bmr = f.sex === "male" ? 10 * kg + 6.25 * cm - 5 * f.age + 5 : 10 * kg + 6.25 * cm - 5 * f.age - 161;
+  const actF = (ACTIVITY.find(x => x[0] === f.activity) || ACTIVITY[2])[2];
+  const tdee = bmr * actF;
+  const dir = f.goalWeight < f.weight ? -1 : f.goalWeight > f.weight ? 1 : 0;
+  const rate = Number(f.pace) || 1; // lb/week
+  let cals = Math.round(tdee + dir * rate * 500);
+  const floor = Math.round(bmr * 1.0);
+  if (cals < floor) cals = floor; // don't prescribe below BMR
+  const proteinG = Math.round(Math.max(f.goalWeight, f.weight * 0.9)); // ~1g per lb of goal bodyweight
+  const fatG = Math.round(cals * 0.27 / 9);
+  const carbG = Math.max(0, Math.round((cals - proteinG * 4 - fatG * 9) / 4));
+  const weeks = dir === 0 ? 0 : Math.ceil(Math.abs(f.weight - f.goalWeight) / rate);
+  const save = () => setMacros(f);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: "Macro & Protein Calculator",
+    sub: "Estimates your daily targets to reach a goal weight"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 12
+    }
+  }, [["male", "Male"], ["female", "Female"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setF({
+      ...f,
+      sex: v
+    }),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "9px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 700,
+      background: f.sex === v ? C.red : C.panel2,
+      color: f.sex === v ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Age"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: f.age,
+    onChange: v => setF({
+      ...f,
+      age: v
+    })
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Height ft"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: f.ft,
+    onChange: v => setF({
+      ...f,
+      ft: v
+    })
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Height in"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: f.in,
+    onChange: v => setF({
+      ...f,
+      in: v
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Weight"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: f.weight,
+    onChange: v => setF({
+      ...f,
+      weight: v
+    }),
+    suffix: "lb"
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Goal weight"
+  }, /*#__PURE__*/React.createElement(MiniIn, {
+    value: f.goalWeight,
+    onChange: v => setF({
+      ...f,
+      goalWeight: v
+    }),
+    suffix: "lb"
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "6px 0"
+    }
+  }, "Activity"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 5,
+      flexWrap: "wrap",
+      marginBottom: 10
+    }
+  }, ACTIVITY.map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setF({
+      ...f,
+      activity: v
+    }),
+    style: {
+      padding: "7px 10px",
+      borderRadius: 7,
+      cursor: "pointer",
+      fontSize: 11.5,
+      fontWeight: 600,
+      background: f.activity === v ? C.blue : C.panel2,
+      color: f.activity === v ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l))), dir !== 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      margin: "6px 0"
+    }
+  }, "Pace (", dir < 0 ? "lose" : "gain", ")"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, [[0.5, "Slow ·0.5/wk"], [1, "Moderate ·1/wk"], [1.5, "Fast ·1.5/wk"]].map(([v, l]) => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setF({
+      ...f,
+      pace: v
+    }),
+    style: {
+      flex: 1,
+      padding: "8px",
+      borderRadius: 7,
+      cursor: "pointer",
+      fontSize: 11,
+      fontWeight: 600,
+      background: Number(f.pace) === v ? C.red : C.panel2,
+      color: Number(f.pace) === v ? "#fff" : C.dim,
+      border: `1px solid ${C.line}`
+    }
+  }, l)))), /*#__PURE__*/React.createElement("button", {
+    onClick: save,
+    style: {
+      width: "100%",
+      marginTop: 14,
+      padding: "11px",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 10,
+      color: C.dim,
+      fontSize: 12,
+      cursor: "pointer"
+    }
+  }, "Save these inputs")), /*#__PURE__*/React.createElement(Panel, {
+    title: "Your Daily Targets",
+    sub: dir === 0 ? "Maintenance" : `To reach ${f.goalWeight} lb${weeks ? ` · ~${weeks} weeks` : ""}`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 40,
+      fontWeight: 700,
+      color: C.red
+    }
+  }, cals.toLocaleString()), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.dim
+    }
+  }, "calories / day · TDEE ≈ ", Math.round(tdee).toLocaleString())), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(Stat, {
+    label: "Protein",
+    value: `${proteinG}g`,
+    color: C.green
+  }), /*#__PURE__*/React.createElement(Stat, {
+    label: "Carbs",
+    value: `${carbG}g`,
+    color: C.gold
+  }), /*#__PURE__*/React.createElement(Stat, {
+    label: "Fat",
+    value: `${fatG}g`,
+    color: C.blue
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.dim,
+      marginTop: 14,
+      lineHeight: 1.6
+    }
+  }, "Protein is set near 1 g per lb of goal bodyweight to protect muscle", dir < 0 ? " in a deficit" : "", ". Calories won't drop below your BMR. These are estimates — a registered dietitian can tailor them, especially if you have medical considerations.")));
+}
+
+/* ============ IDEAS ============ */
+const IDEAS = [["Health app sync", "Auto-import bodyweight, steps, and heart rate from Apple Health / Google Health so you don't log them by hand."], ["Auto-update maxes", "When you beat an estimated 1RM in a logged set, offer to bump your max so targets keep pace."], ["Warm-up generator", "Auto-build warm-up ramp sets (e.g. bar → 50% → 70%) before your first heavy set."], ["Progress photos", "Private dated photos with side-by-side compare to see the recomp your scale can't."], ["Rest-day & readiness", "Track sleep/soreness and flag when to push or pull back — smarter than a fixed deload."], ["Exercise how-to", "A short form cue or demo link on each movement for anyone new to it."], ["Supersets & circuits", "Pair exercises to superset in the live view, with a combined rest timer."], ["Reminders", "Optional nudge to train, hit protein, or log bodyweight."], ["Water & sleep tracking", "Simple daily logs that sit alongside cardio and bodyweight trends."], ["Crew kudos", "Let the crew react to each other's PRs — light social push, no open chat."], ["CSV / share export", "Export history and trends to share with a coach or spreadsheet."], ["Wearable companion", "A watch face for logging sets and starting the rest timer from your wrist."]];
+function IdeasTab({
+  setTab
+}) {
+  return /*#__PURE__*/React.createElement(Panel, {
+    title: "Ideas & Roadmap",
+    sub: "Things I'd add next — here for you to review and pick from"
+  }, IDEAS.map(([t, d], i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      padding: "11px 0",
+      borderBottom: i < IDEAS.length - 1 ? `1px solid ${C.line}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "ttl",
+    style: {
+      color: C.gold,
+      fontWeight: 700,
+      width: 20
+    }
+  }, i + 1), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700
+    }
+  }, t), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.dim,
+      marginTop: 2,
+      lineHeight: 1.5
+    }
+  }, d))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.dim,
+      marginTop: 14,
+      lineHeight: 1.6
+    }
+  }, "Tell me which of these you want and I'll build them. The macro calculator, custom-workout builder, and 5-question plan setup are already live — check the Today and Macros tabs."));
+}
+
+/* ============ DISCIPLINES: MMA · PILATES · YOGA ============ */
+function m(n, amt, unit, cue) {
+  return {
+    n,
+    amt,
+    unit,
+    cue
+  };
+}
+const DISCIPLINES = {
+  mma: {
+    name: "MMA",
+    color: "#ff8a3d",
+    rounds: true,
+    blurb: "Striking, grappling & fight conditioning. Use the round timer for live rounds.",
+    lib: {
+      Striking: [m("Jab–Cross (1-2)", 3, "rounds", "Snap punches back to guard, exhale each strike."), m("Jab–Cross–Hook (1-2-3)", 3, "rounds", "Rotate the hips into the hook."), m("Low Leg Kick", 20, "each", "Turn the hip over, strike with the shin."), m("Teep / Push Kick", 20, "each", "Drive the ball of the foot, hands up."), m("Roundhouse Kick", 15, "each", "Pivot the base foot all the way through."), m("Knee Strikes (clinch)", 20, "reps", "Pull down on the collar tie, drive the knee up."), m("Elbow Strikes", 20, "reps", "Short range, turn the shoulder over.")],
+      Grappling: [m("Sprawls", 30, "sec", "Hips to the floor, kick the legs back fast."), m("Double-Leg Takedown (drill)", 10, "reps", "Change levels, penetration step, drive."), m("Shrimp / Hip Escape", 8, "each", "Push off the feet, make space with the hips."), m("Technical Stand-Up", 8, "reps", "Post the hand, stay guarded coming up."), m("Bridge & Roll (Upa)", 8, "each", "Trap the arm, bridge over the shoulder.")],
+      Conditioning: [m("Burpees", 15, "reps", "Explode up, chest to the floor."), m("Jump Rope", 60, "sec", "Light on the toes, relaxed shoulders."), m("Bag Blast (max punches)", 30, "sec", "All-out volume, don't drop the hands."), m("Mountain Climbers", 40, "sec", "Hips low, fast knees."), m("Kettlebell Swing", 20, "reps", "Hinge at the hips, snap through.")],
+      Footwork: [m("Shadowbox Footwork", 3, "rounds", "Balls of the feet, circle both directions."), m("Slip & Roll", 45, "sec", "Slip under the imaginary hook, stay balanced."), m("Pivot Drill", 45, "sec", "Pivot off the lead foot to cut an angle.")]
+    },
+    standards: [{
+      name: "Fundamentals",
+      level: "Beginner",
+      note: "Learn the base movements at an easy pace.",
+      moves: [m("Shadowbox Footwork", 3, "rounds", "Circle both ways, hands up."), m("Jab–Cross (1-2)", 3, "rounds", "Back to guard every time."), m("Sprawls", 30, "sec", "3 sets, rest as needed."), m("Shrimp / Hip Escape", 8, "each", "2 lengths."), m("Burpees", 10, "reps", "3 sets.")]
+    }, {
+      name: "Striking Rounds",
+      level: "Intermediate",
+      note: "Bag or shadow — sharp, technical volume.",
+      moves: [m("Shadowbox Footwork", 1, "rounds", "Warm up."), m("Jab–Cross–Hook (1-2-3)", 4, "rounds", "Crisp combos."), m("Low Leg Kick", 20, "each", "3 sets."), m("Teep / Push Kick", 20, "each", "3 sets."), m("Slip & Roll", 45, "sec", "3 sets.")]
+    }, {
+      name: "Grappling & Conditioning",
+      level: "Intermediate",
+      note: "Wrestling base plus a gas-tank finisher.",
+      moves: [m("Double-Leg Takedown (drill)", 10, "reps", "4 sets."), m("Sprawls", 30, "sec", "4 sets."), m("Shrimp / Hip Escape", 8, "each", "3 sets."), m("Bridge & Roll (Upa)", 8, "each", "3 sets."), m("Kettlebell Swing", 20, "reps", "3 sets."), m("Burpees", 12, "reps", "3 sets.")]
+    }, {
+      name: "Fight Cardio Circuit",
+      level: "Conditioning",
+      note: "HIIT-style — run it 40s work / 20s rest x4.",
+      moves: [m("Bag Blast (max punches)", 40, "sec", ""), m("Mountain Climbers", 40, "sec", ""), m("Jump Rope", 40, "sec", ""), m("Burpees", 40, "sec", ""), m("Kettlebell Swing", 40, "sec", "")]
+    }]
+  },
+  pilates: {
+    name: "Pilates",
+    color: "#c084fc",
+    rounds: false,
+    blurb: "Controlled mat work for core strength, control & posture. Move slow, breathe.",
+    lib: {
+      Core: [m("The Hundred", 100, "breaths", "Pump the arms, navel to spine, breathe wide."), m("Roll-Up", 8, "reps", "Peel the spine off the mat one bone at a time."), m("Single Leg Stretch", 10, "each", "Draw the knee in, keep the core braced."), m("Double Leg Stretch", 10, "reps", "Reach and circle the arms with control."), m("Criss-Cross", 12, "each", "Opposite elbow toward knee, slow twist."), m("Scissors", 10, "each", "Long legs, switch with control."), m("Teaser", 6, "reps", "Roll up into a V and balance."), m("Leg Circles", 8, "each", "Small circles, hips stay still.")],
+      Mat: [m("Roll Like a Ball", 8, "reps", "Balance, roll back and up smoothly."), m("Spine Stretch Forward", 6, "reps", "Round forward, reach long."), m("Saw", 6, "each", "Twist and reach past the pinky toe."), m("Swan", 8, "reps", "Lift the chest, long spine, glutes on."), m("Shoulder Bridge", 10, "reps", "Roll the hips up, squeeze the glutes."), m("Plank Hold", 40, "sec", "Straight line head to heels, brace."), m("Side Kick Series", 10, "each", "Torso stable, the leg moves freely."), m("Swimming", 30, "sec", "Opposite arm/leg flutter, long body.")],
+      Stability: [m("Side Plank", 30, "each", "Stack, lift the hips, stay steady."), m("Bird-Dog", 10, "each", "Opposite arm/leg, no wobble."), m("Pelvic Curl", 10, "reps", "Articulate the spine up and down.")]
+    },
+    standards: [{
+      name: "Beginner Mat Flow",
+      level: "Beginner",
+      note: "Gentle intro to the classical order.",
+      moves: [m("Pelvic Curl", 10, "reps", ""), m("The Hundred", 100, "breaths", "Modified: feet down if needed."), m("Roll-Up", 6, "reps", ""), m("Leg Circles", 6, "each", ""), m("Roll Like a Ball", 8, "reps", ""), m("Single Leg Stretch", 10, "each", ""), m("Spine Stretch Forward", 6, "reps", ""), m("Shoulder Bridge", 10, "reps", ""), m("Side Kick Series", 10, "each", ""), m("Plank Hold", 30, "sec", "")]
+    }, {
+      name: "Core Focus",
+      level: "Intermediate",
+      note: "The Pilates ab series, front to back.",
+      moves: [m("The Hundred", 100, "breaths", ""), m("Single Leg Stretch", 10, "each", ""), m("Double Leg Stretch", 10, "reps", ""), m("Criss-Cross", 12, "each", ""), m("Scissors", 10, "each", ""), m("Teaser", 6, "reps", ""), m("Plank Hold", 45, "sec", ""), m("Side Plank", 30, "each", "")]
+    }, {
+      name: "Posture & Back",
+      level: "All levels",
+      note: "Undo desk posture, strengthen the back line.",
+      moves: [m("Swan", 8, "reps", ""), m("Bird-Dog", 10, "each", ""), m("Shoulder Bridge", 10, "reps", ""), m("Spine Stretch Forward", 6, "reps", ""), m("Swimming", 30, "sec", ""), m("Side Kick Series", 10, "each", "")]
+    }]
+  },
+  yoga: {
+    name: "Yoga",
+    color: "#4ade80",
+    rounds: false,
+    blurb: "Flows for mobility, balance & recovery. Hold with steady breath; ease into each pose.",
+    lib: {
+      "Sun Salutation": [m("Mountain (Tadasana)", 20, "sec", "Stand tall, grounded, breathe."), m("Forward Fold", 30, "sec", "Hinge at the hips, soft knees."), m("Halfway Lift", 15, "sec", "Flat back, gaze forward."), m("Plank", 30, "sec", "Strong line, shoulders over wrists."), m("Chaturanga", 5, "reps", "Elbows in, lower halfway with control."), m("Upward Dog", 20, "sec", "Chest open, thighs lifted off the mat."), m("Downward Dog", 40, "sec", "Hips up and back, heels toward the floor.")],
+      Standing: [m("Warrior I", 30, "each", "Front knee bent, arms up, hips forward."), m("Warrior II", 30, "each", "Open the hips, gaze over the front hand."), m("Warrior III", 20, "each", "Balance, body in one straight line."), m("Triangle", 30, "each", "Long side body, open the chest."), m("Chair", 30, "sec", "Sit back, weight in the heels."), m("Crescent Lunge", 30, "each", "Sink the hips, lift the chest.")],
+      Balance: [m("Tree", 30, "each", "Foot to calf or thigh, steady gaze."), m("Eagle", 20, "each", "Wrap and squeeze, sink low."), m("Half Moon", 20, "each", "Open through the top hand.")],
+      Floor: [m("Cat-Cow", 8, "reps", "Flow the spine with the breath."), m("Cobra", 20, "sec", "Lift the chest, elbows soft."), m("Bridge", 30, "sec", "Lift the hips, roll the shoulders under."), m("Boat", 20, "sec", "V-sit, lift the chest, core on."), m("Pigeon", 45, "each", "Hip opener, keep the hips square."), m("Seated Forward Fold", 45, "sec", "Long spine, fold from the hips."), m("Supine Twist", 30, "each", "Knees over, gaze the other way."), m("Child's Pose", 45, "sec", "Rest, breathe into the back.")],
+      Restorative: [m("Legs-Up-the-Wall", 90, "sec", "Relax, let the blood flow back."), m("Savasana", 120, "sec", "Total stillness, let everything go.")]
+    },
+    standards: [{
+      name: "Morning Flow",
+      level: "All levels",
+      note: "Wake the body up, gentle to moving.",
+      moves: [m("Cat-Cow", 8, "reps", ""), m("Downward Dog", 40, "sec", ""), m("Sun Salutation A", 3, "rounds", "Fold→Plank→Chaturanga→UpDog→DownDog."), m("Warrior I", 30, "each", ""), m("Warrior II", 30, "each", ""), m("Triangle", 30, "each", ""), m("Tree", 30, "each", ""), m("Forward Fold", 30, "sec", ""), m("Savasana", 120, "sec", "")]
+    }, {
+      name: "Athlete Recovery (Yin)",
+      level: "Recovery",
+      note: "Long holds — perfect after a heavy lift day.",
+      moves: [m("Pigeon", 60, "each", "Breathe into the hip."), m("Seated Forward Fold", 60, "sec", ""), m("Supine Twist", 45, "each", ""), m("Bridge", 30, "sec", ""), m("Legs-Up-the-Wall", 120, "sec", ""), m("Child's Pose", 60, "sec", ""), m("Savasana", 120, "sec", "")]
+    }, {
+      name: "Post-Lift Stretch",
+      level: "All levels",
+      note: "Open hips, hamstrings, spine and shoulders.",
+      moves: [m("Downward Dog", 40, "sec", ""), m("Crescent Lunge", 30, "each", ""), m("Pigeon", 45, "each", ""), m("Seated Forward Fold", 45, "sec", ""), m("Supine Twist", 30, "each", ""), m("Child's Pose", 45, "sec", "")]
+    }, {
+      name: "Beginner Basics",
+      level: "Beginner",
+      note: "Foundational poses with plenty of time.",
+      moves: [m("Mountain (Tadasana)", 20, "sec", ""), m("Cat-Cow", 8, "reps", ""), m("Downward Dog", 40, "sec", ""), m("Warrior II", 30, "each", ""), m("Triangle", 30, "each", ""), m("Tree", 30, "each", ""), m("Child's Pose", 45, "sec", ""), m("Savasana", 120, "sec", "")]
+    }]
+  }
+};
+function DisciplineTab({
+  id,
+  note
+}) {
+  const cfg = DISCIPLINES[id];
+  const groups = Object.keys(cfg.lib);
+  const KEY = "irondesk:disc:" + id;
+  const [view, setView] = useState("home");
+  const [active, setActive] = useState(null);
+  const [custom, setCustom] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(KEY) || "[]");
+    } catch (e) {
+      return [];
+    }
+  });
+  // builder
+  const [bName, setBName] = useState("");
+  const [bRows, setBRows] = useState([]);
+  const [grp, setGrp] = useState(groups[0]);
+  const [pick, setPick] = useState(cfg.lib[groups[0]][0].n);
+  const saveCustom = list => {
+    setCustom(list);
+    try {
+      localStorage.setItem(KEY, JSON.stringify(list));
+    } catch (e) {}
+  };
+  const run = w => {
+    setActive({
+      name: w.name,
+      moves: w.moves.map(x => ({
+        ...x,
+        done: false
+      }))
+    });
+    setView("run");
+  };
+  const toggle = i => setActive({
+    ...active,
+    moves: active.moves.map((x, j) => j === i ? {
+      ...x,
+      done: !x.done
+    } : x)
+  });
+  if (view === "run" && active) {
+    const done = active.moves.filter(x => x.done).length;
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+      title: active.name,
+      sub: `${done}/${active.moves.length} done · tap each as you finish`
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        height: 6,
+        background: C.panel2,
+        borderRadius: 3,
+        marginBottom: 14
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        height: 6,
+        width: `${done / active.moves.length * 100}%`,
+        background: cfg.color,
+        borderRadius: 3,
+        transition: "width .3s"
+      }
+    })), active.moves.map((x, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "11px 0",
+        borderBottom: i < active.moves.length - 1 ? `1px solid ${C.line}` : "none"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => toggle(i),
+      style: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        flexShrink: 0,
+        border: `2px solid ${x.done ? cfg.color : C.line}`,
+        background: x.done ? cfg.color : "transparent",
+        color: "#111",
+        fontWeight: 700,
+        cursor: "pointer"
+      }
+    }, x.done ? "✓" : ""), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 14,
+        fontWeight: 600,
+        opacity: x.done ? 0.5 : 1
+      }
+    }, x.n), x.cue && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.dim,
+        marginTop: 1
+      }
+    }, x.cue)), /*#__PURE__*/React.createElement("span", {
+      className: "ttl",
+      style: {
+        fontSize: 13,
+        fontWeight: 700,
+        color: cfg.color,
+        whiteSpace: "nowrap"
+      }
+    }, x.amt, " ", x.unit))), /*#__PURE__*/React.createElement("button", {
+      onClick: () => {
+        setActive(null);
+        setView("home");
+        note("Nice work");
+      },
+      style: {
+        width: "100%",
+        marginTop: 14,
+        padding: "13px",
+        background: cfg.color,
+        border: "none",
+        borderRadius: 10,
+        color: "#111",
+        fontFamily: "'Oswald'",
+        fontSize: 14,
+        fontWeight: 700,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Finish")), cfg.rounds && /*#__PURE__*/React.createElement(IntervalTimer, {
+      proto: {
+        id: "round",
+        name: "Rounds",
+        work: 180,
+        rest: 60,
+        rounds: 5
+      },
+      machine: "Round",
+      note: note
+    }), /*#__PURE__*/React.createElement(Stopwatch, null));
+  }
+  if (view === "build") {
+    const addRow = () => {
+      const src = cfg.lib[grp].find(x => x.n === pick) || cfg.lib[grp][0];
+      setBRows([...bRows, {
+        ...src
+      }]);
+    };
+    const save = start => {
+      if (!bRows.length) {
+        note("Add at least one move");
+        return;
+      }
+      const w = {
+        name: bName.trim() || `My ${cfg.name}`,
+        moves: bRows
+      };
+      saveCustom([{
+        id: uid(),
+        ...w
+      }, ...custom]);
+      note("Saved");
+      if (start) run(w);else setView("home");
+      setBRows([]);
+      setBName("");
+    };
+    return /*#__PURE__*/React.createElement(Panel, {
+      title: `Build a ${cfg.name} Workout`,
+      sub: "Pick moves and amounts — make your own routine"
+    }, /*#__PURE__*/React.createElement(Field, {
+      label: "Name"
+    }, /*#__PURE__*/React.createElement("input", {
+      value: bName,
+      onChange: e => setBName(e.target.value),
+      placeholder: `My ${cfg.name}`,
+      style: inp("100%")
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 12,
+        background: C.panel2,
+        borderRadius: 10,
+        padding: 12,
+        border: `1px solid ${C.line}`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        marginBottom: 8
+      }
+    }, /*#__PURE__*/React.createElement("select", {
+      value: grp,
+      onChange: e => {
+        setGrp(e.target.value);
+        setPick(cfg.lib[e.target.value][0].n);
+      },
+      style: {
+        ...inp("42%"),
+        padding: "9px 8px"
+      }
+    }, groups.map(g => /*#__PURE__*/React.createElement("option", {
+      key: g,
+      value: g
+    }, g))), /*#__PURE__*/React.createElement("select", {
+      value: pick,
+      onChange: e => setPick(e.target.value),
+      style: {
+        ...inp("58%"),
+        padding: "9px 8px"
+      }
+    }, cfg.lib[grp].map(x => /*#__PURE__*/React.createElement("option", {
+      key: x.n,
+      value: x.n
+    }, x.n)))), /*#__PURE__*/React.createElement("button", {
+      onClick: addRow,
+      style: {
+        ...btnSm(),
+        background: cfg.color,
+        color: "#111"
+      }
+    }, "+ Add move")), bRows.length > 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 12
+      }
+    }, bRows.map((r, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 0",
+        borderBottom: `1px solid ${C.line}`
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: 1,
+        fontSize: 14,
+        fontWeight: 600
+      }
+    }, r.n), /*#__PURE__*/React.createElement(MiniIn, {
+      value: r.amt,
+      onChange: v => setBRows(bRows.map((x, j) => j === i ? {
+        ...x,
+        amt: v
+      } : x)),
+      suffix: r.unit
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setBRows(bRows.filter((_, j) => j !== i)),
+      style: {
+        background: "none",
+        border: "none",
+        color: C.dim,
+        cursor: "pointer",
+        fontSize: 16
+      }
+    }, "×")))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 10,
+        marginTop: 16
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setView("home"),
+      style: {
+        flex: 1,
+        padding: "12px",
+        background: C.panel2,
+        border: `1px solid ${C.line}`,
+        borderRadius: 10,
+        color: C.dim,
+        fontFamily: "'Oswald'",
+        fontWeight: 600,
+        fontSize: 12.5,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => save(false),
+      style: {
+        flex: 1,
+        padding: "12px",
+        background: C.panel2,
+        border: `1px solid ${cfg.color}`,
+        borderRadius: 10,
+        color: cfg.color,
+        fontFamily: "'Oswald'",
+        fontWeight: 700,
+        fontSize: 12.5,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Save"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => save(true),
+      style: {
+        flex: 1.4,
+        padding: "12px",
+        background: cfg.color,
+        border: "none",
+        borderRadius: 10,
+        color: "#111",
+        fontFamily: "'Oswald'",
+        fontWeight: 700,
+        fontSize: 12.5,
+        textTransform: "uppercase",
+        cursor: "pointer"
+      }
+    }, "Save & Start")));
+  }
+
+  // home
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
+    title: cfg.name,
+    sub: cfg.blurb
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setView("build"),
+    style: {
+      width: "100%",
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${cfg.color}`,
+      borderRadius: 10,
+      color: cfg.color,
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 13,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "✎ Build Your Own ", cfg.name)), custom.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+    title: "Your Workouts",
+    sub: "Built by you — tap to run"
+  }, custom.map(w => /*#__PURE__*/React.createElement("div", {
+    key: w.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "9px 0",
+      borderBottom: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 600
+    }
+  }, w.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.dim
+    }
+  }, w.moves.length, " moves")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => run(w),
+    style: {
+      padding: "8px 14px",
+      background: cfg.color,
+      border: "none",
+      borderRadius: 8,
+      color: "#111",
+      fontWeight: 700,
+      fontSize: 12,
+      cursor: "pointer"
+    }
+  }, "Start"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => saveCustom(custom.filter(x => x.id !== w.id)),
+    style: {
+      background: "none",
+      border: "none",
+      color: C.dim,
+      cursor: "pointer",
+      fontSize: 16
+    }
+  }, "×")))), /*#__PURE__*/React.createElement(Panel, {
+    title: "Standard Workouts",
+    sub: "Ready to go — no experience needed, each move has a cue"
+  }, cfg.standards.map((w, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 12,
+      padding: "12px 14px",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, w.name), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: cfg.color,
+      letterSpacing: 0.5,
+      marginTop: 1
+    }
+  }, w.level.toUpperCase(), " · ", w.moves.length, " MOVES")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => run(w),
+    style: {
+      padding: "9px 16px",
+      background: cfg.color,
+      border: "none",
+      borderRadius: 8,
+      color: "#111",
+      fontWeight: 700,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, "Start")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.dim,
+      marginTop: 6,
+      lineHeight: 1.4
+    }
+  }, w.note)))));
+}
+
+/* ============ SHARED UI ============ */
+const inp = w => ({
+  background: C.panel2,
+  border: `1px solid ${C.line}`,
+  borderRadius: 6,
+  color: C.txt,
+  padding: "8px 10px",
+  fontSize: 13,
+  width: w,
+  fontFamily: "'Archivo',sans-serif",
+  outline: "none"
+});
+const btnSm = () => ({
+  padding: "9px 14px",
+  background: C.red,
+  border: "none",
+  borderRadius: 8,
+  color: "#fff",
+  fontWeight: 700,
+  cursor: "pointer",
+  fontSize: 12
+});
+const btnFull = (bg, txt) => ({
+  width: "100%",
+  marginTop: 10,
+  padding: "12px",
+  background: bg,
+  border: bg === C.panel2 ? `1px solid ${C.line}` : "none",
+  borderRadius: 10,
+  color: txt || "#fff",
+  fontFamily: "'Oswald'",
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  textTransform: "uppercase",
+  cursor: "pointer"
+});
+function Panel({
+  title,
+  sub,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("section", {
+    style: {
+      background: C.panel,
+      border: `1px solid ${C.line}`,
+      borderRadius: 14,
+      padding: "16px 14px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 15.5,
+      fontWeight: 600
+    }
+  }, title), sub && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.dim,
+      margin: "3px 0 13px"
+    }
+  }, sub), children);
+}
+function Badge({
+  color,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      background: `${color}26`,
+      color,
+      fontSize: 9,
+      fontWeight: 700,
+      padding: "1px 6px",
+      borderRadius: 4,
+      marginLeft: 6,
+      letterSpacing: 0.5,
+      verticalAlign: "middle"
+    }
+  }, children);
+}
+function Stat({
+  label,
+  value,
+  color
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      background: C.panel2,
+      borderRadius: 10,
+      padding: "12px 6px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "ttl",
+    style: {
+      fontSize: 20,
+      fontWeight: 700,
+      color
+    }
+  }, value), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginTop: 2
+    }
+  }, label));
+}
+function MiniIn({
+  value,
+  onChange,
+  suffix
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      background: C.panel2,
+      border: `1px solid ${C.line}`,
+      borderRadius: 6,
+      padding: "0 8px",
+      width: 86
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    value: value,
+    onChange: e => onChange(e.target.value === "" ? "" : Number(e.target.value)),
+    style: {
+      width: "100%",
+      background: "transparent",
+      border: "none",
+      outline: "none",
+      color: C.txt,
+      fontSize: 14,
+      fontWeight: 600,
+      padding: "8px 0",
+      fontFamily: "'Archivo',sans-serif"
+    }
+  }), suffix && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: C.dim,
+      marginLeft: 3,
+      whiteSpace: "nowrap"
+    }
+  }, suffix));
+}
+function LoadChips({
+  total,
+  bar,
+  plates
+}) {
+  const {
+    total: got,
+    counts
+  } = solveLoadout(total, Number(bar), plates);
+  const order = [55, 45, 35, 25, 10, 5, 2.5].filter(w => counts[w]);
+  const off = got - total;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 4,
+      alignItems: "center",
+      marginTop: 3
+    }
+  }, order.length === 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.dim,
+      fontSize: 11
+    }
+  }, "bar only"), order.map(w => /*#__PURE__*/React.createElement("span", {
+    key: w,
+    style: {
+      background: C.panel,
+      border: `1px solid ${C.line}`,
+      borderRadius: 4,
+      padding: "1px 6px",
+      fontSize: 11
+    }
+  }, counts[w], "× ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: C.gold
+    }
+  }, w), "/s")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: off === 0 ? C.green : C.gold,
+      fontSize: 10.5
+    }
+  }, "= ", got, off ? ` (${off > 0 ? "+" : ""}${off})` : " ✓"));
+}
+function Field({
+  label,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.dim,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+      marginBottom: 4
+    }
+  }, label), children);
+}
+function Empty({
+  text
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: C.dim,
+      fontSize: 13,
+      textAlign: "center",
+      padding: "14px 0"
+    }
+  }, text);
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(IronDesk));
+}
+</script>
+</body>
+</html>
