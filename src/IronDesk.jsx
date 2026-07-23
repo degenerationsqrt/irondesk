@@ -11,6 +11,15 @@ import {
   weightForReps as wForReps,
   workoutVolume,
 } from "./trainingMath.js";
+import {
+  DEFAULT_REST_TIMER_PREFS,
+  filterAndSortSessions,
+  normalizeRestTimerPrefs,
+  restDurationForEntry,
+  safeSessionVolume,
+  sessionsToCsv,
+  summarizeSessions,
+} from "./workoutUtilities.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
@@ -83,6 +92,19 @@ window.storage = {
 /* ============ MATH ============ */
 const today = () => localDateKey();
 const uid = () => Math.random().toString(36).slice(2, 9);
+function downloadFile(contents, filename, type) {
+  const blob = new Blob([contents], {
+    type
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 function solveLoadout(targetTotal, bar, pairs) {
   const perSide = Math.max(0, (targetTotal - bar) / 2);
   const denoms = pairs.filter(p => p.weight > 0 && Math.floor(p.count / 2) > 0).map(p => ({
@@ -963,6 +985,7 @@ export default function IronDesk() {
   const [customDays, setCustomDays] = useState([]);
   const [onboarded, setOnboarded] = useState(true);
   const [macros, setMacros] = useState(null);
+  const [restTimerPrefs, setRestTimerPrefs] = useState(DEFAULT_REST_TIMER_PREFS);
   const crewRef = useRef({
     uid: null,
     name: null,
@@ -992,6 +1015,7 @@ export default function IronDesk() {
           s.styleOverride && setStyleOverride(s.styleOverride);
           s.customDays && setCustomDays(s.customDays);
           s.macros && setMacros(s.macros);
+          setRestTimerPrefs(normalizeRestTimerPrefs(s.restTimerPrefs));
           if (typeof s.onboarded === "boolean") setOnboarded(s.onboarded);
         } else {
           // migrate from v2 if present
@@ -1034,13 +1058,14 @@ export default function IronDesk() {
         styleOverride,
         customDays,
         onboarded,
-        macros
+        macros,
+        restTimerPrefs
       }));
     } catch (e) {}
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, loaded]);
+  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
 
   // push PRs + stats to the crew group when a new session lands
   useEffect(() => {
@@ -1072,7 +1097,7 @@ export default function IronDesk() {
     })));
     return m;
   }, [sessions]);
-  const exportData = () => {
+  const exportJson = () => {
     const data = {
       maxes,
       homePlates,
@@ -1082,22 +1107,25 @@ export default function IronDesk() {
       sessions,
       bwLog,
       cardioLog,
-      _app: "IronDesk",
+      active,
+      progress,
+      gender,
+      goal,
+      styleOverride,
+      customDays,
+      onboarded,
+      macros,
+      restTimerPrefs,
+      _app: "IronDesk Pro",
       _v: 3,
       _exported: new Date().toISOString()
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json"
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `irondesk-backup-${today()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    note("Exported");
+    downloadFile(JSON.stringify(data, null, 2), `irondesk-backup-${today()}.json`, "application/json");
+    note("JSON backup exported");
+  };
+  const exportCsv = () => {
+    downloadFile(`\uFEFF${sessionsToCsv(sessions)}`, `irondesk-history-${today()}.csv`, "text/csv;charset=utf-8");
+    note(sessions.length ? "CSV history exported" : "CSV exported — no sets yet");
   };
   const importData = file => {
     if (!file) return;
@@ -1109,12 +1137,21 @@ export default function IronDesk() {
         s.homePlates && setHomePlates(s.homePlates);
         s.plates && setHomePlates(s.plates);
         s.gymPlates && setGymPlates(s.gymPlates);
-        s.bar && setBar(s.bar);
+        if (s.bar != null) setBar(s.bar);
         s.mode && setMode(s.mode);
-        s.sessions && setSessions(s.sessions);
+        Array.isArray(s.sessions) && setSessions(s.sessions);
         // v2 logs → keep bw/cardio
         s.bwLog && setBwLog(s.bwLog);
         s.cardioLog && setCardioLog(s.cardioLog);
+        if (Object.prototype.hasOwnProperty.call(s, "active")) setActive(s.active || null);
+        s.progress && setProgress(s.progress);
+        s.gender && setGender(s.gender);
+        s.goal && setGoal(s.goal);
+        if (Object.prototype.hasOwnProperty.call(s, "styleOverride")) setStyleOverride(s.styleOverride || null);
+        Array.isArray(s.customDays) && setCustomDays(s.customDays);
+        if (Object.prototype.hasOwnProperty.call(s, "macros")) setMacros(s.macros || null);
+        setRestTimerPrefs(normalizeRestTimerPrefs(s.restTimerPrefs));
+        if (typeof s.onboarded === "boolean") setOnboarded(s.onboarded);
         note("Imported");
       } catch (e) {
         note("Import failed");
@@ -1225,7 +1262,7 @@ export default function IronDesk() {
     }
   }, l, k === "today" && active ? " ●" : "")))), /*#__PURE__*/React.createElement("main", {
     style: {
-      maxWidth: 560,
+      maxWidth: 820,
       margin: "0 auto",
       padding: "16px 14px"
     }
@@ -1259,7 +1296,9 @@ export default function IronDesk() {
     customDays,
     setCustomDays,
     onboarded,
-    setOnboarded
+    setOnboarded,
+    restTimerPrefs,
+    setRestTimerPrefs
   }), tab === "program" && /*#__PURE__*/React.createElement(ProgramTab, {
     mode,
     tm,
@@ -1296,7 +1335,8 @@ export default function IronDesk() {
     note
   }), tab === "history" && /*#__PURE__*/React.createElement(History, {
     sessions,
-    setSessions
+    setSessions,
+    exportCsv
   }), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
     sessions,
     bwLog,
@@ -1319,13 +1359,16 @@ export default function IronDesk() {
     bar,
     setBar,
     mode,
-    exportData,
+    exportJson,
+    exportCsv,
     importData,
     sessions,
     gender,
     goal,
     setGender,
-    setGoal
+    setGoal,
+    restTimerPrefs,
+    setRestTimerPrefs
   }))));
 }
 
@@ -1358,31 +1401,52 @@ function Today({
   customDays,
   setCustomDays,
   onboarded,
-  setOnboarded
+  setOnboarded,
+  restTimerPrefs,
+  setRestTimerPrefs
 }) {
   const week = GOALS[goal].week;
   const [builder, setBuilder] = useState(false);
   const [planQ, setPlanQ] = useState(false);
-  const [timer, setTimer] = useState(0);
-  const timerRef = useRef(null);
+  const [timerNow, setTimerNow] = useState(Date.now());
+  const completedTimerRef = useRef(0);
+  const timerEndAt = Number(active?.restTimerEndAt) || 0;
+  const timer = timerEndAt > 0 ? Math.max(0, Math.ceil((timerEndAt - timerNow) / 1000)) : 0;
   useEffect(() => {
-    if (timer > 0 && !timerRef.current) {
-      timerRef.current = setInterval(() => setTimer(t => {
-        if (t <= 1) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-          return 0;
+    if (!timerEndAt) return undefined;
+    const tick = () => {
+      const now = Date.now();
+      setTimerNow(now);
+      if (now >= timerEndAt) {
+        setActive(current => {
+          if (!current || Number(current.restTimerEndAt) !== timerEndAt) return current;
+          return {
+            ...current,
+            restTimerEndAt: null,
+            restTimerDuration: 0
+          };
+        });
+        if (completedTimerRef.current !== timerEndAt) {
+          completedTimerRef.current = timerEndAt;
+          if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+          note("Rest complete");
         }
-        return t - 1;
-      }), 1000);
-    }
-    return () => {
-      if (timer === 0 && timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
       }
     };
-  }, [timer]);
+    tick();
+    const interval = setInterval(tick, 500);
+    return () => clearInterval(interval);
+  }, [timerEndAt, setActive, note]);
+  const clearRestTimer = () => setActive(current => current ? {
+    ...current,
+    restTimerEndAt: null,
+    restTimerDuration: 0
+  } : current);
+  const extendRestTimer = seconds => setActive(current => current ? {
+    ...current,
+    restTimerEndAt: Math.max(Date.now(), Number(current.restTimerEndAt) || Date.now()) + seconds * 1000,
+    restTimerDuration: Math.max(0, Number(current.restTimerDuration) || 0) + seconds
+  } : current);
   const start = focusKey => {
     const d = generateDay(focusKey, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
     setActive({
@@ -1456,11 +1520,25 @@ function Today({
     setActive(a);
   };
   const toggleDone = (ei, si) => {
-    const en = active.entries[ei];
-    const s = en.sets[si];
-    const nowDone = !s.done;
-    setSet(ei, si, "done", nowDone);
-    if (nowDone && en.role !== "cardio" && en.role !== "ab") setTimer(en.heavy ? 180 : 60);
+    setActive(current => {
+      if (!current) return current;
+      const entry = current.entries[ei];
+      const currentSet = entry.sets[si];
+      const nowDone = !currentSet.done;
+      const restSeconds = nowDone ? restDurationForEntry(restTimerPrefs, entry) : 0;
+      return {
+        ...current,
+        restTimerEndAt: restSeconds ? Date.now() + restSeconds * 1000 : current.restTimerEndAt,
+        restTimerDuration: restSeconds || current.restTimerDuration || 0,
+        entries: current.entries.map((item, entryIndex) => entryIndex !== ei ? item : {
+          ...item,
+          sets: item.sets.map((set, setIndex) => setIndex !== si ? set : {
+            ...set,
+            done: nowDone
+          })
+        })
+      };
+    });
   };
   const addSet = ei => {
     const a = {
@@ -1515,7 +1593,6 @@ function Today({
     };
     setSessions([session, ...sessions]);
     setActive(null);
-    setTimer(0);
     note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
     setTab("history");
   };
@@ -1891,25 +1968,53 @@ function Today({
       fontWeight: 700,
       color: "#fff"
     }
-  }, Math.floor(timer / 60), ":", String(timer % 60).padStart(2, "0")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setTimer(0),
+  }, Math.floor(timer / 60), ":", String(timer % 60).padStart(2, "0")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => extendRestTimer(30),
+    style: {
+      background: "rgba(0,0,0,.18)",
+      border: "1px solid rgba(255,255,255,.25)",
+      borderRadius: 6,
+      color: "#fff",
+      padding: "6px 9px",
+      fontSize: 12,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "+30"), /*#__PURE__*/React.createElement("button", {
+    onClick: clearRestTimer,
     style: {
       background: "rgba(0,0,0,.25)",
       border: "none",
       borderRadius: 6,
       color: "#fff",
-      padding: "6px 12px",
+      padding: "6px 9px",
       fontSize: 12,
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "SKIP")), /*#__PURE__*/React.createElement(Panel, {
+  }, "SKIP"))), /*#__PURE__*/React.createElement(Panel, {
     title: `${active.dayId} — Live`,
     sub: `${doneCount}/${totalCount} sets done · started ${new Date(active.start).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit"
     })}`
   }, /*#__PURE__*/React.createElement("div", {
+    className: "live-rest-control"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("strong", null, "Auto rest"), /*#__PURE__*/React.createElement("span", null, restTimerPrefs.enabled ? `${restTimerPrefs.accessorySeconds}s accessory · ${restTimerPrefs.heavySeconds}s heavy` : "Timer will not start after sets")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    role: "switch",
+    "aria-checked": restTimerPrefs.enabled,
+    onClick: () => setRestTimerPrefs(current => ({
+      ...current,
+      enabled: !current.enabled
+    })),
+    className: `switch-button ${restTimerPrefs.enabled ? "is-on" : ""}`
+  }, restTimerPrefs.enabled ? "ON" : "OFF")), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 6,
       background: C.panel2,
@@ -2054,7 +2159,6 @@ function Today({
     onClick: () => {
       if (window.confirm("Discard this workout?")) {
         setActive(null);
-        setTimer(0);
       }
     },
     style: {
@@ -2386,97 +2490,198 @@ function ProgramTab({
 /* ============ HISTORY ============ */
 function History({
   sessions,
-  setSessions
+  setSessions,
+  exportCsv
 }) {
   const [open, setOpen] = useState(null);
-  const del = id => {
-    if (window.confirm("Delete this session?")) setSessions(sessions.filter(s => s.id !== id));
+  const [query, setQuery] = useState("");
+  const [modeFilter, setModeFilter] = useState("all");
+  const [range, setRange] = useState("all");
+  const [sort, setSort] = useState("newest");
+  const filtered = useMemo(() => filterAndSortSessions(sessions, {
+    query,
+    mode: modeFilter,
+    range,
+    sort
+  }), [sessions, query, modeFilter, range, sort]);
+  const summary = useMemo(() => summarizeSessions(filtered), [filtered]);
+  const hasFilters = Boolean(query) || modeFilter !== "all" || range !== "all";
+  const del = target => {
+    if (window.confirm("Delete this session?")) {
+      setSessions(sessions.filter(session => target?.id ? session.id !== target.id : session !== target));
+    }
   };
-  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
-    title: "Workout History",
-    sub: `${sessions.length} sessions logged`
-  }, sessions.length === 0 && /*#__PURE__*/React.createElement(Empty, {
-    text: "No workouts yet — start one on the Today tab."
-  }), sessions.map(s => /*#__PURE__*/React.createElement("div", {
-    key: s.id,
-    style: {
-      borderBottom: `1px solid ${C.line}`,
-      padding: "10px 0"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      cursor: "pointer"
-    },
-    onClick: () => setOpen(open === s.id ? null : s.id)
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 14,
-      fontWeight: 700
-    }
-  }, s.dayId, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 10,
-      color: C.dim,
-      fontWeight: 400,
-      marginLeft: 8
-    }
-  }, s.mode === "gym" ? "GYM" : "HOME"), s.prs?.length > 0 && /*#__PURE__*/React.createElement(Badge, {
-    color: C.green
-  }, s.prs.length, " PR")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: C.dim
-    }
-  }, s.date, " · ", s.durationMin, " min · ", s.volume.toLocaleString(), " lb volume")), /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: C.dim,
-      fontSize: 12
-    }
-  }, open === s.id ? "▲" : "▼"), /*#__PURE__*/React.createElement("button", {
-    onClick: e => {
-      e.stopPropagation();
-      del(s.id);
-    },
-    style: {
-      background: "none",
-      border: "none",
-      color: C.dim,
-      fontSize: 16,
-      cursor: "pointer"
-    }
-  }, "×")), open === s.id && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 8,
-      background: C.panel2,
-      borderRadius: 10,
-      padding: "10px 12px"
-    }
-  }, s.entries.map((en, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      padding: "5px 0",
-      borderBottom: i < s.entries.length - 1 ? `1px solid ${C.line}` : "none"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      fontWeight: 600
-    }
-  }, en.ex, s.prs?.some(p => p.ex === en.ex) && /*#__PURE__*/React.createElement(Badge, {
-    color: C.green
-  }, "PR")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.dim
-    }
-  }, en.sets.map(st => `${st.w}×${st.r}`).join("  ·  ")))))))));
+  const resetFilters = () => {
+    setQuery("");
+    setModeFilter("all");
+    setRange("all");
+  };
+  return <React.Fragment>
+    <section className="history-heading">
+      <div className="history-heading-icon" aria-hidden="true">◷</div>
+      <div>
+        <div className="history-heading-kicker">Training &amp; Planning</div>
+        <h2 className="ttl">Workout History</h2>
+        <p>Search, filter, sort, and export every logged workout.</p>
+      </div>
+      <button type="button" className="history-export-button" onClick={exportCsv}>
+        ↓ CSV
+      </button>
+    </section>
+
+    <div className="history-dashboard">
+      <aside className="history-filter-rail" aria-label="Workout history filters">
+        <div className="history-filter-title">Workouts</div>
+        {[
+          ["all", "All sessions"],
+          ["home", "Home"],
+          ["gym", "Gym"],
+        ].map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            className={`history-filter-button ${modeFilter === value ? "is-active" : ""}`}
+            aria-pressed={modeFilter === value}
+            onClick={() => setModeFilter(value)}
+          >
+            <span aria-hidden="true">{value === "all" ? "▦" : value === "home" ? "⌂" : "◆"}</span>
+            {label}
+          </button>
+        ))}
+        <label className="history-filter-label" htmlFor="history-range">Date range</label>
+        <select
+          id="history-range"
+          className="history-select"
+          value={range}
+          onChange={(event) => setRange(event.target.value)}
+        >
+          <option value="all">All time</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+          <option value="year">Last year</option>
+        </select>
+      </aside>
+
+      <section className="history-results" aria-live="polite">
+        <div className="history-toolbar">
+          <label className="history-search">
+            <span className="sr-only">Search workout history</span>
+            <span aria-hidden="true">⌕</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="Search workout or exercise"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <label>
+            <span className="sr-only">Sort workout history</span>
+            <select
+              className="history-select"
+              value={sort}
+              onChange={(event) => setSort(event.target.value)}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="volume">Highest volume</option>
+              <option value="duration">Longest duration</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="history-summary">
+          <div><strong>{summary.sessions}</strong><span>Sessions</span></div>
+          <div><strong>{Math.round(summary.volume).toLocaleString()}</strong><span>Volume lb</span></div>
+          <div><strong>{summary.minutes.toLocaleString()}</strong><span>Minutes</span></div>
+          <div><strong>{summary.prs}</strong><span>PRs</span></div>
+        </div>
+
+        {sessions.length === 0 && (
+          <div className="history-empty">
+            <strong>No workouts yet</strong>
+            <span>Start a workout on Today. Finished sessions will appear here automatically.</span>
+          </div>
+        )}
+
+        {sessions.length > 0 && filtered.length === 0 && (
+          <div className="history-empty">
+            <strong>No matching workouts</strong>
+            <span>Try a different exercise, location, or date range.</span>
+            <button type="button" onClick={resetFilters}>Clear filters</button>
+          </div>
+        )}
+
+        {filtered.length > 0 && (
+          <div className="history-result-count">
+            Showing {filtered.length} of {sessions.length}
+            {hasFilters && <button type="button" onClick={resetFilters}>Reset</button>}
+          </div>
+        )}
+
+        <div className="history-list">
+          {filtered.map((session, sessionIndex) => {
+            const sessionId = session.id || `${session.date}-${session.dayId}-${sessionIndex}`;
+            const isOpen = open === sessionId;
+            const entries = Array.isArray(session.entries) ? session.entries : [];
+            const records = Array.isArray(session.prs) ? session.prs : [];
+            return (
+              <article className={`history-card ${isOpen ? "is-open" : ""}`} key={sessionId}>
+                <div className="history-card-row">
+                  <button
+                    type="button"
+                    className="history-card-toggle"
+                    aria-expanded={isOpen}
+                    onClick={() => setOpen(isOpen ? null : sessionId)}
+                  >
+                    <span className="history-card-date">
+                      {session.date || "No date"}
+                      <small>{session.mode === "gym" ? "GYM" : "HOME"}</small>
+                    </span>
+                    <span className="history-card-main">
+                      <strong>{session.dayId || "Workout"}</strong>
+                      <small>
+                        {Number(session.durationMin) || 0} min · {Math.round(safeSessionVolume(session)).toLocaleString()} lb
+                        {records.length ? ` · ${records.length} PR${records.length === 1 ? "" : "s"}` : ""}
+                      </small>
+                    </span>
+                    <span className="history-card-chevron" aria-hidden="true">{isOpen ? "⌃" : "⌄"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="history-delete"
+                    aria-label={`Delete ${session.dayId || "workout"} from ${session.date || "unknown date"}`}
+                    onClick={() => del(session)}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {isOpen && (
+                  <div className="history-card-detail">
+                    {entries.length === 0 ? (
+                      <span className="history-legacy-note">This older session has no set detail.</span>
+                    ) : entries.map((entry, entryIndex) => {
+                      const sets = Array.isArray(entry.sets) ? entry.sets : [];
+                      return (
+                        <div className="history-exercise" key={`${entry.ex || "exercise"}-${entryIndex}`}>
+                          <div>
+                            <strong>{entry.ex || "Exercise"}</strong>
+                            {entry.db && <small>PER DB</small>}
+                            {records.some((record) => record.ex === entry.ex) && <small className="is-pr">PR</small>}
+                          </div>
+                          <span>{sets.map((set) => `${set.w}×${set.r}`).join(" · ") || "No sets"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  </React.Fragment>;
 }
 
 /* ============ TRENDS ============ */
@@ -3136,13 +3341,16 @@ function Settings({
   bar,
   setBar,
   mode,
-  exportData,
+  exportJson,
+  exportCsv,
   importData,
   sessions,
   gender,
   goal,
   setGender,
-  setGoal
+  setGoal,
+  restTimerPrefs,
+  setRestTimerPrefs
 }) {
   const setGenderGoal = g => {
     setGender(g);
@@ -3285,18 +3493,23 @@ function Settings({
       setPlates(np);
     },
     suffix: "total"
-  })))), /*#__PURE__*/React.createElement(Panel, {
+  })))), /*#__PURE__*/React.createElement(RestTimerSettings, {
+    preferences: restTimerPrefs,
+    setPreferences: setRestTimerPrefs
+  }), /*#__PURE__*/React.createElement(Panel, {
     title: "Backup & Restore",
     sub: `${sessions.length} sessions in your log — export to keep them forever`
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
-      gap: 10
+      gap: 10,
+      flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: exportData,
+    onClick: exportJson,
     style: {
       flex: 1,
+      minWidth: 130,
       padding: "12px",
       background: C.panel2,
       border: `1px solid ${C.gold}`,
@@ -3309,9 +3522,27 @@ function Settings({
       textTransform: "uppercase",
       cursor: "pointer"
     }
-  }, "↓ Export"), /*#__PURE__*/React.createElement("label", {
+  }, "↓ JSON Backup"), /*#__PURE__*/React.createElement("button", {
+    onClick: exportCsv,
     style: {
       flex: 1,
+      minWidth: 130,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.blue}`,
+      borderRadius: 10,
+      color: C.blue,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "↓ CSV History"), /*#__PURE__*/React.createElement("label", {
+    style: {
+      flex: 1,
+      minWidth: 130,
       padding: "12px",
       background: C.panel2,
       border: `1px solid ${C.line}`,
@@ -3343,6 +3574,64 @@ function Settings({
       lineHeight: 1.6
     }
   }, "IronDesk Pro · loads round to ", mode === "gym" ? "2.5" : "5", " lb in ", mode, " mode · Epley e1RM, best at 1–8 reps", /*#__PURE__*/React.createElement("br", null), "auto-saves everything · not medical advice"));
+}
+
+function RestTimerSettings({
+  preferences,
+  setPreferences
+}) {
+  const prefs = normalizeRestTimerPrefs(preferences);
+  const options = [30, 45, 60, 90, 120, 180, 240, 300];
+  const update = (field, value) => setPreferences(current => normalizeRestTimerPrefs({
+    ...current,
+    [field]: value
+  }));
+  return <Panel
+    title="Automatic Rest Timer"
+    sub="Optionally start a countdown whenever you log a strength set"
+  >
+    <div className="rest-setting-toggle">
+      <div>
+        <strong>Start timer after completed sets</strong>
+        <span>Cardio and core entries never trigger it.</span>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={prefs.enabled}
+        className={`switch-button ${prefs.enabled ? "is-on" : ""}`}
+        onClick={() => update("enabled", !prefs.enabled)}
+      >
+        {prefs.enabled ? "ON" : "OFF"}
+      </button>
+    </div>
+    <div className="rest-setting-grid">
+      <label>
+        <span>Accessory sets</span>
+        <select
+          value={prefs.accessorySeconds}
+          disabled={!prefs.enabled}
+          onChange={(event) => update("accessorySeconds", Number(event.target.value))}
+        >
+          {options.filter((seconds) => seconds <= 180).map((seconds) => (
+            <option value={seconds} key={seconds}>{seconds} seconds</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Heavy sets</span>
+        <select
+          value={prefs.heavySeconds}
+          disabled={!prefs.enabled}
+          onChange={(event) => update("heavySeconds", Number(event.target.value))}
+        >
+          {options.filter((seconds) => seconds >= 60).map((seconds) => (
+            <option value={seconds} key={seconds}>{seconds} seconds</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  </Panel>;
 }
 
 /* ============ CREW (connected) ============ */

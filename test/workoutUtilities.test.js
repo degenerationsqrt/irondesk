@@ -1,0 +1,80 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  DEFAULT_REST_TIMER_PREFS,
+  filterAndSortSessions,
+  normalizeRestTimerPrefs,
+  restDurationForEntry,
+  sessionsToCsv,
+  summarizeSessions,
+} from "../src/workoutUtilities.js";
+
+const sessions = [
+  {
+    id: "older",
+    date: "2026-05-01",
+    dayId: "Push, Pull",
+    mode: "home",
+    durationMin: 30,
+    entries: [{ ex: 'DB "Press"', db: true, role: "acc", sets: [{ w: 50, r: 10 }] }],
+    prs: [{ ex: 'DB "Press"' }],
+  },
+  {
+    id: "newer",
+    date: "2026-07-20",
+    dayId: "Legs",
+    mode: "gym",
+    durationMin: 55,
+    volume: 2400,
+    entries: [{ ex: "Squat", role: "main", sets: [{ w: 240, r: 10 }] }],
+    prs: [],
+  },
+];
+
+test("old saved data receives safe rest timer defaults without mutation", () => {
+  assert.deepEqual(normalizeRestTimerPrefs(undefined), DEFAULT_REST_TIMER_PREFS);
+  assert.deepEqual(normalizeRestTimerPrefs({ enabled: false, accessorySeconds: 45 }), {
+    enabled: false,
+    accessorySeconds: 45,
+    heavySeconds: 180,
+  });
+});
+
+test("rest duration is optional and skips cardio/core entries", () => {
+  assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { heavy: true }), 180);
+  assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { heavy: false }), 60);
+  assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { role: "cardio" }), 0);
+  assert.equal(restDurationForEntry({ enabled: false }, { heavy: true }), 0);
+});
+
+test("history can filter by exercise and mode, then sort by volume", () => {
+  assert.deepEqual(
+    filterAndSortSessions(sessions, { query: "press", mode: "home" }).map((item) => item.id),
+    ["older"],
+  );
+  assert.deepEqual(
+    filterAndSortSessions(sessions, { sort: "volume" }).map((item) => item.id),
+    ["newer", "older"],
+  );
+});
+
+test("history summaries tolerate legacy sessions without a recorded volume", () => {
+  assert.deepEqual(summarizeSessions(sessions), {
+    sessions: 2,
+    minutes: 85,
+    volume: 3400,
+    prs: 1,
+  });
+});
+
+test("CSV export includes headers, escapes text, and counts both dumbbells", () => {
+  const csv = sessionsToCsv(sessions);
+  assert.match(csv, /^workout_id,date,workout,/);
+  assert.match(csv, /"Push, Pull"/);
+  assert.match(csv, /"DB ""Press"""/);
+  assert.match(csv, /,1000,yes\r?\n/);
+});
+
+test("empty CSV exports remain useful and contain the header row", () => {
+  assert.equal(sessionsToCsv([]).split("\r\n").length, 1);
+});
