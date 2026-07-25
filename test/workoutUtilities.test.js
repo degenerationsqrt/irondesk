@@ -6,8 +6,10 @@ import {
   normalizeRestTimerPrefs,
   restDurationForEntry,
   sessionsToCsv,
+  sessionsToGarminCsv,
   summarizeSessions,
 } from "../src/workoutUtilities.js";
+import { mergeGarminSessions, parseGarminCsv } from "../src/garminImport.js";
 
 const sessions = [
   {
@@ -119,4 +121,16 @@ test("CSV export keeps Garmin summary activities even when no sets were recorded
   }]);
   assert.equal(csv.split("\r\n").length, 2);
   assert.match(csv, /garmin,Garmin fēnix 6X,67890,Running,3.10 mi,505,148,177$/);
+});
+
+test("Garmin-compatible CSV uses import headers and round-trips without duplicates", () => {
+  const csv = sessionsToGarminCsv(sessions);
+  assert.match(csv, /^Activity ID,Activity Type,Date,Title,Distance,Calories,Time,Avg HR,Max HR/);
+  assert.match(csv, /irondesk-newer,Strength Training,2026-07-20,Legs,,,00:55:00,,/);
+
+  const parsed = parseGarminCsv(csv);
+  const merged = mergeGarminSessions(sessions, parsed.sessions);
+  assert.equal(parsed.sessions.length, sessions.length);
+  assert.equal(merged.added, 0);
+  assert.equal(merged.duplicates, sessions.length);
 });

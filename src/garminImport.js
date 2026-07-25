@@ -568,15 +568,27 @@ export function mergeGarminSessions(existingSessions, importedSessions) {
       .map((session) => session?.sourceKey)
       .filter(Boolean),
   );
+  const knownActivityIds = new Set(
+    existing.flatMap((session) => [
+      session?.garmin?.activityId,
+      session?.id ? `irondesk-${session.id}` : "",
+    ]).filter(Boolean).map(String),
+  );
   const addedSessions = [];
   let duplicates = 0;
 
   for (const session of Array.isArray(importedSessions) ? importedSessions : []) {
-    if (!session?.sourceKey || knownKeys.has(session.sourceKey)) {
+    const activityId = String(session?.garmin?.activityId || "");
+    if (
+      !session?.sourceKey
+      || knownKeys.has(session.sourceKey)
+      || (activityId && knownActivityIds.has(activityId))
+    ) {
       duplicates += 1;
       continue;
     }
     knownKeys.add(session.sourceKey);
+    if (activityId) knownActivityIds.add(activityId);
     addedSessions.push(session);
   }
 

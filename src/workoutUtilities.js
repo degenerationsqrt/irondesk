@@ -131,9 +131,60 @@ const CSV_COLUMNS = [
   "max_hr",
 ];
 
+const GARMIN_CSV_COLUMNS = [
+  "Activity ID",
+  "Activity Type",
+  "Date",
+  "Title",
+  "Distance",
+  "Calories",
+  "Time",
+  "Avg HR",
+  "Max HR",
+];
+
 function csvCell(value) {
   const text = String(value ?? "");
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function durationClock(secondsValue) {
+  const totalSeconds = Math.max(0, Math.round(Number(secondsValue) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function garminActivityId(session, index) {
+  const recorded = String(session?.garmin?.activityId || "").trim();
+  if (recorded) return recorded;
+  const sourceActivity = String(session?.sourceKey || "").match(/^garmin:activity:(.+)$/)?.[1];
+  if (sourceActivity) return sourceActivity;
+  const id = String(session?.id || "").trim()
+    || `${session?.date || "undated"}-${index + 1}`;
+  return `irondesk-${id}`;
+}
+
+export function sessionsToGarminCsv(sessions) {
+  const rows = [GARMIN_CSV_COLUMNS];
+  (Array.isArray(sessions) ? sessions : []).forEach((session, index) => {
+    const garmin = session?.garmin || {};
+    const durationSeconds = Number(garmin.durationSeconds)
+      || (Number(session?.durationMin) || 0) * 60;
+    rows.push([
+      garminActivityId(session, index),
+      garmin.activityType || "Strength Training",
+      session?.startedAt || session?.date || "",
+      session?.dayId || session?.title || "IronDesk Workout",
+      garmin.distanceDisplay || "",
+      garmin.calories ?? "",
+      durationClock(durationSeconds),
+      garmin.avgHeartRate ?? "",
+      garmin.maxHeartRate ?? "",
+    ]);
+  });
+  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
 export function sessionsToCsv(sessions) {
