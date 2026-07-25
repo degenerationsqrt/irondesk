@@ -489,6 +489,218 @@ body {
   text-transform: uppercase;
 }
 
+.cloud-sync-card {
+  display: grid;
+  gap: 12px;
+}
+
+.cloud-sync-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid #303039;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgb(59 154 225 / 12%), rgb(20 20 24 / 92%));
+}
+
+.cloud-sync-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgb(125 211 252 / 35%);
+  border-radius: 50%;
+  color: #7dd3fc;
+  background: #111114;
+  font-size: 17px;
+}
+
+.cloud-sync-heading strong,
+.cloud-sync-heading span,
+.cloud-sync-message strong,
+.cloud-sync-message span {
+  display: block;
+}
+
+.cloud-sync-heading strong {
+  color: #f4f4f5;
+  font-size: 12px;
+}
+
+.cloud-sync-heading > div:nth-child(2) > span {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #92929b;
+  font-size: 10px;
+}
+
+.cloud-sync-chip {
+  padding: 5px 7px;
+  border: 1px solid #3b3b44;
+  border-radius: 999px;
+  color: #a1a1aa;
+  background: #151519;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.55px;
+  text-transform: uppercase;
+}
+
+.cloud-sync-chip.is-synced {
+  border-color: rgb(74 222 128 / 45%);
+  color: #4ade80;
+}
+
+.cloud-sync-chip.is-connecting,
+.cloud-sync-chip.is-syncing {
+  border-color: rgb(125 211 252 / 45%);
+  color: #7dd3fc;
+}
+
+.cloud-sync-chip.is-error {
+  border-color: rgb(225 29 42 / 50%);
+  color: #fb7185;
+}
+
+.cloud-account-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cloud-account-tabs,
+.cloud-account-form > .cloud-primary-button {
+  grid-column: 1 / -1;
+}
+
+.cloud-account-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+  border: 1px solid #303039;
+  border-radius: 9px;
+  background: #111114;
+}
+
+.cloud-account-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  color: #92929b;
+  background: transparent;
+  font: 700 10px "Archivo", sans-serif;
+  cursor: pointer;
+}
+
+.cloud-account-tabs button.is-active {
+  color: #f4f4f5;
+  background: #292931;
+}
+
+.cloud-account-form label span {
+  display: block;
+  margin-bottom: 6px;
+  color: #92929b;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cloud-account-form input {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid #34343c;
+  border-radius: 8px;
+  outline: none;
+  color: #f4f4f5;
+  background: #1d1d22;
+  font: 500 12px "Archivo", sans-serif;
+}
+
+.cloud-account-form input:focus {
+  border-color: #3b9ae1;
+  box-shadow: 0 0 0 3px rgb(59 154 225 / 12%);
+}
+
+.cloud-primary-button,
+.cloud-secondary-button {
+  min-height: 40px;
+  padding: 0 13px;
+  border-radius: 8px;
+  font: 800 10px "Archivo", sans-serif;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cloud-primary-button {
+  border: 1px solid #3b9ae1;
+  color: #07121a;
+  background: #7dd3fc;
+}
+
+.cloud-secondary-button {
+  border: 1px solid #3b3b44;
+  color: #c4c4cc;
+  background: #1d1d22;
+}
+
+.cloud-primary-button:disabled,
+.cloud-secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.cloud-sync-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.cloud-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cloud-sync-message {
+  padding: 10px 11px;
+  border: 1px solid #34343c;
+  border-radius: 8px;
+  color: #d4d4d8;
+  background: #19191e;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.cloud-sync-message.is-synced {
+  border-color: rgb(74 222 128 / 35%);
+  background: rgb(74 222 128 / 7%);
+}
+
+.cloud-sync-message.is-error {
+  border-color: rgb(225 29 42 / 42%);
+  background: rgb(225 29 42 / 8%);
+}
+
+.cloud-sync-message span {
+  margin-top: 3px;
+  color: #92929b;
+  font-size: 9px;
+}
+
+.cloud-privacy-note {
+  padding-top: 10px;
+  border-top: 1px solid #2b2b32;
+  color: #85858e;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
 .garmin-import-card {
   display: grid;
   gap: 13px;
@@ -853,5 +1065,27 @@ body {
 
   .history-exercise {
     gap: 4px;
+  }
+
+  .cloud-account-form {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-account-form > *,
+  .cloud-account-form > .cloud-primary-button {
+    grid-column: 1;
+  }
+
+  .cloud-sync-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .cloud-sync-chip {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .cloud-sync-actions > button {
+    flex: 1 1 120px;
   }
 }

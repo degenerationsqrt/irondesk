@@ -18,6 +18,7 @@ import {
   restDurationForEntry,
   safeSessionVolume,
   sessionsToCsv,
+  sessionsToGarminCsv,
   summarizeSessions,
 } from "./workoutUtilities.js";
 import {
@@ -26,6 +27,14 @@ import {
   parseGarminCsv,
   parseGarminFit,
 } from "./garminImport.js";
+import {
+  CLOUD_SYNC_PREF_KEY,
+  buildPersonalState,
+  createCloudEnvelope,
+  getOrCreateCloudDeviceId,
+  mergePersonalStates,
+  personalStateHash,
+} from "./cloudSync.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
@@ -804,6 +813,23 @@ var FB = function () {
     signOut: function () {
       return auth().signOut();
     },
+    watchPersonalState: function (uid, cb, onError) {
+      if (!ready || !uid) {
+        cb(null);
+        return function () {};
+      }
+      return db().collection("users").doc(uid).onSnapshot(function (doc) {
+        cb(doc.exists ? doc.data()?.irondeskCloud || null : null);
+      }, onError || function () {});
+    },
+    savePersonalState: function (uid, envelope) {
+      if (!ready || !uid) return Promise.reject(new Error("Firebase is unavailable."));
+      return db().collection("users").doc(uid).set({
+        irondeskCloud: envelope
+      }, {
+        merge: true
+      });
+    },
     createGroup: function (uid, name, groupName) {
       var code = Math.random().toString(36).slice(2, 8).toUpperCase();
       var ref = db().collection("groups").doc();
@@ -1003,6 +1029,44 @@ export default function IronDesk() {
   const lastPushed = useRef(null);
   const [loaded, setLoaded] = useState(false);
   const [flash, setFlash] = useState("");
+  const [cloudUser, setCloudUser] = useState(null);
+  const [cloudEnabled, setCloudEnabled] = useState(() => {
+    try {
+      return localStorage.getItem(CLOUD_SYNC_PREF_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [cloudStatus, setCloudStatus] = useState({
+    state: "signed-out",
+    message: "Sign in to sync this device.",
+    syncedAt: null
+  });
+  const [cloudSyncNonce, setCloudSyncNonce] = useState(0);
+  const [cloudDeviceId] = useState(() => getOrCreateCloudDeviceId(localStorage));
+  const cloudReadyRef = useRef(false);
+  const cloudLastHashRef = useRef("");
+  const personalState = useMemo(() => buildPersonalState({
+    maxes,
+    homePlates,
+    gymPlates,
+    bar,
+    mode,
+    sessions,
+    bwLog,
+    cardioLog,
+    active,
+    progress,
+    gender,
+    goal,
+    styleOverride,
+    customDays,
+    onboarded,
+    macros,
+    restTimerPrefs
+  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
+  const personalStateRef = useRef(personalState);
+  personalStateRef.current = personalState;
   useEffect(() => {
     (async () => {
       try {
@@ -1076,6 +1140,189 @@ export default function IronDesk() {
     if (loaded) persist(); /* eslint-disable-next-line */
   }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
 
+  useEffect(() => FB.onAuth(user => {
+    setCloudUser(user || null);
+    cloudReadyRef.current = false;
+    cloudLastHashRef.current = "";
+    setCloudStatus(user ? {
+      state: cloudEnabled ? "connecting" : "paused",
+      message: cloudEnabled ? "Connecting to your cloud copy…" : "Cloud sync is paused.",
+      syncedAt: null
+    } : {
+      state: "signed-out",
+      message: "Sign in to sync this device.",
+      syncedAt: null
+    });
+  }), [cloudEnabled]);
+
+  const applyPersonalState = state => {
+    state.maxes && setMaxes(state.maxes);
+    state.homePlates && setHomePlates(state.homePlates);
+    state.gymPlates && setGymPlates(state.gymPlates);
+    if (state.bar != null) setBar(state.bar);
+    state.mode && setMode(state.mode);
+    Array.isArray(state.sessions) && setSessions(state.sessions);
+    Array.isArray(state.bwLog) && setBwLog(state.bwLog);
+    Array.isArray(state.cardioLog) && setCardioLog(state.cardioLog);
+    if (Object.prototype.hasOwnProperty.call(state, "active")) setActive(state.active || null);
+    state.progress && setProgress(state.progress);
+    state.gender && setGender(state.gender);
+    state.goal && setGoal(state.goal);
+    if (Object.prototype.hasOwnProperty.call(state, "styleOverride")) setStyleOverride(state.styleOverride || null);
+    Array.isArray(state.customDays) && setCustomDays(state.customDays);
+    if (typeof state.onboarded === "boolean") setOnboarded(state.onboarded);
+    if (Object.prototype.hasOwnProperty.call(state, "macros")) setMacros(state.macros || null);
+    setRestTimerPrefs(normalizeRestTimerPrefs(state.restTimerPrefs));
+  };
+
+  useEffect(() => {
+    if (!loaded || !cloudEnabled || !cloudUser || !FB.ready) return undefined;
+    cloudReadyRef.current = false;
+    setCloudStatus({
+      state: "connecting",
+      message: "Checking your cloud copy…",
+      syncedAt: null
+    });
+    return FB.watchPersonalState(cloudUser.uid, payload => {
+      const local = personalStateRef.current;
+      if (!payload?.state) {
+        const hash = personalStateHash(local);
+        cloudLastHashRef.current = hash;
+        cloudReadyRef.current = true;
+        setCloudStatus({
+          state: "syncing",
+          message: "Uploading this device for the first time…",
+          syncedAt: null
+        });
+        try {
+          const envelope = createCloudEnvelope(local, {
+            deviceId: cloudDeviceId
+          });
+          FB.savePersonalState(cloudUser.uid, envelope).then(() => {
+            setCloudStatus({
+              state: "synced",
+              message: "This device is synced.",
+              syncedAt: Date.now()
+            });
+          }).catch(error => {
+            setCloudStatus({
+              state: "error",
+              message: error?.code === "permission-denied"
+                ? "Firebase denied personal sync. Check Firestore rules."
+                : error?.message || "Cloud upload failed.",
+              syncedAt: null
+            });
+          });
+        } catch (error) {
+          setCloudStatus({
+            state: "error",
+            message: error?.message || "Cloud upload failed.",
+            syncedAt: null
+          });
+        }
+        return;
+      }
+
+      const remote = buildPersonalState(payload.state);
+      const merged = mergePersonalStates(local, remote);
+      const localHash = personalStateHash(local);
+      const remoteHash = personalStateHash(remote);
+      const mergedHash = personalStateHash(merged);
+      cloudReadyRef.current = true;
+      cloudLastHashRef.current = mergedHash === remoteHash ? mergedHash : remoteHash;
+      if (mergedHash !== localHash) applyPersonalState(merged);
+      if (mergedHash !== remoteHash) {
+        setCloudStatus({
+          state: "syncing",
+          message: "Merging this device with your cloud history…",
+          syncedAt: null
+        });
+        setCloudSyncNonce(value => value + 1);
+      } else {
+        setCloudStatus({
+          state: "synced",
+          message: "This device is synced.",
+          syncedAt: Number(payload.updatedAt) || Date.now()
+        });
+      }
+    }, error => {
+      setCloudStatus({
+        state: "error",
+        message: error?.code === "permission-denied"
+          ? "Firebase denied personal sync. Check Firestore rules."
+          : error?.message || "Cloud connection failed.",
+        syncedAt: null
+      });
+    });
+  }, [loaded, cloudEnabled, cloudUser, cloudDeviceId]);
+
+  useEffect(() => {
+    if (
+      !loaded
+      || !cloudEnabled
+      || !cloudUser
+      || !cloudReadyRef.current
+      || !FB.ready
+    ) return undefined;
+    const hash = personalStateHash(personalState);
+    if (hash === cloudLastHashRef.current) return undefined;
+    setCloudStatus({
+      state: "syncing",
+      message: "Saving changes to your cloud copy…",
+      syncedAt: null
+    });
+    const timer = setTimeout(() => {
+      try {
+        const envelope = createCloudEnvelope(personalStateRef.current, {
+          deviceId: cloudDeviceId
+        });
+        const envelopeHash = personalStateHash(envelope.state);
+        FB.savePersonalState(cloudUser.uid, envelope).then(() => {
+          cloudLastHashRef.current = envelopeHash;
+          setCloudStatus({
+            state: "synced",
+            message: "This device is synced.",
+            syncedAt: Date.now()
+          });
+        }).catch(error => {
+          setCloudStatus({
+            state: "error",
+            message: error?.code === "permission-denied"
+              ? "Firebase denied personal sync. Check Firestore rules."
+              : error?.message || "Cloud save failed.",
+            syncedAt: null
+          });
+        });
+      } catch (error) {
+        setCloudStatus({
+          state: "error",
+          message: error?.message || "Cloud save failed.",
+          syncedAt: null
+        });
+      }
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [personalState, loaded, cloudEnabled, cloudUser, cloudDeviceId, cloudSyncNonce]);
+
+  const updateCloudEnabled = enabled => {
+    try {
+      localStorage.setItem(CLOUD_SYNC_PREF_KEY, enabled ? "true" : "false");
+    } catch {}
+    setCloudEnabled(enabled);
+    cloudReadyRef.current = false;
+    if (!enabled) {
+      setCloudStatus({
+        state: cloudUser ? "paused" : "signed-out",
+        message: cloudUser ? "Cloud sync is paused." : "Sign in to sync this device.",
+        syncedAt: null
+      });
+    }
+  };
+  const syncCloudNow = () => {
+    cloudLastHashRef.current = "";
+    setCloudSyncNonce(value => value + 1);
+  };
+
   // push PRs + stats to the crew group when a new session lands
   useEffect(() => {
     if (!FB.ready || !loaded) return;
@@ -1133,8 +1380,12 @@ export default function IronDesk() {
     note("JSON backup exported");
   };
   const exportCsv = () => {
-    downloadFile(`\uFEFF${sessionsToCsv(sessions)}`, `irondesk-history-${today()}.csv`, "text/csv;charset=utf-8");
-    note(sessions.length ? "CSV history exported" : "CSV exported — no sets yet");
+    downloadFile(`\uFEFF${sessionsToGarminCsv(sessions)}`, `irondesk-garmin-history-${today()}.csv`, "text/csv;charset=utf-8");
+    note(sessions.length ? "Garmin import CSV exported" : "Garmin import CSV exported — no sessions yet");
+  };
+  const exportSetCsv = () => {
+    downloadFile(`\uFEFF${sessionsToCsv(sessions)}`, `irondesk-set-history-${today()}.csv`, "text/csv;charset=utf-8");
+    note(sessions.length ? "Detailed set CSV exported" : "Set CSV exported — no sets yet");
   };
   const importData = file => {
     if (!file) return;
@@ -1421,6 +1672,7 @@ export default function IronDesk() {
     mode,
     exportJson,
     exportCsv,
+    exportSetCsv,
     importData,
     importGarminFiles,
     sessions,
@@ -1430,6 +1682,15 @@ export default function IronDesk() {
     setGoal,
     restTimerPrefs,
     setRestTimerPrefs,
+    firebaseReady: FB.ready,
+    cloudUser,
+    cloudEnabled,
+    cloudStatus,
+    updateCloudEnabled,
+    syncCloudNow,
+    cloudSignIn: FB.signIn,
+    cloudSignUp: FB.signUp,
+    cloudSignOut: FB.signOut,
     setTab
   }))));
 }
@@ -2587,7 +2848,7 @@ function History({
         <p>Search, filter, sort, and export IronDesk workouts and Garmin activities.</p>
       </div>
       <button type="button" className="history-export-button" onClick={exportCsv}>
-        ↓ CSV
+        ↓ Garmin Import CSV
       </button>
     </section>
 
@@ -3427,6 +3688,204 @@ function Tools({
 }
 
 /* ============ SETTINGS ============ */
+function friendlyAuthError(error) {
+  const code = String(error?.code || "");
+  if (code.includes("operation-not-allowed")) {
+    return "Email/password sign-in is not enabled in Firebase yet.";
+  }
+  if (code.includes("email-already-in-use")) {
+    return "That email already has an account. Sign in instead.";
+  }
+  if (
+    code.includes("invalid-credential")
+    || code.includes("invalid-login-credentials")
+    || code.includes("wrong-password")
+    || code.includes("user-not-found")
+  ) {
+    return "Email or password did not match.";
+  }
+  if (code.includes("weak-password")) return "Use a password with at least 6 characters.";
+  if (code.includes("invalid-email")) return "Enter a valid email address.";
+  if (code.includes("network-request-failed")) return "No network connection. Try again when you are online.";
+  return error?.message || "Account request failed.";
+}
+
+function CloudSyncPanel({
+  firebaseReady,
+  user,
+  enabled,
+  status,
+  onEnable,
+  onSyncNow,
+  onSignIn,
+  onSignUp,
+  onSignOut,
+}) {
+  const [accountMode, setAccountMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const statusState = ["connecting", "syncing", "synced", "error", "paused", "signed-out"]
+    .includes(status?.state) ? status.state : "paused";
+
+  const submitAccount = async event => {
+    event.preventDefault();
+    setBusy(true);
+    setAccountError("");
+    try {
+      if (accountMode === "signup") {
+        await onSignUp(email.trim(), password, name.trim() || email.trim().split("@")[0]);
+      } else {
+        await onSignIn(email.trim(), password);
+      }
+      onEnable(true);
+      setPassword("");
+    } catch (error) {
+      setAccountError(friendlyAuthError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    setBusy(true);
+    setAccountError("");
+    try {
+      onEnable(false);
+      await onSignOut();
+    } catch (error) {
+      setAccountError(friendlyAuthError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <Panel
+    title="Personal Cloud Sync"
+    sub="Keep workouts, Garmin imports, maxes, trends, and preferences aligned across your phone and website"
+  >
+    <div className="cloud-sync-card">
+      <div className="cloud-sync-heading">
+        <div className="cloud-sync-mark" aria-hidden="true">☁</div>
+        <div>
+          <strong>{user ? "Your IronDesk account" : "Use the same account on every device"}</strong>
+          <span>{user?.email || "Sign in once on the website and once on your phone."}</span>
+        </div>
+        <span className={`cloud-sync-chip is-${statusState}`}>
+          {enabled && user ? statusState.replace("-", " ") : user ? "paused" : "signed out"}
+        </span>
+      </div>
+
+      {!firebaseReady ? (
+        <div className="cloud-sync-message is-error" role="alert">
+          Firebase did not load. Refresh the app while online and try again.
+        </div>
+      ) : !user ? (
+        <form className="cloud-account-form" onSubmit={submitAccount}>
+          <div className="cloud-account-tabs" aria-label="Cloud account action">
+            <button
+              type="button"
+              className={accountMode === "signin" ? "is-active" : ""}
+              onClick={() => {
+                setAccountMode("signin");
+                setAccountError("");
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              className={accountMode === "signup" ? "is-active" : ""}
+              onClick={() => {
+                setAccountMode("signup");
+                setAccountError("");
+              }}
+            >
+              Create account
+            </button>
+          </div>
+          {accountMode === "signup" && (
+            <label>
+              <span>Name</span>
+              <input
+                type="text"
+                autoComplete="name"
+                value={name}
+                onChange={event => setName(event.target.value)}
+                placeholder="Your name"
+              />
+            </label>
+          )}
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              autoComplete={accountMode === "signup" ? "new-password" : "current-password"}
+              required
+              minLength={6}
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              placeholder="6+ characters"
+            />
+          </label>
+          <button type="submit" className="cloud-primary-button" disabled={busy}>
+            {busy
+              ? "Connecting…"
+              : accountMode === "signup" ? "Create Account & Sync" : "Sign In & Sync"}
+          </button>
+        </form>
+      ) : (
+        <div className="cloud-sync-controls">
+          <div className={`cloud-sync-message is-${statusState}`} role={statusState === "error" ? "alert" : "status"}>
+            <strong>{status?.message || (enabled ? "Connecting…" : "Cloud sync is paused.")}</strong>
+            {status?.syncedAt && (
+              <span>Last synced {new Date(status.syncedAt).toLocaleString()}</span>
+            )}
+          </div>
+          <div className="cloud-sync-actions">
+            {!enabled ? (
+              <button type="button" className="cloud-primary-button" onClick={() => onEnable(true)}>
+                Turn On Cloud Sync
+              </button>
+            ) : (
+              <>
+                <button type="button" className="cloud-primary-button" onClick={onSyncNow}>
+                  Sync Now
+                </button>
+                <button type="button" className="cloud-secondary-button" onClick={() => onEnable(false)}>
+                  Pause
+                </button>
+              </>
+            )}
+            <button type="button" className="cloud-secondary-button" onClick={signOut} disabled={busy}>
+              Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+
+      {accountError && <div className="cloud-sync-message is-error" role="alert">{accountError}</div>}
+      <div className="cloud-privacy-note">
+        First connection safely merges workout, bodyweight, and cardio histories. Decoded Garmin
+        activity data syncs; the original FIT or CSV files stay on the device where you selected them.
+      </div>
+    </div>
+  </Panel>;
+}
+
 function GarminImportPanel({
   importGarminFiles,
   setTab
@@ -3528,6 +3987,7 @@ function Settings({
   mode,
   exportJson,
   exportCsv,
+  exportSetCsv,
   importData,
   importGarminFiles,
   sessions,
@@ -3537,6 +3997,15 @@ function Settings({
   setGoal,
   restTimerPrefs,
   setRestTimerPrefs,
+  firebaseReady,
+  cloudUser,
+  cloudEnabled,
+  cloudStatus,
+  updateCloudEnabled,
+  syncCloudNow,
+  cloudSignIn,
+  cloudSignUp,
+  cloudSignOut,
   setTab
 }) {
   const setGenderGoal = g => {
@@ -3683,6 +4152,16 @@ function Settings({
   })))), /*#__PURE__*/React.createElement(RestTimerSettings, {
     preferences: restTimerPrefs,
     setPreferences: setRestTimerPrefs
+  }), /*#__PURE__*/React.createElement(CloudSyncPanel, {
+    firebaseReady,
+    user: cloudUser,
+    enabled: cloudEnabled,
+    status: cloudStatus,
+    onEnable: updateCloudEnabled,
+    onSyncNow: syncCloudNow,
+    onSignIn: cloudSignIn,
+    onSignUp: cloudSignUp,
+    onSignOut: cloudSignOut
   }), /*#__PURE__*/React.createElement(GarminImportPanel, {
     importGarminFiles,
     setTab
@@ -3729,7 +4208,24 @@ function Settings({
       textTransform: "uppercase",
       cursor: "pointer"
     }
-  }, "↓ CSV History"), /*#__PURE__*/React.createElement("label", {
+  }, "↓ Garmin Import CSV"), /*#__PURE__*/React.createElement("button", {
+    onClick: exportSetCsv,
+    style: {
+      flex: 1,
+      minWidth: 130,
+      padding: "12px",
+      background: C.panel2,
+      border: `1px solid ${C.red}`,
+      borderRadius: 10,
+      color: C.red,
+      fontFamily: "'Oswald'",
+      fontSize: 12.5,
+      fontWeight: 600,
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, "↓ Detailed Sets"), /*#__PURE__*/React.createElement("label", {
     style: {
       flex: 1,
       minWidth: 130,
