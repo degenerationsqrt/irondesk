@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@garmin/fitsdk": "^21.208.0",
+    "fflate": "^0.8.2",
     "firebase": "12.16.0",
     "prop-types": "15.8.1",
     "react": "18.3.1",
