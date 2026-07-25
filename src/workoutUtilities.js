@@ -13,6 +13,13 @@ function safeDuration(value, fallback) {
   return REST_DURATION_OPTIONS.has(duration) ? duration : fallback;
 }
 
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
 export function normalizeRestTimerPrefs(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
@@ -41,7 +48,7 @@ export function filterAndSortSessions(
   sessions,
   { query = "", mode = "all", range = "all", sort = "newest", now = new Date() } = {},
 ) {
-  const normalizedQuery = String(query).trim().toLowerCase();
+  const normalizedQuery = normalizeSearchText(query).trim();
   const days = range === "30d" ? 30 : range === "90d" ? 90 : range === "year" ? 365 : null;
   const cutoff = days == null
     ? null
@@ -52,15 +59,17 @@ export function filterAndSortSessions(
     if (cutoff && String(session?.date || "") < cutoff) return false;
     if (!normalizedQuery) return true;
 
-    const haystack = [
+    const haystack = normalizeSearchText([
       session?.dayId,
       session?.date,
       session?.mode,
+      session?.source,
+      session?.sourceDevice,
+      session?.garmin?.activityType,
       ...(Array.isArray(session?.entries) ? session.entries.map((entry) => entry?.ex) : []),
     ]
       .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+      .join(" "));
 
     return haystack.includes(normalizedQuery);
   });
@@ -112,6 +121,14 @@ const CSV_COLUMNS = [
   "reps",
   "set_volume_lb",
   "is_pr",
+  "source",
+  "source_device",
+  "garmin_activity_id",
+  "activity_type",
+  "distance",
+  "calories",
+  "avg_hr",
+  "max_hr",
 ];
 
 function csvCell(value) {
@@ -127,6 +144,16 @@ export function sessionsToCsv(sessions) {
     const prs = new Set(
       (Array.isArray(session?.prs) ? session.prs : []).map((personalRecord) => personalRecord?.ex),
     );
+    const sourceFields = [
+      session?.source || "irondesk",
+      session?.sourceDevice || "",
+      session?.garmin?.activityId || "",
+      session?.garmin?.activityType || "",
+      session?.garmin?.distanceDisplay || "",
+      session?.garmin?.calories ?? "",
+      session?.garmin?.avgHeartRate ?? "",
+      session?.garmin?.maxHeartRate ?? "",
+    ];
 
     for (const entry of entries) {
       const sets = Array.isArray(entry?.sets) ? entry.sets : [];
@@ -146,8 +173,29 @@ export function sessionsToCsv(sessions) {
           Number(set?.r) || 0,
           setVolume(set, Boolean(entry?.db)),
           prs.has(entry?.ex) ? "yes" : "no",
+          ...sourceFields,
         ]);
       });
+    }
+
+    if (!entries.some((entry) => Array.isArray(entry?.sets) && entry.sets.length)) {
+      rows.push([
+        session?.id,
+        session?.date,
+        session?.dayId,
+        session?.mode,
+        Number(session?.durationMin) || 0,
+        safeSessionVolume(session),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ...sourceFields,
+      ]);
     }
   }
 

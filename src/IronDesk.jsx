@@ -20,6 +20,12 @@ import {
   sessionsToCsv,
   summarizeSessions,
 } from "./workoutUtilities.js";
+import {
+  garminMetricItems,
+  mergeGarminSessions,
+  parseGarminCsv,
+  parseGarminFit,
+} from "./garminImport.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
@@ -883,13 +889,16 @@ var FB = function () {
   };
 }();
 function computeStats(sessions, maxes) {
+  var ironDeskSessions = sessions.filter(function (session) {
+    return session?.source !== "garmin";
+  });
   var best = {
     bench: 0,
     squat: 0,
     ohp: 0,
     deadlift: 0
   };
-  sessions.forEach(function (s) {
+  ironDeskSessions.forEach(function (s) {
     s.entries.forEach(function (en) {
       if (en.lift && best.hasOwnProperty(en.lift)) en.sets.forEach(function (st) {
         var estimate = estimatedMaxForSet(st.w, st.r);
@@ -903,7 +912,7 @@ function computeStats(sessions, maxes) {
     if (!best[k]) best[k] = maxes[k] || 0;
   });
   var cut = localDateKey(new Date(Date.now() - 7 * 864e5));
-  var wk = sessions.filter(function (s) {
+  var wk = ironDeskSessions.filter(function (s) {
     return s.date >= cut;
   });
   return {
@@ -1159,6 +1168,57 @@ export default function IronDesk() {
     };
     rd.readAsText(file);
   };
+  const importGarminFiles = async files => {
+    const selected = Array.from(files || []);
+    if (!selected.length) throw new Error("Choose at least one Garmin FIT or CSV file.");
+
+    const importedSessions = [];
+    const warnings = [];
+    const failedFiles = [];
+    let skippedRows = 0;
+    for (const file of selected) {
+      try {
+        const name = String(file.name || "");
+        const lowerName = name.toLowerCase();
+        let parsed;
+        if (lowerName.endsWith(".fit")) {
+          parsed = await parseGarminFit(await file.arrayBuffer(), {
+            sourceFile: name,
+            device: "Garmin fēnix 6X"
+          });
+        } else if (lowerName.endsWith(".csv") || file.type === "text/csv") {
+          parsed = parseGarminCsv(await file.text(), {
+            sourceFile: name,
+            device: "Garmin fēnix 6X"
+          });
+        } else {
+          throw new Error("Use a .FIT or .CSV file.");
+        }
+        importedSessions.push(...parsed.sessions);
+        skippedRows += Number(parsed.skippedRows) || 0;
+        warnings.push(...(parsed.warnings || []).map(warning => `${name}: ${warning}`));
+      } catch (error) {
+        failedFiles.push(`${file.name || "File"}: ${error?.message || "Import failed"}`);
+      }
+    }
+
+    if (!importedSessions.length) {
+      throw new Error(failedFiles[0] || "No Garmin activities were found.");
+    }
+    const merged = mergeGarminSessions(sessions, importedSessions);
+    setSessions(merged.sessions);
+    note(merged.added
+      ? `${merged.added} Garmin activit${merged.added === 1 ? "y" : "ies"} imported`
+      : "Garmin import already up to date");
+    return {
+      ...merged,
+      files: selected.length,
+      parsed: importedSessions.length,
+      skippedRows,
+      warnings,
+      failedFiles
+    };
+  };
   const TABS = [["today", "Today"], ["program", "Program"], ["core", "Core"], ["hiit", "HIIT"], ["mma", "MMA"], ["pilates", "Pilates"], ["yoga", "Yoga"], ["macros", "Macros"], ["crew", "Crew"], ["history", "History"], ["trends", "Trends"], ["tools", "Tools"], ["ideas", "Ideas"], ["settings", "Settings"]];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1362,13 +1422,15 @@ export default function IronDesk() {
     exportJson,
     exportCsv,
     importData,
+    importGarminFiles,
     sessions,
     gender,
     goal,
     setGender,
     setGoal,
     restTimerPrefs,
-    setRestTimerPrefs
+    setRestTimerPrefs,
+    setTab
   }))));
 }
 
@@ -2522,7 +2584,7 @@ function History({
       <div>
         <div className="history-heading-kicker">Training &amp; Planning</div>
         <h2 className="ttl">Workout History</h2>
-        <p>Search, filter, sort, and export every logged workout.</p>
+        <p>Search, filter, sort, and export IronDesk workouts and Garmin activities.</p>
       </div>
       <button type="button" className="history-export-button" onClick={exportCsv}>
         ↓ CSV
@@ -2536,6 +2598,7 @@ function History({
           ["all", "All sessions"],
           ["home", "Home"],
           ["gym", "Gym"],
+          ["garmin", "Garmin"],
         ].map(([value, label]) => (
           <button
             type="button"
@@ -2544,7 +2607,9 @@ function History({
             aria-pressed={modeFilter === value}
             onClick={() => setModeFilter(value)}
           >
-            <span aria-hidden="true">{value === "all" ? "▦" : value === "home" ? "⌂" : "◆"}</span>
+            <span aria-hidden="true">
+              {value === "all" ? "▦" : value === "home" ? "⌂" : value === "garmin" ? "G" : "◆"}
+            </span>
             {label}
           </button>
         ))}
@@ -2624,8 +2689,13 @@ function History({
             const isOpen = open === sessionId;
             const entries = Array.isArray(session.entries) ? session.entries : [];
             const records = Array.isArray(session.prs) ? session.prs : [];
+            const isGarmin = session.source === "garmin";
+            const garminMetrics = isGarmin ? garminMetricItems(session) : [];
             return (
-              <article className={`history-card ${isOpen ? "is-open" : ""}`} key={sessionId}>
+              <article
+                className={`history-card ${isOpen ? "is-open" : ""} ${isGarmin ? "is-garmin" : ""}`}
+                key={sessionId}
+              >
                 <div className="history-card-row">
                   <button
                     type="button"
@@ -2635,13 +2705,15 @@ function History({
                   >
                     <span className="history-card-date">
                       {session.date || "No date"}
-                      <small>{session.mode === "gym" ? "GYM" : "HOME"}</small>
+                      <small>{isGarmin ? "GARMIN" : session.mode === "gym" ? "GYM" : "HOME"}</small>
                     </span>
                     <span className="history-card-main">
                       <strong>{session.dayId || "Workout"}</strong>
                       <small>
-                        {Number(session.durationMin) || 0} min · {Math.round(safeSessionVolume(session)).toLocaleString()} lb
-                        {records.length ? ` · ${records.length} PR${records.length === 1 ? "" : "s"}` : ""}
+                        {isGarmin
+                          ? `${Number(session.durationMin) || 0} min · ${session.garmin?.activityType || "Garmin activity"}`
+                          : `${Number(session.durationMin) || 0} min · ${Math.round(safeSessionVolume(session)).toLocaleString()} lb`}
+                        {!isGarmin && records.length ? ` · ${records.length} PR${records.length === 1 ? "" : "s"}` : ""}
                       </small>
                     </span>
                     <span className="history-card-chevron" aria-hidden="true">{isOpen ? "⌃" : "⌄"}</span>
@@ -2658,8 +2730,30 @@ function History({
 
                 {isOpen && (
                   <div className="history-card-detail">
+                    {isGarmin && (
+                      <div className="garmin-history-summary">
+                        <div className="garmin-history-source">
+                          <span className="garmin-device-mark" aria-hidden="true">G</span>
+                          <div>
+                            <strong>{session.sourceDevice || "Garmin fēnix 6X"}</strong>
+                            <small>{session.garmin?.sourceFile || "Garmin activity import"}</small>
+                          </div>
+                        </div>
+                        {garminMetrics.length > 0 && (
+                          <div className="garmin-metric-grid">
+                            {garminMetrics.map(([label, value]) => (
+                              <div key={label}><strong>{value}</strong><span>{label}</span></div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {entries.length === 0 ? (
-                      <span className="history-legacy-note">This older session has no set detail.</span>
+                      <span className="history-legacy-note">
+                        {isGarmin
+                          ? "Activity summary imported. Use the original FIT file when you want the best available set detail."
+                          : "This older session has no set detail."}
+                      </span>
                     ) : entries.map((entry, entryIndex) => {
                       const sets = Array.isArray(entry.sets) ? entry.sets : [];
                       return (
@@ -3333,6 +3427,97 @@ function Tools({
 }
 
 /* ============ SETTINGS ============ */
+function GarminImportPanel({
+  importGarminFiles,
+  setTab
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const handleFiles = async fileList => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const imported = await importGarminFiles(files);
+      setResult({
+        kind: imported.failedFiles.length ? "warning" : "success",
+        title: imported.added
+          ? `Added ${imported.added} Garmin activit${imported.added === 1 ? "y" : "ies"}`
+          : "No new Garmin activities",
+        detail: [
+          imported.duplicates
+            ? `${imported.duplicates} duplicate${imported.duplicates === 1 ? "" : "s"} skipped`
+            : "",
+          imported.skippedRows
+            ? `${imported.skippedRows} undated row${imported.skippedRows === 1 ? "" : "s"} skipped`
+            : "",
+          imported.failedFiles[0] || ""
+        ].filter(Boolean).join(" · ")
+      });
+    } catch (error) {
+      setResult({
+        kind: "error",
+        title: "Garmin import failed",
+        detail: error?.message || "The selected file could not be read."
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <Panel
+    title="Garmin fēnix 6X Import"
+    sub="Bring watch activities into History without replacing your IronDesk workouts"
+  >
+    <div className="garmin-import-card">
+      <div className="garmin-import-heading">
+        <div className="garmin-device-mark" aria-hidden="true">G</div>
+        <div>
+          <strong>FIT / CSV activity import</strong>
+          <span>Original FIT files include the richest heart-rate and strength-set detail.</span>
+        </div>
+        <span className="garmin-device-chip">FĒNIX 6X</span>
+      </div>
+      <div className="garmin-import-steps">
+        <span><b>1</b> Export Original (.FIT) from a Garmin Connect activity, or export the Activities CSV.</span>
+        <span><b>2</b> Select one or many files below. Repeat imports are skipped automatically.</span>
+      </div>
+      <label className={`garmin-import-button ${busy ? "is-busy" : ""}`}>
+        {busy ? "Reading Garmin files…" : "↑ Select Garmin FIT / CSV"}
+        <input
+          type="file"
+          accept=".fit,.FIT,.csv,text/csv,application/vnd.ant.fit"
+          multiple
+          disabled={busy}
+          onChange={event => {
+            handleFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </label>
+      <div className="garmin-privacy-note">
+        <span aria-hidden="true">⌁</span>
+        Processed on this device. IronDesk never asks for your Garmin password and does not upload
+        the selected files.
+      </div>
+      {result && (
+        <div
+          className={`garmin-import-result is-${result.kind}`}
+          role={result.kind === "error" ? "alert" : "status"}
+        >
+          <div>
+            <strong>{result.title}</strong>
+            {result.detail && <span>{result.detail}</span>}
+          </div>
+          {result.kind !== "error" && (
+            <button type="button" onClick={() => setTab("history")}>View History →</button>
+          )}
+        </div>
+      )}
+    </div>
+  </Panel>;
+}
+
 function Settings({
   maxes,
   setMaxes,
@@ -3344,13 +3529,15 @@ function Settings({
   exportJson,
   exportCsv,
   importData,
+  importGarminFiles,
   sessions,
   gender,
   goal,
   setGender,
   setGoal,
   restTimerPrefs,
-  setRestTimerPrefs
+  setRestTimerPrefs,
+  setTab
 }) {
   const setGenderGoal = g => {
     setGender(g);
@@ -3496,6 +3683,9 @@ function Settings({
   })))), /*#__PURE__*/React.createElement(RestTimerSettings, {
     preferences: restTimerPrefs,
     setPreferences: setRestTimerPrefs
+  }), /*#__PURE__*/React.createElement(GarminImportPanel, {
+    importGarminFiles,
+    setTab
   }), /*#__PURE__*/React.createElement(Panel, {
     title: "Backup & Restore",
     sub: `${sessions.length} sessions in your log — export to keep them forever`
