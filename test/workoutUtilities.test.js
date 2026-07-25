@@ -58,6 +58,24 @@ test("history can filter by exercise and mode, then sort by volume", () => {
   );
 });
 
+test("history can isolate and search Garmin imports", () => {
+  const garminSession = {
+    id: "garmin-run",
+    date: "2026-07-21",
+    dayId: "Morning Run",
+    mode: "garmin",
+    source: "garmin",
+    sourceDevice: "Garmin fēnix 6X",
+    garmin: { activityType: "Running" },
+    entries: [],
+  };
+  assert.deepEqual(
+    filterAndSortSessions([...sessions, garminSession], { mode: "garmin", query: "fenix" })
+      .map((item) => item.id),
+    ["garmin-run"],
+  );
+});
+
 test("history summaries tolerate legacy sessions without a recorded volume", () => {
   assert.deepEqual(summarizeSessions(sessions), {
     sessions: 2,
@@ -72,9 +90,33 @@ test("CSV export includes headers, escapes text, and counts both dumbbells", () 
   assert.match(csv, /^workout_id,date,workout,/);
   assert.match(csv, /"Push, Pull"/);
   assert.match(csv, /"DB ""Press"""/);
-  assert.match(csv, /,1000,yes\r?\n/);
+  assert.match(csv, /,1000,yes,irondesk,/);
 });
 
 test("empty CSV exports remain useful and contain the header row", () => {
   assert.equal(sessionsToCsv([]).split("\r\n").length, 1);
+});
+
+test("CSV export keeps Garmin summary activities even when no sets were recorded", () => {
+  const csv = sessionsToCsv([{
+    id: "garmin-run",
+    date: "2026-07-21",
+    dayId: "Morning Run",
+    mode: "garmin",
+    durationMin: 29,
+    volume: 0,
+    entries: [],
+    source: "garmin",
+    sourceDevice: "Garmin fēnix 6X",
+    garmin: {
+      activityId: "67890",
+      activityType: "Running",
+      distanceDisplay: "3.10 mi",
+      calories: 505,
+      avgHeartRate: 148,
+      maxHeartRate: 177,
+    },
+  }]);
+  assert.equal(csv.split("\r\n").length, 2);
+  assert.match(csv, /garmin,Garmin fēnix 6X,67890,Running,3.10 mi,505,148,177$/);
 });
