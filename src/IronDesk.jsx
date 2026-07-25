@@ -36,6 +36,9 @@ import {
   personalStateHash,
 } from "./cloudSync.js";
 
+const GarminBridge = React.lazy(() =>
+  import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
+
 const firebaseConfig = {
   apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
   authDomain: "irondesk-54651.firebaseapp.com",
@@ -1470,7 +1473,7 @@ export default function IronDesk() {
       failedFiles
     };
   };
-  const TABS = [["today", "Today"], ["program", "Program"], ["core", "Core"], ["hiit", "HIIT"], ["mma", "MMA"], ["pilates", "Pilates"], ["yoga", "Yoga"], ["macros", "Macros"], ["crew", "Crew"], ["history", "History"], ["trends", "Trends"], ["tools", "Tools"], ["ideas", "Ideas"], ["settings", "Settings"]];
+  const TABS = [["today", "Today"], ["program", "Program"], ["core", "Core"], ["hiit", "HIIT"], ["mma", "MMA"], ["pilates", "Pilates"], ["yoga", "Yoga"], ["macros", "Macros"], ["crew", "Crew"], ["history", "History"], ["garmin", "Garmin"], ["trends", "Trends"], ["tools", "Tools"], ["ideas", "Ideas"], ["settings", "Settings"]];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -1648,7 +1651,16 @@ export default function IronDesk() {
     sessions,
     setSessions,
     exportCsv
-  }), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
+  }), tab === "garmin" && /*#__PURE__*/React.createElement(React.Suspense, {
+    fallback: /*#__PURE__*/React.createElement("div", {
+      className: "garmin-bridge-loading",
+      role: "status"
+    }, "Loading Garmin Bridge…")
+  }, /*#__PURE__*/React.createElement(GarminBridge, {
+    sessions,
+    note,
+    onOpenImport: () => setTab("settings")
+  })), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
     sessions,
     bwLog,
     setBwLog,
