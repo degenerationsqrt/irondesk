@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import IronDesk from "./IronDesk.jsx";
+import { UPDATE_AVAILABLE_EVENT } from "./release.js";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -17,6 +18,22 @@ try {
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: "./" }).catch(() => {});
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: "./" })
+      .then(registration => {
+        const announceUpdate = () => window.dispatchEvent(new Event(UPDATE_AVAILABLE_EVENT));
+        if (registration.waiting && navigator.serviceWorker.controller) announceUpdate();
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) announceUpdate();
+          });
+        });
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (hadController) announceUpdate();
+        });
+      })
+      .catch(() => {});
   });
 }
