@@ -35,6 +35,15 @@ import {
   mergePersonalStates,
   personalStateHash,
 } from "./cloudSync.js";
+import { HealthConnectPanel } from "./HealthConnectPanel.jsx";
+import {
+  HEALTH_CONNECT_AUTO_SYNC_KEY,
+  HEALTH_CONNECT_LAST_SYNC_KEY,
+  isNativeHealthConnect,
+  mergeHealthBodyweight,
+  mergeHealthSummaries,
+  performHealthConnectSync,
+} from "./healthConnect.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -1012,6 +1021,26 @@ export default function IronDesk() {
   const [sessions, setSessions] = useState([]);
   const [bwLog, setBwLog] = useState([]);
   const [cardioLog, setCardioLog] = useState([]);
+  const [healthLog, setHealthLog] = useState([]);
+  const [healthLogClearedAt, setHealthLogClearedAt] = useState(0);
+  const [healthAutoSync, setHealthAutoSync] = useState(() => {
+    try {
+      return localStorage.getItem(HEALTH_CONNECT_AUTO_SYNC_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [healthSyncStatus, setHealthSyncStatus] = useState(() => {
+    let syncedAt = null;
+    try {
+      syncedAt = localStorage.getItem(HEALTH_CONNECT_LAST_SYNC_KEY);
+    } catch {}
+    return {
+      state: "idle",
+      message: "",
+      syncedAt
+    };
+  });
   const [active, setActive] = useState(null); // live workout
   const [progress, setProgress] = useState({
     blockNum: 1,
@@ -1058,6 +1087,8 @@ export default function IronDesk() {
     sessions,
     bwLog,
     cardioLog,
+    healthLog,
+    healthLogClearedAt,
     active,
     progress,
     gender,
@@ -1067,9 +1098,42 @@ export default function IronDesk() {
     onboarded,
     macros,
     restTimerPrefs
-  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
+  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
   const personalStateRef = useRef(personalState);
   personalStateRef.current = personalState;
+  const applyHealthSync = React.useCallback(result => {
+    const days = Array.isArray(result?.days) ? result.days : [];
+    const syncedAt = result?.syncedAt || new Date().toISOString();
+    setHealthLog(current => mergeHealthSummaries(current, days, syncedAt));
+    setBwLog(current => mergeHealthBodyweight(current, days));
+    try {
+      localStorage.setItem(HEALTH_CONNECT_LAST_SYNC_KEY, syncedAt);
+    } catch {}
+    setHealthSyncStatus({
+      state: "synced",
+      message: `Imported ${days.length} Health Connect day${days.length === 1 ? "" : "s"}.`,
+      syncedAt
+    });
+    return result;
+  }, []);
+  const syncHealthNow = React.useCallback(async () => {
+    setHealthSyncStatus({
+      state: "syncing",
+      message: "Reading the last 7 days from Health Connect…",
+      syncedAt: null
+    });
+    try {
+      const result = await performHealthConnectSync();
+      return applyHealthSync(result);
+    } catch (error) {
+      setHealthSyncStatus({
+        state: error?.code === "health-connect-permission-required" ? "permission" : "error",
+        message: error?.message || "Health Connect sync failed.",
+        syncedAt: null
+      });
+      throw error;
+    }
+  }, [applyHealthSync]);
   useEffect(() => {
     (async () => {
       try {
@@ -1084,6 +1148,8 @@ export default function IronDesk() {
           s.sessions && setSessions(s.sessions);
           s.bwLog && setBwLog(s.bwLog);
           s.cardioLog && setCardioLog(s.cardioLog);
+          s.healthLog && setHealthLog(s.healthLog);
+          if (s.healthLogClearedAt != null) setHealthLogClearedAt(Number(s.healthLogClearedAt) || 0);
           s.active && setActive(s.active);
           s.progress && setProgress(s.progress);
           s.gender && setGender(s.gender);
@@ -1116,6 +1182,15 @@ export default function IronDesk() {
       setLoaded(true);
     })();
   }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HEALTH_CONNECT_AUTO_SYNC_KEY, healthAutoSync ? "true" : "false");
+    } catch {}
+  }, [healthAutoSync]);
+  useEffect(() => {
+    if (!loaded || !healthAutoSync || !isNativeHealthConnect()) return;
+    syncHealthNow().catch(() => {});
+  }, [loaded, healthAutoSync, syncHealthNow]);
   const persist = async () => {
     try {
       await window.storage.set("irondesk:v3", JSON.stringify({
@@ -1127,6 +1202,8 @@ export default function IronDesk() {
         sessions,
         bwLog,
         cardioLog,
+        healthLog,
+        healthLogClearedAt,
         active,
         progress,
         gender,
@@ -1141,7 +1218,7 @@ export default function IronDesk() {
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
+  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
 
   useEffect(() => FB.onAuth(user => {
     setCloudUser(user || null);
@@ -1167,6 +1244,8 @@ export default function IronDesk() {
     Array.isArray(state.sessions) && setSessions(state.sessions);
     Array.isArray(state.bwLog) && setBwLog(state.bwLog);
     Array.isArray(state.cardioLog) && setCardioLog(state.cardioLog);
+    Array.isArray(state.healthLog) && setHealthLog(state.healthLog);
+    if (state.healthLogClearedAt != null) setHealthLogClearedAt(Number(state.healthLogClearedAt) || 0);
     if (Object.prototype.hasOwnProperty.call(state, "active")) setActive(state.active || null);
     state.progress && setProgress(state.progress);
     state.gender && setGender(state.gender);
@@ -1366,6 +1445,8 @@ export default function IronDesk() {
       sessions,
       bwLog,
       cardioLog,
+      healthLog,
+      healthLogClearedAt,
       active,
       progress,
       gender,
@@ -1406,6 +1487,8 @@ export default function IronDesk() {
         // v2 logs → keep bw/cardio
         s.bwLog && setBwLog(s.bwLog);
         s.cardioLog && setCardioLog(s.cardioLog);
+        s.healthLog && setHealthLog(s.healthLog);
+        if (s.healthLogClearedAt != null) setHealthLogClearedAt(Number(s.healthLogClearedAt) || 0);
         if (Object.prototype.hasOwnProperty.call(s, "active")) setActive(s.active || null);
         s.progress && setProgress(s.progress);
         s.gender && setGender(s.gender);
@@ -1703,6 +1786,25 @@ export default function IronDesk() {
     cloudSignIn: FB.signIn,
     cloudSignUp: FB.signUp,
     cloudSignOut: FB.signOut,
+    healthLog,
+    healthAutoSync,
+    setHealthAutoSync,
+    healthSyncStatus,
+    syncHealthNow,
+    clearHealthData: () => {
+      const clearedAt = Date.now();
+      setHealthLog([]);
+      setHealthLogClearedAt(clearedAt);
+      setBwLog(current => current.filter(entry => entry?.source !== "health-connect"));
+      setHealthSyncStatus({
+        state: "idle",
+        message: "Health Connect summaries were removed from IronDesk.",
+        syncedAt: null
+      });
+      try {
+        localStorage.removeItem(HEALTH_CONNECT_LAST_SYNC_KEY);
+      } catch {}
+    },
     setTab
   }))));
 }
@@ -3776,7 +3878,7 @@ function CloudSyncPanel({
 
   return <Panel
     title="Personal Cloud Sync"
-    sub="Keep workouts, Garmin imports, maxes, trends, and preferences aligned across your phone and website"
+    sub="Keep workouts, Garmin and Health Connect summaries, maxes, trends, and preferences aligned across your phone and website"
   >
     <div className="cloud-sync-card">
       <div className="cloud-sync-heading">
@@ -3891,8 +3993,9 @@ function CloudSyncPanel({
 
       {accountError && <div className="cloud-sync-message is-error" role="alert">{accountError}</div>}
       <div className="cloud-privacy-note">
-        First connection safely merges workout, bodyweight, and cardio histories. Decoded Garmin
-        activity data syncs; the original FIT or CSV files stay on the device where you selected them.
+        First connection safely merges workout, bodyweight, cardio, and daily Health Connect
+        histories. Decoded Garmin activity data syncs; original FIT or CSV files and raw Health
+        Connect sensor records stay on the device where you selected them.
       </div>
     </div>
   </Panel>;
@@ -4018,6 +4121,12 @@ function Settings({
   cloudSignIn,
   cloudSignUp,
   cloudSignOut,
+  healthLog,
+  healthAutoSync,
+  setHealthAutoSync,
+  healthSyncStatus,
+  syncHealthNow,
+  clearHealthData,
   setTab
 }) {
   const setGenderGoal = g => {
@@ -4164,6 +4273,13 @@ function Settings({
   })))), /*#__PURE__*/React.createElement(RestTimerSettings, {
     preferences: restTimerPrefs,
     setPreferences: setRestTimerPrefs
+  }), /*#__PURE__*/React.createElement(HealthConnectPanel, {
+    healthLog,
+    autoSync: healthAutoSync,
+    setAutoSync: setHealthAutoSync,
+    syncStatus: healthSyncStatus,
+    onSync: syncHealthNow,
+    onClear: clearHealthData
   }), /*#__PURE__*/React.createElement(CloudSyncPanel, {
     firebaseReady,
     user: cloudUser,

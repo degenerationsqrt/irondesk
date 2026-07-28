@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>IronDesk Health Data & Privacy</title>
+    <style>
+      :root {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #e9edef;
+        background: #0b0f12;
+      }
+      body {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 34px 22px 60px;
+        line-height: 1.65;
+      }
+      h1, h2 {
+        color: #f7f9fa;
+        line-height: 1.2;
+      }
+      h1 {
+        margin-bottom: 8px;
+        font-size: clamp(28px, 7vw, 44px);
+      }
+      h2 {
+        margin-top: 32px;
+        font-size: 20px;
+      }
+      p, li {
+        color: #aeb8bf;
+      }
+      .eyebrow {
+        color: #55dfb8;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+      .summary {
+        margin: 24px 0;
+        padding: 18px;
+        border: 1px solid #28443d;
+        border-radius: 14px;
+        background: #101a18;
+      }
+      a {
+        color: #65e2c0;
+      }
+      code {
+        color: #d7e0e4;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="eyebrow">IronDesk Android</div>
+    <h1>Health data & privacy</h1>
+    <p>Last updated: July 27, 2026</p>
+
+    <div class="summary">
+      IronDesk uses Health Connect only after you choose to connect it. Access is read-only and can
+      be revoked at any time from Android Health Connect settings.
+    </div>
+
+    <h2>Data IronDesk can read</h2>
+    <p>
+      With your permission, IronDesk reads daily totals or summaries for steps, heart rate, resting
+      heart rate, sleep duration, weight, body-fat percentage, total calories burned, and exercise
+      duration. IronDesk does not request medical-record permissions, exercise routes, raw location,
+      or background health access.
+    </p>
+
+    <h2>How the data is used</h2>
+    <p>
+      The data is used to show fitness and recovery trends inside IronDesk. Health Connect exercise
+      time is not converted into a detailed IronDesk workout, which avoids duplicating activities
+      already imported from Garmin FIT or CSV files.
+    </p>
+
+    <h2>Storage and transfer</h2>
+    <p>
+      Daily Health Connect summaries are stored with your other IronDesk data on the device. If you
+      explicitly enable Personal Cloud Sync and sign in, those summaries can be stored in your
+      private Firebase user document so they can appear on your other signed-in devices and the
+      IronDesk website. Raw Health Connect sensor records do not sync to Firebase.
+    </p>
+    <p>
+      IronDesk does not sell health data, use it for advertising, or share it with Crew members.
+      Firebase processes opt-in cloud data as IronDesk's service provider.
+    </p>
+
+    <h2>Your controls</h2>
+    <ul>
+      <li>Use <strong>Manage Access</strong> in IronDesk Settings to grant or revoke Health Connect permissions.</li>
+      <li>Turn off foreground auto-sync without revoking Health Connect access.</li>
+      <li>Use <strong>Remove imported summaries</strong> to delete Health Connect summaries and derived Health Connect bodyweight entries from IronDesk.</li>
+      <li>Pause Personal Cloud Sync separately at any time.</li>
+    </ul>
+    <p>
+      A synchronized deletion marker prevents an older cloud copy from automatically restoring
+      removed Health Connect summaries. Data remains until you remove it, clear local app data, or
+      request deletion of the associated hosted account data.
+    </p>
+
+    <h2>Questions and deletion requests</h2>
+    <p>
+      Open a request through the
+      <a href="https://github.com/degenerationsqrt/irondesk/issues">IronDesk GitHub Issues page</a>.
+      Do not include private health measurements in a public issue.
+    </p>
+  </body>
+</html>
