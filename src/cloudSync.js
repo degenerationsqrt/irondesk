@@ -15,6 +15,7 @@ const STATE_FIELDS = [
   "healthLog",
   "healthLogClearedAt",
   "active",
+  "activeClearedAt",
   "progress",
   "gender",
   "goal",
@@ -87,6 +88,15 @@ export function buildPersonalState(source = {}) {
 export function mergePersonalStates(localSource, cloudSource) {
   const local = buildPersonalState(localSource);
   const cloud = buildPersonalState(cloudSource);
+  const activeClearedAt = Math.max(
+    Number(local.activeClearedAt) || 0,
+    Number(cloud.activeClearedAt) || 0,
+  );
+  const activeAfterClear = active => {
+    if (!active || activeClearedAt <= 0) return active || null;
+    const startedAt = Number(active.start) || Date.parse(active.startedAt || "") || 0;
+    return startedAt > activeClearedAt ? active : null;
+  };
   const healthLogClearedAt = Math.max(
     Number(local.healthLogClearedAt) || 0,
     Number(cloud.healthLogClearedAt) || 0,
@@ -123,7 +133,8 @@ export function mergePersonalStates(localSource, cloudSource) {
       ["id", "date"],
     ).filter(afterHealthClear).sort(logSort),
     healthLogClearedAt,
-    active: local.active || cloud.active || null,
+    active: activeAfterClear(local.active) || activeAfterClear(cloud.active),
+    activeClearedAt,
   });
   return merged;
 }

@@ -16,5 +16,5 @@ test("web, service worker, and Android releases use the same version", async () 
   assert.equal(packageLock.packages[""].version, APP_VERSION);
   assert.match(serviceWorker, new RegExp(`irondesk-v${APP_VERSION.replaceAll(".", "\\.")}`));
   assert.match(androidBuild, new RegExp(`versionName "${APP_VERSION.replaceAll(".", "\\.")}"`));
-  assert.match(androidBuild, /versionCode 2/);
+  assert.match(androidBuild, /versionCode 3/);
 });

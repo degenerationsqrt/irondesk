@@ -94,6 +94,68 @@ test("a Health Connect clear marker prevents cloud summaries from returning", ()
   assert.equal(merged.healthLogClearedAt, Date.parse("2026-07-27T12:00:00.000Z"));
 });
 
+test("discarding an active workout prevents an older cloud copy from returning", () => {
+  const clearedAt = Date.parse("2026-07-28T12:00:00.000Z");
+  const merged = mergePersonalStates(
+    {
+      active: null,
+      activeClearedAt: clearedAt,
+    },
+    {
+      active: {
+        id: "stale-workout",
+        start: clearedAt - 60_000,
+      },
+    },
+  );
+
+  assert.equal(merged.active, null);
+  assert.equal(merged.activeClearedAt, clearedAt);
+});
+
+test("a cloud discard also clears an older workout on another device", () => {
+  const clearedAt = Date.parse("2026-07-28T12:00:00.000Z");
+  const merged = mergePersonalStates(
+    {
+      active: {
+        id: "stale-local-workout",
+        start: clearedAt - 60_000,
+      },
+    },
+    {
+      active: null,
+      activeClearedAt: clearedAt,
+    },
+  );
+
+  assert.equal(merged.active, null);
+  assert.equal(merged.activeClearedAt, clearedAt);
+});
+
+test("a workout started after the clear marker still syncs", () => {
+  const clearedAt = Date.parse("2026-07-28T12:00:00.000Z");
+  const active = {
+    id: "new-workout",
+    start: clearedAt + 60_000,
+  };
+  const merged = mergePersonalStates(
+    {
+      active,
+      activeClearedAt: clearedAt,
+    },
+    {
+      active: {
+        id: "stale-workout",
+        start: clearedAt - 60_000,
+      },
+      activeClearedAt: clearedAt,
+    },
+  );
+
+  assert.deepEqual(merged.active, active);
+  assert.equal(merged.activeClearedAt, clearedAt);
+});
+
 test("cloud envelopes include device and reject oversized snapshots", () => {
   const envelope = createCloudEnvelope(
     { sessions: [{ id: "one" }] },

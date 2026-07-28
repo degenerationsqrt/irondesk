@@ -1044,6 +1044,7 @@ export default function IronDesk() {
     };
   });
   const [active, setActive] = useState(null); // live workout
+  const [activeClearedAt, setActiveClearedAt] = useState(0);
   const [progress, setProgress] = useState({
     blockNum: 1,
     week: 1
@@ -1092,6 +1093,7 @@ export default function IronDesk() {
     healthLog,
     healthLogClearedAt,
     active,
+    activeClearedAt,
     progress,
     gender,
     goal,
@@ -1100,7 +1102,7 @@ export default function IronDesk() {
     onboarded,
     macros,
     restTimerPrefs
-  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
+  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
   const personalStateRef = useRef(personalState);
   personalStateRef.current = personalState;
   const applyHealthSync = React.useCallback(result => {
@@ -1152,7 +1154,14 @@ export default function IronDesk() {
           s.cardioLog && setCardioLog(s.cardioLog);
           s.healthLog && setHealthLog(s.healthLog);
           if (s.healthLogClearedAt != null) setHealthLogClearedAt(Number(s.healthLogClearedAt) || 0);
-          s.active && setActive(s.active);
+          const storedActiveClearedAt = Number(s.activeClearedAt) || 0;
+          setActiveClearedAt(storedActiveClearedAt);
+          if (s.active) {
+            const activeStartedAt = Number(s.active.start) || Date.parse(s.active.startedAt || "") || 0;
+            if (storedActiveClearedAt <= 0 || activeStartedAt > storedActiveClearedAt) {
+              setActive(s.active);
+            }
+          }
           s.progress && setProgress(s.progress);
           s.gender && setGender(s.gender);
           s.goal && setGoal(s.goal);
@@ -1207,6 +1216,7 @@ export default function IronDesk() {
         healthLog,
         healthLogClearedAt,
         active,
+        activeClearedAt,
         progress,
         gender,
         goal,
@@ -1220,7 +1230,7 @@ export default function IronDesk() {
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
+  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
 
   useEffect(() => FB.onAuth(user => {
     setCloudUser(user || null);
@@ -1249,6 +1259,7 @@ export default function IronDesk() {
     Array.isArray(state.healthLog) && setHealthLog(state.healthLog);
     if (state.healthLogClearedAt != null) setHealthLogClearedAt(Number(state.healthLogClearedAt) || 0);
     if (Object.prototype.hasOwnProperty.call(state, "active")) setActive(state.active || null);
+    if (state.activeClearedAt != null) setActiveClearedAt(Number(state.activeClearedAt) || 0);
     state.progress && setProgress(state.progress);
     state.gender && setGender(state.gender);
     state.goal && setGoal(state.goal);
@@ -1422,6 +1433,20 @@ export default function IronDesk() {
     setFlash(m);
     setTimeout(() => setFlash(""), 1600);
   };
+  const clearActiveWorkout = React.useCallback(() => {
+    const clearedAt = Date.now();
+    const clearedState = buildPersonalState({
+      ...personalStateRef.current,
+      active: null,
+      activeClearedAt: clearedAt
+    });
+    personalStateRef.current = clearedState;
+    try {
+      window.storage.set("irondesk:v3", JSON.stringify(clearedState));
+    } catch {}
+    setActive(null);
+    setActiveClearedAt(current => Math.max(current, clearedAt));
+  }, []);
   const plates = mode === "gym" ? gymPlates : homePlates;
   const setPlates = mode === "gym" ? setGymPlates : setHomePlates;
   const roundLoad = x => mode === "gym" ? Math.round(x / 2.5) * 2.5 : Math.round(x / 5) * 5;
@@ -1450,6 +1475,7 @@ export default function IronDesk() {
       healthLog,
       healthLogClearedAt,
       active,
+      activeClearedAt,
       progress,
       gender,
       goal,
@@ -1459,7 +1485,7 @@ export default function IronDesk() {
       macros,
       restTimerPrefs,
       _app: "IronDesk Pro",
-      _v: 3,
+      _v: 4,
       _exported: new Date().toISOString()
     };
     downloadFile(JSON.stringify(data, null, 2), `irondesk-backup-${today()}.json`, "application/json");
@@ -1491,7 +1517,21 @@ export default function IronDesk() {
         s.cardioLog && setCardioLog(s.cardioLog);
         s.healthLog && setHealthLog(s.healthLog);
         if (s.healthLogClearedAt != null) setHealthLogClearedAt(Number(s.healthLogClearedAt) || 0);
-        if (Object.prototype.hasOwnProperty.call(s, "active")) setActive(s.active || null);
+        if (Object.prototype.hasOwnProperty.call(s, "active")) {
+          const importedActiveClearedAt = Math.max(
+            Number(s.activeClearedAt) || 0,
+            s.active ? 0 : Date.now(),
+          );
+          const activeStartedAt = Number(s.active?.start) || Date.parse(s.active?.startedAt || "") || 0;
+          setActive(
+            s.active && (importedActiveClearedAt <= 0 || activeStartedAt > importedActiveClearedAt)
+              ? s.active
+              : null,
+          );
+          setActiveClearedAt(importedActiveClearedAt);
+        } else if (s.activeClearedAt != null) {
+          setActiveClearedAt(Number(s.activeClearedAt) || 0);
+        }
         s.progress && setProgress(s.progress);
         s.gender && setGender(s.gender);
         s.goal && setGoal(s.goal);
@@ -1655,6 +1695,7 @@ export default function IronDesk() {
     bar,
     active,
     setActive,
+    clearActiveWorkout,
     sessions,
     setSessions,
     prMap,
@@ -1834,6 +1875,7 @@ function Today({
   bar,
   active,
   setActive,
+  clearActiveWorkout,
   sessions,
   setSessions,
   prMap,
@@ -2043,7 +2085,7 @@ function Today({
       prs
     };
     setSessions([session, ...sessions]);
-    setActive(null);
+    clearActiveWorkout();
     note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
     setTab("history");
   };
@@ -2617,7 +2659,8 @@ function Today({
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       if (window.confirm("Discard this workout?")) {
-        setActive(null);
+        clearActiveWorkout();
+        note("Workout discarded");
       }
     },
     style: {
