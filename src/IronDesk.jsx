@@ -36,6 +36,8 @@ import {
   personalStateHash,
 } from "./cloudSync.js";
 import { HealthConnectPanel } from "./HealthConnectPanel.jsx";
+import { AppUpdateBanner } from "./AppUpdateBanner.jsx";
+import { PrimaryNavigation } from "./PrimaryNavigation.jsx";
 import {
   HEALTH_CONNECT_AUTO_SYNC_KEY,
   HEALTH_CONNECT_LAST_SYNC_KEY,
@@ -1556,7 +1558,6 @@ export default function IronDesk() {
       failedFiles
     };
   };
-  const TABS = [["today", "Today"], ["program", "Program"], ["core", "Core"], ["hiit", "HIIT"], ["mma", "MMA"], ["pilates", "Pilates"], ["yoga", "Yoga"], ["macros", "Macros"], ["crew", "Crew"], ["history", "History"], ["garmin", "Garmin"], ["trends", "Trends"], ["tools", "Tools"], ["ideas", "Ideas"], ["settings", "Settings"]];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -1632,32 +1633,11 @@ export default function IronDesk() {
       background: mode === m ? C.red : "transparent",
       color: mode === m ? "#fff" : C.dim
     }
-  }, l)))), /*#__PURE__*/React.createElement("nav", {
-    className: "tabbar",
-    "aria-label": "Primary",
-    style: {
-      display: "flex",
-      gap: 0,
-      marginTop: 14,
-      overflowX: "auto"
-    }
-  }, TABS.map(([k, l]) => /*#__PURE__*/React.createElement("button", {
-    key: k,
-    onClick: () => setTab(k),
-    "aria-current": tab === k ? "page" : undefined,
-    className: "ttl",
-    style: {
-      background: "none",
-      border: "none",
-      borderBottom: tab === k ? `2px solid ${C.red}` : "2px solid transparent",
-      color: tab === k ? C.txt : C.dim,
-      padding: "9px 13px",
-      fontSize: 12.5,
-      fontWeight: 600,
-      cursor: "pointer",
-      whiteSpace: "nowrap"
-    }
-  }, l, k === "today" && active ? " ●" : "")))), /*#__PURE__*/React.createElement("main", {
+  }, l)))), /*#__PURE__*/React.createElement(PrimaryNavigation, {
+    tab,
+    setTab,
+    hasActiveWorkout: Boolean(active)
+  })), /*#__PURE__*/React.createElement(AppUpdateBanner, null), /*#__PURE__*/React.createElement("main", {
     style: {
       maxWidth: 820,
       margin: "0 auto",
@@ -1734,49 +1714,7 @@ export default function IronDesk() {
     sessions,
     setSessions,
     exportCsv
-  }), tab === "garmin" && /*#__PURE__*/React.createElement(React.Suspense, {
-    fallback: /*#__PURE__*/React.createElement("div", {
-      className: "garmin-bridge-loading",
-      role: "status"
-    }, "Loading Garmin Bridge…")
-  }, /*#__PURE__*/React.createElement(GarminBridge, {
-    sessions,
-    note,
-    onOpenImport: () => setTab("settings")
-  })), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
-    sessions,
-    bwLog,
-    setBwLog,
-    cardioLog,
-    setCardioLog
-  }), tab === "tools" && /*#__PURE__*/React.createElement(Tools, {
-    mode,
-    plates,
-    bar,
-    roundLoad,
-    maxes
-  }), tab === "ideas" && /*#__PURE__*/React.createElement(IdeasTab, {
-    setTab
-  }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
-    maxes,
-    setMaxes,
-    plates,
-    setPlates,
-    bar,
-    setBar,
-    mode,
-    exportJson,
-    exportCsv,
-    exportSetCsv,
-    importData,
-    importGarminFiles,
-    sessions,
-    gender,
-    goal,
-    setGender,
-    setGoal,
-    restTimerPrefs,
-    setRestTimerPrefs,
+  }), tab === "connections" && /*#__PURE__*/React.createElement(Connections, {
     firebaseReady: FB.ready,
     cloudUser,
     cloudEnabled,
@@ -1805,11 +1743,87 @@ export default function IronDesk() {
         localStorage.removeItem(HEALTH_CONNECT_LAST_SYNC_KEY);
       } catch {}
     },
+    importGarminFiles,
     setTab
+  }), tab === "garmin" && /*#__PURE__*/React.createElement(React.Suspense, {
+    fallback: /*#__PURE__*/React.createElement("div", {
+      className: "garmin-bridge-loading",
+      role: "status"
+    }, "Loading Garmin Bridge…")
+  }, /*#__PURE__*/React.createElement(GarminBridge, {
+    sessions,
+    note,
+    onOpenImport: () => setTab("connections")
+  })), tab === "trends" && /*#__PURE__*/React.createElement(Trends, {
+    sessions,
+    bwLog,
+    setBwLog,
+    cardioLog,
+    setCardioLog
+  }), tab === "tools" && /*#__PURE__*/React.createElement(Tools, {
+    mode,
+    plates,
+    bar,
+    roundLoad,
+    maxes
+  }), tab === "ideas" && /*#__PURE__*/React.createElement(IdeasTab, {
+    setTab
+  }), tab === "settings" && /*#__PURE__*/React.createElement(Settings, {
+    maxes,
+    setMaxes,
+    plates,
+    setPlates,
+    bar,
+    setBar,
+    mode,
+    exportJson,
+    exportCsv,
+    exportSetCsv,
+    importData,
+    sessions,
+    gender,
+    goal,
+    setGender,
+    setGoal,
+    restTimerPrefs,
+    setRestTimerPrefs
   }))));
 }
 
 /* ============ TODAY (live workout) ============ */
+function TodayCommandCard({
+  mode,
+  goal,
+  progress,
+  focusKey,
+  lastTrained,
+  onStart,
+  onOpenProgram
+}) {
+  const focus = FOCUS[focusKey] || FOCUS.Upper;
+  return (
+    <section className="today-command-card" aria-labelledby="today-command-title">
+      <div className="today-command-heading">
+        <div>
+          <span className="today-command-kicker">TODAY&apos;S PLAN</span>
+          <h2 id="today-command-title">{focus.title}</h2>
+          <p>{GOALS[goal].label} · {mode === "gym" ? "Gym" : "Home"}</p>
+        </div>
+        <span className="today-command-week">B{progress.blockNum} · W{progress.week}</span>
+      </div>
+      <div className="today-command-meta">
+        <span><small>Session</small><strong>Day 1 of {GOALS[goal].week.length}</strong></span>
+        <span><small>Last trained</small><strong>{lastTrained ? lastTrained.slice(5) : "First session"}</strong></span>
+        <span><small>Focus</small><strong>{focus.title}</strong></span>
+      </div>
+      <div className="today-command-actions">
+        <button type="button" className="today-command-start" onClick={onStart}>Start today&apos;s workout</button>
+        <button type="button" className="today-command-program" onClick={onOpenProgram}>View program</button>
+      </div>
+    </section>
+  );
+}
+
 function Today({
   mode,
   maxes,
@@ -2059,7 +2073,15 @@ function Today({
       done: () => setBuilder(false),
       note
     });
-    return /*#__PURE__*/React.createElement(React.Fragment, null, !onboarded && /*#__PURE__*/React.createElement("div", {
+    return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(TodayCommandCard, {
+      mode,
+      goal,
+      progress,
+      focusKey: week[0],
+      lastTrained: lastByDay[(FOCUS[week[0]] || FOCUS.Upper).title],
+      onStart: () => start(week[0]),
+      onOpenProgram: () => setTab("program")
+    }), !onboarded && /*#__PURE__*/React.createElement("div", {
       style: {
         background: "linear-gradient(135deg,#e11d2a22,#0b0b0d)",
         border: `1px solid ${C.red}`,
@@ -2259,7 +2281,7 @@ function Today({
         fontWeight: goal === k ? 700 : 500
       }
     }, g.label)))), /*#__PURE__*/React.createElement(Panel, {
-      title: "Today's Workout",
+      title: "This Week",
       sub: `${mode === "gym" ? "Gym" : "Home"} · ${GOALS[goal].label} · Block ${progress.blockNum} · Week ${progress.week}/6`
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4092,26 +4114,7 @@ function GarminImportPanel({
   </Panel>;
 }
 
-function Settings({
-  maxes,
-  setMaxes,
-  plates,
-  setPlates,
-  bar,
-  setBar,
-  mode,
-  exportJson,
-  exportCsv,
-  exportSetCsv,
-  importData,
-  importGarminFiles,
-  sessions,
-  gender,
-  goal,
-  setGender,
-  setGoal,
-  restTimerPrefs,
-  setRestTimerPrefs,
+function Connections({
   firebaseReady,
   cloudUser,
   cloudEnabled,
@@ -4127,7 +4130,161 @@ function Settings({
   healthSyncStatus,
   syncHealthNow,
   clearHealthData,
+  importGarminFiles,
   setTab
+}) {
+  const nativeAndroid = isNativeHealthConnect();
+  const healthRecords = Array.isArray(healthLog) ? healthLog.length : 0;
+  const healthState = nativeAndroid
+    ? healthSyncStatus?.syncedAt || healthRecords
+      ? "Ready"
+      : "Connect"
+    : healthRecords
+      ? "Via cloud"
+      : "Android needed";
+  const cloudState = !firebaseReady
+    ? "Unavailable"
+    : !cloudUser
+      ? "Sign in"
+      : cloudEnabled && cloudStatus?.state === "synced"
+        ? "Synced"
+        : cloudEnabled
+          ? "Connecting"
+          : "Paused";
+
+  const scrollTo = id => document.getElementById(id)?.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+
+  return (
+    <div className="connection-center">
+      <section className="connection-center-hero" aria-labelledby="connection-center-title">
+        <div>
+          <span className="connection-center-kicker">ONE PLACE FOR EVERY DEVICE</span>
+          <h2 id="connection-center-title">Connection Center</h2>
+          <p>
+            Bring Garmin health summaries, detailed FIT/CSV activities, and your private
+            IronDesk cloud copy together without hunting through Settings.
+          </p>
+        </div>
+        <span className="connection-center-device">
+          {nativeAndroid ? "Android companion" : "Website"}
+        </span>
+      </section>
+
+      <div className="connection-status-grid" aria-label="Connection status">
+        <button type="button" onClick={() => setTab("garmin")}>
+          <span className="connection-status-icon is-garmin" aria-hidden="true">G</span>
+          <span><small>Garmin</small><strong>FIT / CSV ready</strong></span>
+          <b>Open →</b>
+        </button>
+        <button type="button" onClick={() => scrollTo("health-connect-title")}>
+          <span className="connection-status-icon is-health" aria-hidden="true">♥</span>
+          <span><small>Health Connect</small><strong>{healthState}</strong></span>
+          <b>Set up ↓</b>
+        </button>
+        <button type="button" onClick={() => scrollTo("personal-cloud-title")}>
+          <span className="connection-status-icon is-cloud" aria-hidden="true">☁</span>
+          <span><small>Personal Cloud</small><strong>{cloudState}</strong></span>
+          <b>Manage ↓</b>
+        </button>
+      </div>
+
+      <section className="connection-guide">
+        <div className="connection-guide-heading">
+          <div>
+            <span className="connection-center-kicker">FĒNIX 6X + ANDROID</span>
+            <h3>Connect Garmin to IronDesk</h3>
+          </div>
+          <span>Android 14+</span>
+        </div>
+        <ol>
+          <li>
+            <b>1</b>
+            <div>
+              <strong>Install and open the IronDesk Android companion</strong>
+              <span>The website alone cannot appear inside the Health Connect app.</span>
+            </div>
+          </li>
+          <li>
+            <b>2</b>
+            <div>
+              <strong>In Garmin Connect, enable Health Connect sharing</strong>
+              <span>Garmin Connect → More → Settings → Health Connect.</span>
+            </div>
+          </li>
+          <li>
+            <b>3</b>
+            <div>
+              <strong>Return here and grant read access</strong>
+              <span>Tap Connect Health Connect below, then choose the health fields to share.</span>
+            </div>
+          </li>
+          <li>
+            <b>4</b>
+            <div>
+              <strong>Sync, then sign into Personal Cloud</strong>
+              <span>Your phone imports summaries; cloud sync makes them visible on the website.</span>
+            </div>
+          </li>
+        </ol>
+        {!nativeAndroid ? (
+          <div className="connection-guide-note">
+            <strong>You are viewing the website.</strong>
+            <span>
+              Complete steps 1–3 from the installed Android app. Android distribution is still in
+              tester mode, so IronDesk will not appear in Health Connect until the companion is installed.
+            </span>
+          </div>
+        ) : null}
+      </section>
+
+      <HealthConnectPanel
+        healthLog={healthLog}
+        autoSync={healthAutoSync}
+        setAutoSync={setHealthAutoSync}
+        syncStatus={healthSyncStatus}
+        onSync={syncHealthNow}
+        onClear={clearHealthData}
+      />
+      <div id="personal-cloud-title">
+        <CloudSyncPanel
+          firebaseReady={firebaseReady}
+          user={cloudUser}
+          enabled={cloudEnabled}
+          status={cloudStatus}
+          onEnable={updateCloudEnabled}
+          onSyncNow={syncCloudNow}
+          onSignIn={cloudSignIn}
+          onSignUp={cloudSignUp}
+          onSignOut={cloudSignOut}
+        />
+      </div>
+      <GarminImportPanel importGarminFiles={importGarminFiles} setTab={setTab} />
+    </div>
+  );
+}
+
+function Settings({
+  maxes,
+  setMaxes,
+  plates,
+  setPlates,
+  bar,
+  setBar,
+  mode,
+  exportJson,
+  exportCsv,
+  exportSetCsv,
+  importData,
+  sessions,
+  gender,
+  goal,
+  setGender,
+  setGoal,
+  restTimerPrefs,
+  setRestTimerPrefs
 }) {
   const setGenderGoal = g => {
     setGender(g);
@@ -4273,26 +4430,6 @@ function Settings({
   })))), /*#__PURE__*/React.createElement(RestTimerSettings, {
     preferences: restTimerPrefs,
     setPreferences: setRestTimerPrefs
-  }), /*#__PURE__*/React.createElement(HealthConnectPanel, {
-    healthLog,
-    autoSync: healthAutoSync,
-    setAutoSync: setHealthAutoSync,
-    syncStatus: healthSyncStatus,
-    onSync: syncHealthNow,
-    onClear: clearHealthData
-  }), /*#__PURE__*/React.createElement(CloudSyncPanel, {
-    firebaseReady,
-    user: cloudUser,
-    enabled: cloudEnabled,
-    status: cloudStatus,
-    onEnable: updateCloudEnabled,
-    onSyncNow: syncCloudNow,
-    onSignIn: cloudSignIn,
-    onSignUp: cloudSignUp,
-    onSignOut: cloudSignOut
-  }), /*#__PURE__*/React.createElement(GarminImportPanel, {
-    importGarminFiles,
-    setTab
   }), /*#__PURE__*/React.createElement(Panel, {
     title: "Backup & Restore",
     sub: `${sessions.length} sessions in your log — export to keep them forever`
