@@ -213,10 +213,13 @@ public class HealthConnectPlugin extends Plugin {
                     Throwable cause = failure instanceof CompletionException && failure.getCause() != null
                         ? failure.getCause()
                         : failure;
+                    Exception exception = cause instanceof Exception
+                        ? (Exception) cause
+                        : new Exception(cause);
                     call.reject(
                         "Health Connect could not read the selected days. Check access and try again.",
                         "HEALTH_CONNECT_READ_FAILED",
-                        cause
+                        exception
                     );
                     return;
                 }
