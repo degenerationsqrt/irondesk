@@ -19,6 +19,7 @@ test("cloud state keeps only supported IronDesk fields", () => {
   assert.deepEqual(state.maxes, { bench: 225 });
   assert.equal("secret" in state, false);
   assert.deepEqual(state.cardioLog, []);
+  assert.deepEqual(state.healthLog, []);
 });
 
 test("first cloud connection merges histories without losing either device", () => {
@@ -31,6 +32,7 @@ test("first cloud connection merges histories without losing either device", () 
       ],
       bwLog: [{ date: "2026-07-24", weight: 220 }],
       cardioLog: [{ date: "2026-07-24", type: "run", miles: 3 }],
+      healthLog: [{ id: "health-connect:2026-07-24", date: "2026-07-24", steps: 8000 }],
     },
     {
       mode: "gym",
@@ -40,6 +42,10 @@ test("first cloud connection merges histories without losing either device", () 
       ],
       bwLog: [{ date: "2026-07-22", weight: 222 }],
       cardioLog: [{ date: "2026-07-24", type: "ride", miles: 10 }],
+      healthLog: [
+        { id: "health-connect:2026-07-25", date: "2026-07-25", steps: 9000 },
+        { id: "health-connect:2026-07-24", date: "2026-07-24", steps: 7000 },
+      ],
     },
   );
 
@@ -48,6 +54,8 @@ test("first cloud connection merges histories without losing either device", () 
   assert.equal(merged.sessions.find((session) => session.id === "shared").title, "local copy");
   assert.deepEqual(merged.bwLog.map((entry) => entry.date), ["2026-07-24", "2026-07-22"]);
   assert.equal(merged.cardioLog.length, 2);
+  assert.deepEqual(merged.healthLog.map((entry) => entry.date), ["2026-07-25", "2026-07-24"]);
+  assert.equal(merged.healthLog.find((entry) => entry.date === "2026-07-24").steps, 8000);
 });
 
 test("cloud hashes are stable and change with personal data", () => {
@@ -56,6 +64,34 @@ test("cloud hashes are stable and change with personal data", () => {
   const changed = personalStateHash({ sessions: [{ id: "two" }] });
   assert.equal(first, repeated);
   assert.notEqual(first, changed);
+});
+
+test("a Health Connect clear marker prevents cloud summaries from returning", () => {
+  const merged = mergePersonalStates(
+    {
+      healthLog: [],
+      bwLog: [],
+      healthLogClearedAt: Date.parse("2026-07-27T12:00:00.000Z"),
+    },
+    {
+      healthLog: [{
+        id: "health-connect:2026-07-27",
+        date: "2026-07-27",
+        source: "health-connect",
+        importedAt: "2026-07-27T11:00:00.000Z",
+      }],
+      bwLog: [{
+        id: "health-connect-weight:2026-07-27",
+        date: "2026-07-27",
+        source: "health-connect",
+        importedAt: "2026-07-27T11:00:00.000Z",
+      }],
+    },
+  );
+
+  assert.deepEqual(merged.healthLog, []);
+  assert.deepEqual(merged.bwLog, []);
+  assert.equal(merged.healthLogClearedAt, Date.parse("2026-07-27T12:00:00.000Z"));
 });
 
 test("cloud envelopes include device and reject oversized snapshots", () => {

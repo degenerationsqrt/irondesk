@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --test",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android",
+    "android:build": "npm run android:sync && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
     "@garmin/fitsdk": "^21.208.0",
     "fflate": "^0.8.2",
     "firebase": "12.16.0",
@@ -22,6 +27,7 @@
     "recharts": "2.12.7"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
     "@vitejs/plugin-react": "4.3.4",
     "vite": "6.4.3"
   }

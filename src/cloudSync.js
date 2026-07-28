@@ -12,6 +12,8 @@ const STATE_FIELDS = [
   "sessions",
   "bwLog",
   "cardioLog",
+  "healthLog",
+  "healthLogClearedAt",
   "active",
   "progress",
   "gender",
@@ -71,11 +73,13 @@ export function buildPersonalState(source = {}) {
   state.sessions = Array.isArray(state.sessions) ? state.sessions : [];
   state.bwLog = Array.isArray(state.bwLog) ? state.bwLog : [];
   state.cardioLog = Array.isArray(state.cardioLog) ? state.cardioLog : [];
+  state.healthLog = Array.isArray(state.healthLog) ? state.healthLog : [];
   state.customDays = Array.isArray(state.customDays) ? state.customDays : [];
   return cleanJson(state, {
     sessions: [],
     bwLog: [],
     cardioLog: [],
+    healthLog: [],
     customDays: [],
   });
 }
@@ -83,6 +87,18 @@ export function buildPersonalState(source = {}) {
 export function mergePersonalStates(localSource, cloudSource) {
   const local = buildPersonalState(localSource);
   const cloud = buildPersonalState(cloudSource);
+  const healthLogClearedAt = Math.max(
+    Number(local.healthLogClearedAt) || 0,
+    Number(cloud.healthLogClearedAt) || 0,
+  );
+  const afterHealthClear = record => {
+    if (healthLogClearedAt <= 0) return true;
+    if (record?.source !== "health-connect" && !String(record?.id || "").startsWith("health-connect:")) {
+      return true;
+    }
+    const importedAt = Date.parse(record?.importedAt || "");
+    return Number.isFinite(importedAt) && importedAt > healthLogClearedAt;
+  };
   const merged = buildPersonalState({
     ...local,
     ...cloud,
@@ -95,12 +111,18 @@ export function mergePersonalStates(localSource, cloudSource) {
       cloud.bwLog,
       local.bwLog,
       ["id", "date"],
-    ).sort(logSort),
+    ).filter(afterHealthClear).sort(logSort),
     cardioLog: mergeRecords(
       cloud.cardioLog,
       local.cardioLog,
       ["id"],
     ).sort(logSort),
+    healthLog: mergeRecords(
+      cloud.healthLog,
+      local.healthLog,
+      ["id", "date"],
+    ).filter(afterHealthClear).sort(logSort),
+    healthLogClearedAt,
     active: local.active || cloud.active || null,
   });
   return merged;
