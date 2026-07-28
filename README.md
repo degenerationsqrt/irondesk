@@ -14,7 +14,7 @@ IronDesk is a mobile-first strength training planner and workout logger. It incl
 
 ## Development
 
-Requirements: Node.js 20 or newer.
+Requirements: Node.js 22 or newer.
 
 ```bash
 npm install

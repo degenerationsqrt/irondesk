@@ -35,7 +35,7 @@ new watch data. Some Garmin metrics or historical data might not be shared.
 
 ## Build and install a local test APK
 
-Install Node.js 20+, JDK 21, and Android Studio with Android SDK 36. Then run:
+Install Node.js 22+, JDK 21, and Android Studio with Android SDK 36. Then run:
 
 ```bash
 npm ci
