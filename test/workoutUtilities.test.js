@@ -78,6 +78,21 @@ test("history can isolate and search Garmin imports", () => {
   );
 });
 
+test("history can isolate guided Train sessions", () => {
+  const guided = {
+    id: "vo2-session",
+    date: "2026-07-21",
+    dayId: "Norwegian 4 × 4",
+    mode: "gym",
+    sessionType: "vo2",
+    entries: [],
+  };
+  assert.deepEqual(
+    filterAndSortSessions([...sessions, guided], { mode: "training" }).map(item => item.id),
+    ["vo2-session"],
+  );
+});
+
 test("history summaries tolerate legacy sessions without a recorded volume", () => {
   assert.deepEqual(summarizeSessions(sessions), {
     sessions: 2,

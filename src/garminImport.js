@@ -29,6 +29,7 @@ const HEADER_ALIASES = {
   calories: ["calories", "totalcalories", "activecalories"],
   avgHeartRate: ["avghr", "averageheartrate", "avgheartrate"],
   maxHeartRate: ["maxhr", "maximumheartrate", "maxheartrate"],
+  vo2Max: ["vo2max", "vo2maxvalue", "maximaloxygenuptake"],
   totalReps: ["totalreps", "repetitions", "reps"],
 };
 
@@ -212,6 +213,7 @@ function makeGarminSession({
   calories = null,
   avgHeartRate = null,
   maxHeartRate = null,
+  vo2Max = null,
   distanceMeters = null,
   distanceDisplay = "",
   totalReps = null,
@@ -262,6 +264,7 @@ function makeGarminSession({
       calories,
       avgHeartRate,
       maxHeartRate,
+      vo2Max,
       distanceMeters,
       distanceDisplay,
       durationSeconds: Math.round(Number(durationSeconds) || 0),
@@ -367,6 +370,7 @@ export function parseGarminCsv(
       calories: positiveNumber(value("calories")),
       avgHeartRate: positiveNumber(value("avgHeartRate")),
       maxHeartRate: positiveNumber(value("maxHeartRate")),
+      vo2Max: positiveNumber(value("vo2Max")),
       distanceMeters: distance.distanceMeters,
       distanceDisplay: distance.distanceDisplay,
       totalReps: positiveNumber(value("totalReps")),
@@ -510,6 +514,7 @@ export function garminMessagesToSessions(
       calories: positiveNumber(session?.totalCalories),
       avgHeartRate: positiveNumber(session?.avgHeartRate),
       maxHeartRate: positiveNumber(session?.maxHeartRate),
+      vo2Max: positiveNumber(session?.vo2Max ?? session?.vo2MaxValue),
       distanceMeters,
       distanceDisplay,
       totalReps: totalReps || null,
@@ -617,6 +622,7 @@ export function garminMetricItems(session) {
   if (garmin.calories != null) metrics.push(["Calories", Math.round(garmin.calories).toLocaleString()]);
   if (garmin.avgHeartRate != null) metrics.push(["Avg HR", `${Math.round(garmin.avgHeartRate)} bpm`]);
   if (garmin.maxHeartRate != null) metrics.push(["Max HR", `${Math.round(garmin.maxHeartRate)} bpm`]);
+  if (garmin.vo2Max != null) metrics.push(["VO₂ Max", `${Number(garmin.vo2Max).toFixed(1)} ml/kg/min`]);
   if (garmin.totalReps != null) metrics.push(["Reps", Math.round(garmin.totalReps).toLocaleString()]);
   return metrics;
 }

@@ -46,6 +46,18 @@ import {
   mergeHealthSummaries,
   performHealthConnectSync,
 } from "./healthConnect.js";
+import {
+  HEALTH_TREND_METRICS,
+  healthTrendSeries,
+  latestHealthValue,
+  mergeCardioTrendRecords,
+  weekStartKey,
+} from "./trendData.js";
+import {
+  buildTrackedSession,
+  sessionTypeLabel,
+  trackedSessionSummary,
+} from "./trainingSessions.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -769,6 +781,54 @@ function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, 
     rows
   };
 }
+
+function createGeneratedActiveWorkout({
+  focusKey,
+  goal,
+  mode,
+  progress,
+  tm,
+  roundLoad,
+  styleOverride,
+}) {
+  const day = generateDay(
+    focusKey,
+    goal,
+    mode,
+    progress.blockNum,
+    progress.week - 1,
+    tm,
+    roundLoad,
+    styleOverride,
+  );
+  return {
+    id: uid(),
+    date: today(),
+    dayId: day.id,
+    focusKey,
+    mode,
+    goal,
+    blockNum: progress.blockNum,
+    week: progress.week,
+    start: Date.now(),
+    entries: day.rows.map(row => ({
+      ex: row.ex,
+      heavy: Boolean(row.heavy),
+      drop: Boolean(row.drop),
+      role: row.role,
+      db: Boolean(row.db),
+      note: row.note || "",
+      lift: row.lift || null,
+      target: row.target,
+      targetReps: row.reps,
+      sets: Array(row.sets).fill(null).map(() => ({
+        w: row.target || "",
+        r: row.reps,
+        done: false,
+      })),
+    })),
+  };
+}
 const RULES = ["Heavy compounds (3–5 reps) are the muscle-protecting signal. Never drop-set them.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Drop sets only on isolation last sets. Max 2–3 per session.", "Rate of loss ~1–2 lb/week. Faster = lean mass going.", "Safety pins set before every heavy solo bench or squat.", "All reps clean → +5 lb upper / +10 lb lower. Miss → repeat."];
 
 /* ============ THEME ============ */
@@ -1451,6 +1511,31 @@ export default function IronDesk() {
   const setPlates = mode === "gym" ? setGymPlates : setHomePlates;
   const roundLoad = x => mode === "gym" ? Math.round(x / 2.5) * 2.5 : Math.round(x / 5) * 5;
   const tm = k => Math.round(maxes[k] * 0.9);
+  const recordTrainingSession = React.useCallback(details => {
+    const session = buildTrackedSession({
+      id: uid(),
+      date: today(),
+      completedAt: Date.now(),
+      ...details,
+    });
+    setSessions(current => [session, ...current]);
+    return session;
+  }, []);
+  const startProgramWorkout = focusKey => {
+    if (active && !window.confirm("Replace the workout currently in progress?")) return;
+    const workout = createGeneratedActiveWorkout({
+      focusKey,
+      goal,
+      mode,
+      progress,
+      tm,
+      roundLoad,
+      styleOverride,
+    });
+    setActive(workout);
+    setTab("today");
+    note(`${workout.dayId} ready`);
+  };
 
   // PR map: best e1RM per exercise across all finished sessions
   const prMap = useMemo(() => {
@@ -1728,21 +1813,31 @@ export default function IronDesk() {
     goal,
     setGender,
     setGoal,
-    styleOverride
+    styleOverride,
+    onStartWorkout: startProgramWorkout
   }), tab === "core" && /*#__PURE__*/React.createElement(CoreTab, {
     mode,
-    note
+    note,
+    onComplete: recordTrainingSession
   }), tab === "hiit" && /*#__PURE__*/React.createElement(HiitTab, {
-    note
+    note,
+    mode,
+    onComplete: recordTrainingSession
   }), tab === "mma" && /*#__PURE__*/React.createElement(DisciplineTab, {
     id: "mma",
-    note: note
+    note: note,
+    mode,
+    onComplete: recordTrainingSession
   }), tab === "pilates" && /*#__PURE__*/React.createElement(DisciplineTab, {
     id: "pilates",
-    note: note
+    note: note,
+    mode,
+    onComplete: recordTrainingSession
   }), tab === "yoga" && /*#__PURE__*/React.createElement(DisciplineTab, {
     id: "yoga",
-    note: note
+    note: note,
+    mode,
+    onComplete: recordTrainingSession
   }), tab === "macros" && /*#__PURE__*/React.createElement(MacrosTab, {
     macros,
     setMacros
@@ -1800,7 +1895,8 @@ export default function IronDesk() {
     bwLog,
     setBwLog,
     cardioLog,
-    setCardioLog
+    setCardioLog,
+    healthLog
   }), tab === "tools" && /*#__PURE__*/React.createElement(Tools, {
     mode,
     plates,
@@ -1903,6 +1999,10 @@ function Today({
   const [planQ, setPlanQ] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
   const completedTimerRef = useRef(0);
+  const combinedCardioLog = useMemo(
+    () => mergeCardioTrendRecords(cardioLog, sessions),
+    [cardioLog, sessions],
+  );
   const timerEndAt = Number(active?.restTimerEndAt) || 0;
   const timer = timerEndAt > 0 ? Math.max(0, Math.ceil((timerEndAt - timerNow) / 1000)) : 0;
   useEffect(() => {
@@ -1941,34 +2041,15 @@ function Today({
     restTimerDuration: Math.max(0, Number(current.restTimerDuration) || 0) + seconds
   } : current);
   const start = focusKey => {
-    const d = generateDay(focusKey, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
-    setActive({
-      id: uid(),
-      date: today(),
-      dayId: d.id,
+    setActive(createGeneratedActiveWorkout({
       focusKey,
-      mode,
       goal,
-      blockNum: progress.blockNum,
-      week: progress.week,
-      start: Date.now(),
-      entries: d.rows.map(r => ({
-        ex: r.ex,
-        heavy: !!r.heavy,
-        drop: !!r.drop,
-        role: r.role,
-        db: !!r.db,
-        note: r.note || "",
-        lift: r.lift || null,
-        target: r.target,
-        targetReps: r.reps,
-        sets: Array(r.sets).fill(null).map(() => ({
-          w: r.target || "",
-          r: r.reps,
-          done: false
-        }))
-      }))
-    });
+      mode,
+      progress,
+      tm,
+      roundLoad,
+      styleOverride,
+    }));
   };
   const startCustom = cd => {
     setActive({
@@ -2432,6 +2513,7 @@ function Today({
       }
     }, "Use Prev/Next to move through the 6-week block — exercises and loads shift each week, just like the Program tab.")), /*#__PURE__*/React.createElement(Stopwatch, null), /*#__PURE__*/React.createElement(CardioQuickLog, {
       cardioLog: cardioLog,
+      trendLog: combinedCardioLog,
       setCardioLog: setCardioLog,
       note: note
     }), /*#__PURE__*/React.createElement(WeekSummary, {
@@ -2738,7 +2820,8 @@ function ProgramTab({
   goal,
   setGender,
   setGoal,
-  styleOverride
+  styleOverride,
+  onStartWorkout
 }) {
   const g = GOALS[goal];
   const [focusKey, setFocusKey] = useState(g.week[0]);
@@ -2958,7 +3041,25 @@ function ProgramTab({
       color: C.gold,
       whiteSpace: "nowrap"
     }
-  }, r.role === "cardio" ? `${r.reps} min` : `${r.sets}\u00d7${r.reps}`, r.target ? ` \u00b7 ${r.target}` : "")))), /*#__PURE__*/React.createElement("div", {
+  }, r.role === "cardio" ? `${r.reps} min` : `${r.sets}\u00d7${r.reps}`, r.target ? ` \u00b7 ${r.target}` : "")))), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: () => onStartWorkout(fk),
+    style: {
+      width: "100%",
+      marginTop: 14,
+      padding: "13px",
+      background: C.red,
+      border: "none",
+      borderRadius: 10,
+      color: "#fff",
+      fontFamily: "'Oswald'",
+      fontSize: 14,
+      fontWeight: 700,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, `Start ${gen.id}`), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.dim,
@@ -3038,6 +3139,7 @@ function History({
           ["all", "All sessions"],
           ["home", "Home"],
           ["gym", "Gym"],
+          ["training", "Train"],
           ["garmin", "Garmin"],
         ].map(([value, label]) => (
           <button
@@ -3048,7 +3150,7 @@ function History({
             onClick={() => setModeFilter(value)}
           >
             <span aria-hidden="true">
-              {value === "all" ? "▦" : value === "home" ? "⌂" : value === "garmin" ? "G" : "◆"}
+              {value === "all" ? "▦" : value === "home" ? "⌂" : value === "garmin" ? "G" : value === "training" ? "✓" : "◆"}
             </span>
             {label}
           </button>
@@ -3131,6 +3233,7 @@ function History({
             const records = Array.isArray(session.prs) ? session.prs : [];
             const isGarmin = session.source === "garmin";
             const garminMetrics = isGarmin ? garminMetricItems(session) : [];
+            const trackedSummary = trackedSessionSummary(session);
             return (
               <article
                 className={`history-card ${isOpen ? "is-open" : ""} ${isGarmin ? "is-garmin" : ""}`}
@@ -3145,14 +3248,14 @@ function History({
                   >
                     <span className="history-card-date">
                       {session.date || "No date"}
-                      <small>{isGarmin ? "GARMIN" : session.mode === "gym" ? "GYM" : "HOME"}</small>
+                      <small>{sessionTypeLabel(session)}</small>
                     </span>
                     <span className="history-card-main">
                       <strong>{session.dayId || "Workout"}</strong>
                       <small>
                         {isGarmin
                           ? `${Number(session.durationMin) || 0} min · ${session.garmin?.activityType || "Garmin activity"}`
-                          : `${Number(session.durationMin) || 0} min · ${Math.round(safeSessionVolume(session)).toLocaleString()} lb`}
+                          : trackedSummary || `${Number(session.durationMin) || 0} min · ${Math.round(safeSessionVolume(session)).toLocaleString()} lb`}
                         {!isGarmin && records.length ? ` · ${records.length} PR${records.length === 1 ? "" : "s"}` : ""}
                       </small>
                     </span>
@@ -3203,7 +3306,7 @@ function History({
                             {entry.db && <small>PER DB</small>}
                             {records.some((record) => record.ex === entry.ex) && <small className="is-pr">PR</small>}
                           </div>
-                          <span>{sets.map((set) => `${set.w}×${set.r}`).join(" · ") || "No sets"}</span>
+                          <span>{entry.summary || sets.map((set) => `${set.w}×${set.r}`).join(" · ") || "Completed"}</span>
                         </div>
                       );
                     })}
@@ -3218,13 +3321,113 @@ function History({
   </React.Fragment>;
 }
 
+function formatHealthTrendValue(metricKey, value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  if (metricKey === "sleepMinutes") {
+    const hours = Math.floor(number / 60);
+    return `${hours}h ${Math.round(number % 60)}m`;
+  }
+  if (metricKey === "steps" || metricKey === "calories") return Math.round(number).toLocaleString();
+  return Number.isInteger(number) ? String(number) : number.toFixed(1);
+}
+
+function HealthRecoveryTrends({ healthLog }) {
+  const [metricKey, setMetricKey] = useState("steps");
+  const selected = HEALTH_TREND_METRICS.find(metric => metric.key === metricKey)
+    || HEALTH_TREND_METRICS[0];
+  const data = useMemo(
+    () => healthTrendSeries(healthLog, selected.key),
+    [healthLog, selected.key],
+  );
+  const headlineKeys = ["steps", "restingHeartRate", "sleepMinutes", "vo2Max"];
+  const headlineMetrics = HEALTH_TREND_METRICS.filter(metric => headlineKeys.includes(metric.key));
+  const tooltipStyle = {
+    contentStyle: {
+      background: C.panel,
+      border: `1px solid ${C.line}`,
+      borderRadius: 8,
+      fontSize: 12
+    },
+    labelStyle: { color: C.dim }
+  };
+
+  return (
+    <Panel
+      title="Health & Recovery"
+      sub="Health Connect daily summaries now feed Trends automatically"
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8, marginBottom: 12 }}>
+        {headlineMetrics.map(metric => {
+          const latest = latestHealthValue(healthLog, metric.key);
+          return (
+            <div key={metric.key} style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 11px" }}>
+              <span style={{ display: "block", color: C.dim, fontSize: 10, textTransform: "uppercase" }}>{metric.label}</span>
+              <strong style={{ display: "block", color: metric.color, fontSize: 17, marginTop: 2 }}>
+                {formatHealthTrendValue(metric.key, latest?.value)}
+                {latest ? <small style={{ color: C.dim, fontSize: 9, marginLeft: 4 }}>{metric.suffix}</small> : null}
+              </strong>
+              <small style={{ color: C.dim }}>{latest?.date || "No imported data"}</small>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {HEALTH_TREND_METRICS.map(metric => (
+          <button
+            type="button"
+            key={metric.key}
+            onClick={() => setMetricKey(metric.key)}
+            style={{
+              background: metricKey === metric.key ? metric.color : C.panel2,
+              color: metricKey === metric.key ? "#111" : C.dim,
+              border: `1px solid ${metricKey === metric.key ? metric.color : C.line}`,
+              borderRadius: 7,
+              padding: "6px 9px",
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer"
+            }}
+          >
+            {metric.label}
+          </button>
+        ))}
+      </div>
+      {data.length < 2 ? (
+        <Empty text={`Sync 2+ days with ${selected.label.toLowerCase()} to see this trend.`} />
+      ) : (
+        <ResponsiveContainer width="100%" height={175}>
+          <LineChart data={data} margin={{ top: 6, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid stroke={C.line} strokeDasharray="2 4" />
+            <XAxis dataKey="date" tick={{ fill: C.dim, fontSize: 10 }} tickFormatter={date => date.slice(5)} />
+            <YAxis tick={{ fill: C.dim, fontSize: 10 }} />
+            <Tooltip {...tooltipStyle} />
+            <Line
+              type="monotone"
+              dataKey="value"
+              name={selected.label}
+              stroke={selected.color}
+              strokeWidth={2.5}
+              dot={{ r: 3 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+      <div style={{ color: C.dim, fontSize: 10.5, marginTop: 8 }}>
+        Source: Health Connect daily summaries. VO₂ max appears when a connected provider writes that record.
+      </div>
+    </Panel>
+  );
+}
+
 /* ============ TRENDS ============ */
 function Trends({
   sessions,
   bwLog,
   setBwLog,
   cardioLog,
-  setCardioLog
+  setCardioLog,
+  healthLog
 }) {
   const [sel, setSel] = useState("bench");
   const [bw, setBw] = useState({
@@ -3237,16 +3440,24 @@ function Trends({
     type: "Bike",
     minutes: 30
   });
+  const cardioTrendLog = useMemo(
+    () => mergeCardioTrendRecords(cardioLog, sessions),
+    [cardioLog, sessions],
+  );
   const liftName = LIFTS.find(l => l.key === sel)?.name;
   const e1rmData = useMemo(() => {
     const pts = [];
-    [...sessions].reverse().forEach(s => s.entries.forEach(en => {
+    [...sessions].reverse().forEach(s => (Array.isArray(s?.entries) ? s.entries : []).forEach(en => {
       if (en.lift === sel || en.ex === liftName) {
-        const best = Math.max(...en.sets.map(st => epley(st.w, st.r)));
-        pts.push({
-          date: s.date,
-          e1rm: Math.round(best)
-        });
+        const estimates = (Array.isArray(en?.sets) ? en.sets : [])
+          .map(st => epley(st.w, st.r))
+          .filter(Number.isFinite);
+        if (estimates.length) {
+          pts.push({
+            date: s.date,
+            e1rm: Math.round(Math.max(...estimates))
+          });
+        }
       }
     }));
     return pts;
@@ -3254,11 +3465,9 @@ function Trends({
   const volData = useMemo(() => {
     const byWeek = {};
     sessions.forEach(s => {
-      const d = new Date(s.date);
-      const wk = new Date(d);
-      wk.setDate(d.getDate() - d.getDay());
-      const k = wk.toISOString().slice(5, 10);
-      byWeek[k] = (byWeek[k] || 0) + s.volume;
+      const k = weekStartKey(s.date);
+      if (!k) return;
+      byWeek[k] = (byWeek[k] || 0) + safeSessionVolume(s);
     });
     return Object.entries(byWeek).sort((a, b) => a[0].localeCompare(b[0])).slice(-8).map(([w, v]) => ({
       week: w,
@@ -3302,6 +3511,7 @@ function Trends({
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(CardioQuickLog, {
     cardioLog: cardioLog,
+    trendLog: cardioTrendLog,
     setCardioLog: setCardioLog,
     note: () => {}
   }), /*#__PURE__*/React.createElement(Panel, {
@@ -3388,7 +3598,8 @@ function Trends({
     tick: {
       fill: C.dim,
       fontSize: 10
-    }
+    },
+    tickFormatter: d => d.slice(5)
   }), /*#__PURE__*/React.createElement(YAxis, {
     tick: {
       fill: C.dim,
@@ -3594,7 +3805,9 @@ function Trends({
       cursor: "pointer",
       fontSize: 15
     }
-  }, "×"))))), /*#__PURE__*/React.createElement(Panel, {
+  }, "×"))))), /*#__PURE__*/React.createElement(HealthRecoveryTrends, {
+    healthLog: healthLog
+  }), /*#__PURE__*/React.createElement(Panel, {
     title: "Cardio",
     sub: "Mostly zone 2 — protect leg recovery"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3633,7 +3846,7 @@ function Trends({
   }), /*#__PURE__*/React.createElement("button", {
     onClick: addCd,
     style: btnSm()
-  }, "+ Log")), cardioLog.slice(0, 4).map(x => /*#__PURE__*/React.createElement("div", {
+  }, "+ Log")), cardioTrendLog.slice(0, 6).map(x => /*#__PURE__*/React.createElement("div", {
     key: x.id,
     style: {
       display: "flex",
@@ -3646,17 +3859,17 @@ function Trends({
     style: {
       flex: 1
     }
-  }, x.type, /*#__PURE__*/React.createElement("span", {
+  }, x.label || x.type, /*#__PURE__*/React.createElement("span", {
     style: {
       color: C.dim,
       fontSize: 11
     }
-  }, " · ", x.date)), /*#__PURE__*/React.createElement("span", {
+  }, " · ", x.date, x.source === "garmin" ? " · Garmin" : "")), /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 600,
       color: C.gold
     }
-  }, x.minutes, " min"), /*#__PURE__*/React.createElement("button", {
+  }, x.minutes, " min"), x.source !== "garmin" && /*#__PURE__*/React.createElement("button", {
     onClick: () => setCardioLog(cardioLog.filter(c => c.id !== x.id)),
     style: {
       background: "none",
@@ -5237,6 +5450,7 @@ function Stopwatch() {
 /* ============ CARDIO TRACKER (rides / runs / steps) ============ */
 function CardioQuickLog({
   cardioLog,
+  trendLog,
   setCardioLog,
   note
 }) {
@@ -5247,6 +5461,7 @@ function CardioQuickLog({
     miles: "",
     steps: ""
   });
+  const displayLog = Array.isArray(trendLog) ? trendLog : cardioLog || [];
   const add = () => {
     const e = {
       id: uid(),
@@ -5277,12 +5492,12 @@ function CardioQuickLog({
     note("Cardio logged");
   };
   const metric = type === "steps" ? "steps" : "miles";
-  const data = useMemo(() => (cardioLog || []).filter(x => x.type === type).slice().reverse().slice(-14).map(x => ({
+  const data = useMemo(() => displayLog.filter(x => x.type === type).slice().reverse().slice(-14).map(x => ({
     date: x.date,
     v: type === "steps" ? x.steps || 0 : x.miles || 0
-  })), [cardioLog, type]);
+  })), [displayLog, type]);
   const cut = localDateKey(new Date(Date.now() - 7 * 864e5));
-  const wk = (cardioLog || []).filter(x => x.type === type && x.date >= cut);
+  const wk = displayLog.filter(x => x.type === type && x.date >= cut);
   const wkMiles = wk.reduce((a, x) => a + (x.miles || 0), 0);
   const wkMin = wk.reduce((a, x) => a + (x.minutes || 0), 0);
   const wkSteps = wk.reduce((a, x) => a + (x.steps || 0), 0);
@@ -5493,11 +5708,13 @@ const CORE_MOVES = [{
 }];
 function CoreTab({
   mode,
-  note
+  note,
+  onComplete
 }) {
   const [size, setSize] = useState(5);
   const [rounds, setRounds] = useState(3);
   const [seed, setSeed] = useState(1);
+  const [run, setRun] = useState(null);
   const circuit = useMemo(() => {
     const out = [];
     const used = {};
@@ -5512,6 +5729,52 @@ function CoreTab({
     }
     return out;
   }, [size, seed]);
+  const completed = new Set(run?.completed || []);
+  const activeCircuit = run?.circuit || circuit;
+  const activeRounds = run?.rounds || rounds;
+  const toggleMove = index => {
+    setRun(current => {
+      if (!current) return current;
+      const next = new Set(current.completed || []);
+      if (next.has(index)) next.delete(index);else next.add(index);
+      return {
+        ...current,
+        completed: [...next]
+      };
+    });
+  };
+  const finishCircuit = () => {
+    if (!run) {
+      setRun({
+        startedAt: Date.now(),
+        completed: [],
+        circuit: circuit.map(move => ({ ...move })),
+        rounds: Number(rounds) || 1
+      });
+      note("Core circuit started");
+      return;
+    }
+    const selected = activeCircuit.filter((_, index) => completed.has(index));
+    if (!selected.length) {
+      note("Check off at least one move");
+      return;
+    }
+    onComplete({
+      title: `Core Circuit · ${activeRounds} rounds`,
+      sessionType: "core",
+      mode,
+      startedAt: run.startedAt,
+      entries: selected.map(move => ({
+        name: move.n,
+        summary: `${activeRounds} × ${move.amt} ${move.unit}`
+      })),
+      metadata: {
+        rounds: Number(activeRounds) || 1
+      }
+    });
+    setRun(null);
+    note("Core circuit saved");
+  };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
     title: "Core & Abs",
     sub: "Build a circuit — do it for the round count, rest 30–45s between rounds"
@@ -5578,18 +5841,31 @@ function CoreTab({
       cursor: "pointer"
     }
   }, "↻ New Circuit"))), /*#__PURE__*/React.createElement(Panel, {
-    title: `Your Circuit · ${rounds} rounds`,
+    title: `Your Circuit · ${activeRounds} rounds`,
     sub: "Weighted where it makes sense; bodyweight otherwise"
-  }, circuit.map((m, i) => /*#__PURE__*/React.createElement("div", {
+  }, activeCircuit.map((m, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       display: "flex",
       alignItems: "center",
       gap: 12,
       padding: "11px 0",
-      borderBottom: i < circuit.length - 1 ? `1px solid ${C.line}` : "none"
+      borderBottom: i < activeCircuit.length - 1 ? `1px solid ${C.line}` : "none"
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, run && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    "aria-label": `${completed.has(i) ? "Uncheck" : "Complete"} ${m.n}`,
+    onClick: () => toggleMove(i),
+    style: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      border: `2px solid ${completed.has(i) ? C.green : C.line}`,
+      background: completed.has(i) ? C.green : "transparent",
+      color: "#111",
+      cursor: "pointer"
+    }
+  }, completed.has(i) ? "✓" : ""), /*#__PURE__*/React.createElement("span", {
     className: "ttl",
     style: {
       width: 22,
@@ -5609,7 +5885,24 @@ function CoreTab({
       fontWeight: 700,
       color: C.green
     }
-  }, m.amt, " ", m.unit)))), /*#__PURE__*/React.createElement(Stopwatch, null));
+  }, m.amt, " ", m.unit))), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    onClick: finishCircuit,
+    style: {
+      width: "100%",
+      marginTop: 14,
+      padding: "13px",
+      background: run ? C.green : C.gold,
+      border: "none",
+      borderRadius: 10,
+      color: "#111",
+      fontFamily: "'Oswald'",
+      fontWeight: 700,
+      fontSize: 14,
+      textTransform: "uppercase",
+      cursor: "pointer"
+    }
+  }, run ? `Finish & Save · ${completed.size}/${activeCircuit.length}` : "Start Circuit")), /*#__PURE__*/React.createElement(Stopwatch, null));
 }
 
 /* ============ HIIT (cardio machine intervals) ============ */
@@ -5649,15 +5942,91 @@ const HIIT_PROTOCOLS = [{
   rounds: 10,
   note: "Max sprints, full recovery — power."
 }];
+const VO2_PROTOCOLS = [{
+  id: "vo2-4x4",
+  name: "Norwegian 4 × 4",
+  category: "vo2",
+  work: 240,
+  rest: 180,
+  rounds: 4,
+  warmupMinutes: 10,
+  cooldownMinutes: 5,
+  intensity: "90–95% HR max · RPE 8–9",
+  note: "Four controlled hard efforts with active recovery."
+}, {
+  id: "vo2-starter",
+  name: "VO₂ Starter 4 × 2",
+  category: "vo2",
+  work: 120,
+  rest: 120,
+  rounds: 4,
+  warmupMinutes: 8,
+  cooldownMinutes: 5,
+  intensity: "RPE 8 · finish with good form",
+  note: "A shorter entry point before progressing to four-minute efforts."
+}, {
+  id: "vo2-3030",
+  name: "VO₂ 30 / 30 Builder",
+  category: "vo2",
+  work: 30,
+  rest: 30,
+  rounds: 12,
+  warmupMinutes: 8,
+  cooldownMinutes: 5,
+  intensity: "RPE 8–9 · repeatable pace",
+  note: "Short repeats that accumulate quality time at high aerobic output."
+}];
 const MACHINES = ["Bike", "Treadmill", "Rower", "Elliptical", "Stair"];
 function HiitTab({
-  note
+  note,
+  mode,
+  onComplete
 }) {
   const [machine, setMachine] = useState("Bike");
-  const [proto, setProto] = useState(HIIT_PROTOCOLS[1]);
+  const [category, setCategory] = useState("vo2");
+  const [proto, setProto] = useState(VO2_PROTOCOLS[0]);
+  const protocols = category === "vo2" ? VO2_PROTOCOLS : HIIT_PROTOCOLS;
+  const selectCategory = next => {
+    setCategory(next);
+    setProto(next === "vo2" ? VO2_PROTOCOLS[0] : HIIT_PROTOCOLS[1]);
+  };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
-    title: "HIIT — Cardio Machine",
-    sub: "Pick a machine and a protocol, then run the interval timer"
+    title: "Conditioning Command Center",
+    sub: "Choose VO₂ max development or shorter HIIT, then run the guided timer"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      marginBottom: 14
+    }
+  }, [["vo2", "VO₂ Max"], ["hiit", "HIIT"]].map(([key, label]) => /*#__PURE__*/React.createElement("button", {
+    key: key,
+    type: "button",
+    onClick: () => selectCategory(key),
+    className: "ttl",
+    style: {
+      flex: 1,
+      padding: "9px",
+      borderRadius: 8,
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 700,
+      background: category === key ? C.blue : C.panel2,
+      color: category === key ? "#fff" : C.dim,
+      border: `1px solid ${category === key ? C.blue : C.line}`
+    }
+  }, label))), category === "vo2" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "10px 12px",
+      marginBottom: 14,
+      borderRadius: 9,
+      background: "rgba(167,139,250,.10)",
+      border: "1px solid rgba(167,139,250,.35)",
+      color: C.dim,
+      fontSize: 11.5,
+      lineHeight: 1.5
+    }
+  }, "Warm up first, keep the hard efforts controlled, and cool down afterward. Start with 1–2 VO₂ sessions per week. Stop for chest pain, faintness, or unusual shortness of breath."), /*#__PURE__*/React.createElement("div", {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
@@ -5701,7 +6070,7 @@ function HiitTab({
       flexDirection: "column",
       gap: 6
     }
-  }, HIIT_PROTOCOLS.map(p => /*#__PURE__*/React.createElement("button", {
+  }, protocols.map(p => /*#__PURE__*/React.createElement("button", {
     key: p.id,
     onClick: () => setProto(p),
     style: {
@@ -5735,23 +6104,52 @@ function HiitTab({
       color: C.dim,
       marginTop: 2
     }
-  }, p.note, " · ~", Math.round((p.work + p.rest) * p.rounds / 60), " min"))))), /*#__PURE__*/React.createElement(IntervalTimer, {
+  }, p.note, " · ~", Math.round((p.work * p.rounds + p.rest * Math.max(0, p.rounds - 1)) / 60), " min intervals", p.intensity ? ` · ${p.intensity}` : "")))), proto.category === "vo2" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10,
+      color: C.dim,
+      fontSize: 11.5,
+      lineHeight: 1.5
+    }
+  }, `${proto.warmupMinutes} min warm-up · ${proto.intensity} · ${proto.cooldownMinutes} min cool-down`))), /*#__PURE__*/React.createElement(IntervalTimer, {
     key: proto.id,
     proto: proto,
     machine: machine,
-    note: note
+    note: note,
+    onComplete: ({ startedAt }) => onComplete({
+      title: `${proto.name} · ${machine}`,
+      sessionType: proto.category === "vo2" ? "vo2" : "hiit",
+      mode,
+      startedAt,
+      entries: [{
+        name: machine,
+        summary: `${proto.rounds} × ${proto.work}s hard / ${proto.rest}s recovery`
+      }],
+      metadata: {
+        protocolId: proto.id,
+        machine,
+        intervalWorkSeconds: proto.work,
+        intervalRestSeconds: proto.rest,
+        rounds: proto.rounds,
+        warmupMinutes: proto.warmupMinutes || 0,
+        cooldownMinutes: proto.cooldownMinutes || 0
+      }
+    })
   }));
 }
 function IntervalTimer({
   proto,
   machine,
-  note
+  note,
+  onComplete
 }) {
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState("ready"); // ready | work | rest | done
   const [round, setRound] = useState(1);
   const [left, setLeft] = useState(proto.work);
   const ref = useRef(null);
+  const startedAtRef = useRef(null);
+  const completedRef = useRef(false);
   const beep = freq => {
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -5767,6 +6165,7 @@ function IntervalTimer({
       o.start();
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
       o.stop(ctx.currentTime + 0.25);
+      o.onended = () => ctx.close().catch(() => {});
     } catch (e) {}
   };
   useEffect(() => {
@@ -5802,12 +6201,22 @@ function IntervalTimer({
   // when phase changes, reset the seconds for the new phase
   useEffect(() => {
     if (phase === "work") setLeft(proto.work);else if (phase === "rest") setLeft(proto.rest);else if (phase === "done") {
-      note && note("HIIT complete! 🔥");
+      note && note(onComplete
+        ? `${proto.category === "vo2" ? "VO₂" : "HIIT"} session saved`
+        : "Rounds complete");
+      if (!completedRef.current) {
+        completedRef.current = true;
+        onComplete && onComplete({
+          startedAt: startedAtRef.current || Date.now()
+        });
+      }
     }
     /* eslint-disable-next-line */
   }, [phase]);
   const startStop = () => {
     if (phase === "ready" || phase === "done") {
+      startedAtRef.current = Date.now();
+      completedRef.current = false;
       setPhase("work");
       setRound(1);
       setLeft(proto.work);
@@ -5820,6 +6229,8 @@ function IntervalTimer({
     setPhase("ready");
     setRound(1);
     setLeft(proto.work);
+    startedAtRef.current = null;
+    completedRef.current = false;
     if (ref.current) clearInterval(ref.current);
   };
   const bg = phase === "work" ? C.red : phase === "rest" ? C.blue : phase === "done" ? C.green : C.panel2;
@@ -6711,7 +7122,9 @@ const DISCIPLINES = {
 };
 function DisciplineTab({
   id,
-  note
+  note,
+  mode,
+  onComplete
 }) {
   const cfg = DISCIPLINES[id];
   const groups = Object.keys(cfg.lib);
@@ -6739,6 +7152,7 @@ function DisciplineTab({
   const run = w => {
     setActive({
       name: w.name,
+      startedAt: Date.now(),
       moves: w.moves.map(x => ({
         ...x,
         done: false
@@ -6821,9 +7235,24 @@ function DisciplineTab({
       }
     }, x.amt, " ", x.unit))), /*#__PURE__*/React.createElement("button", {
       onClick: () => {
+        const completedMoves = active.moves.filter(move => move.done);
+        if (!completedMoves.length) {
+          note("Check off at least one move");
+          return;
+        }
+        onComplete({
+          title: active.name,
+          sessionType: id,
+          mode,
+          startedAt: active.startedAt,
+          entries: completedMoves.map(move => ({
+            name: move.n,
+            summary: `${move.amt} ${move.unit}`
+          }))
+        });
         setActive(null);
         setView("home");
-        note("Nice work");
+        note(`${cfg.name} workout saved`);
       },
       style: {
         width: "100%",

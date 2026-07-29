@@ -55,7 +55,10 @@ export function filterAndSortSessions(
     : localDateKey(new Date(now.getTime() - days * 24 * 60 * 60 * 1000));
 
   const filtered = (Array.isArray(sessions) ? sessions : []).filter((session) => {
-    if (mode !== "all" && session?.mode !== mode) return false;
+    if (
+      mode !== "all"
+      && (mode === "training" ? !session?.sessionType : session?.mode !== mode)
+    ) return false;
     if (cutoff && String(session?.date || "") < cutoff) return false;
     if (!normalizedQuery) return true;
 
@@ -63,6 +66,7 @@ export function filterAndSortSessions(
       session?.dayId,
       session?.date,
       session?.mode,
+      session?.sessionType,
       session?.source,
       session?.sourceDevice,
       session?.garmin?.activityType,

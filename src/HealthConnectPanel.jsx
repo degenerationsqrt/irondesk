@@ -8,6 +8,7 @@ import {
   HealthConnect,
   isNativeHealthConnect,
 } from "./healthConnect.js";
+import { latestHealthValue } from "./trendData.js";
 
 const PERMISSION_LABELS = {
   steps: "steps",
@@ -18,6 +19,7 @@ const PERMISSION_LABELS = {
   bodyFat: "body fat",
   calories: "calories",
   exercise: "exercise",
+  vo2Max: "VO₂ max",
 };
 
 function metric(value, suffix = "") {
@@ -66,11 +68,13 @@ export function HealthConnectPanel({
     refreshStatus();
   }, [refreshStatus]);
 
-  const latest = useMemo(() => {
-    const records = Array.isArray(healthLog) ? healthLog : [];
-    return [...records].sort((left, right) =>
-      String(right?.date || "").localeCompare(String(left?.date || "")))[0] || null;
-  }, [healthLog]);
+  const latest = useMemo(() => ({
+    steps: latestHealthValue(healthLog, "steps")?.value,
+    restingHeartRate: latestHealthValue(healthLog, "restingHeartRate")?.value,
+    sleepMinutes: latestHealthValue(healthLog, "sleepMinutes")?.value,
+    weightLb: latestHealthValue(healthLog, "weightLb")?.value,
+    vo2Max: latestHealthValue(healthLog, "vo2Max")?.value,
+  }), [healthLog]);
 
   const missingLabels = (deviceStatus?.missingPermissions || [])
     .map(permission => PERMISSION_LABELS[permission] || permission);
@@ -78,7 +82,7 @@ export function HealthConnectPanel({
     ? "web"
     : !deviceStatus?.available
       ? "unavailable"
-      : deviceStatus.allGranted
+      : Number(deviceStatus?.grantedCount) > 0
         ? "connected"
         : "permission";
 
@@ -88,9 +92,9 @@ export function HealthConnectPanel({
     try {
       await HealthConnect.requestPermissions();
       const next = await refreshStatus();
-      setPermissionMessage(next?.allGranted
+      setPermissionMessage(Number(next?.grantedCount) > 0
         ? "Connected. IronDesk can now read your selected daily health summaries."
-        : "Some access was not allowed. You can grant it in Health Connect settings.");
+        : "No health categories were allowed. You can grant them in Health Connect settings.");
     } catch (error) {
       setPermissionMessage(error?.message || "Health Connect access was not granted.");
     } finally {
@@ -169,7 +173,7 @@ export function HealthConnectPanel({
                 <span>
                   {missingLabels.length
                     ? `Waiting for ${missingLabels.join(", ")}.`
-                    : "Steps, heart rate, sleep, weight, body fat, calories, and exercise."}
+                    : "Steps, heart rate, sleep, weight, body fat, calories, exercise, and VO₂ max."}
                 </span>
               </div>
               <button
@@ -188,7 +192,14 @@ export function HealthConnectPanel({
                 <div><span>Resting HR</span><strong>{metric(latest?.restingHeartRate, " bpm")}</strong></div>
                 <div><span>Sleep</span><strong>{formatSleep(latest?.sleepMinutes)}</strong></div>
                 <div><span>Weight</span><strong>{metric(latest?.weightLb, " lb")}</strong></div>
+                <div><span>VO₂ Max</span><strong>{metric(latest?.vo2Max, " ml/kg/min")}</strong></div>
               </div>
+              {missingLabels.length > 0 && (
+                <div className="health-connect-callout">
+                  <strong>Partial access is okay.</strong>
+                  <span>Not currently shared: {missingLabels.join(", ")}. IronDesk will still sync the categories you approved.</span>
+                </div>
+              )}
               <div className="health-connect-actions">
                 <button
                   type="button"

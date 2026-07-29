@@ -11,9 +11,9 @@ import {
 
 test("Garmin activity CSV rows become additive IronDesk sessions", () => {
   const csv = [
-    "Activity ID,Activity Type,Date,Title,Distance,Calories,Time,Avg HR,Max HR",
-    '12345,Strength Training,07/22/2026 6:15 AM,"Lunch, Lifts",0,412,01:03:30,121,164',
-    "67890,Running,2026-07-21 07:30:00,Morning Run,3.10 mi,505,00:28:45,148,177",
+    "Activity ID,Activity Type,Date,Title,Distance,Calories,Time,Avg HR,Max HR,VO2 Max",
+    '12345,Strength Training,07/22/2026 6:15 AM,"Lunch, Lifts",0,412,01:03:30,121,164,',
+    "67890,Running,2026-07-21 07:30:00,Morning Run,3.10 mi,505,00:28:45,148,177,42.8",
   ].join("\r\n");
 
   const result = parseGarminCsv(csv, { sourceFile: "Activities.csv" });
@@ -26,6 +26,7 @@ test("Garmin activity CSV rows become additive IronDesk sessions", () => {
   assert.equal(result.sessions[0].sourceDevice, "Garmin fēnix 6X");
   assert.equal(result.sessions[1].garmin.distanceDisplay, "3.10 mi");
   assert.equal(Math.round(result.sessions[1].garmin.distanceMeters), 4989);
+  assert.equal(result.sessions[1].garmin.vo2Max, 42.8);
 });
 
 test("IronDesk CSV exports are rejected as Garmin imports", () => {
@@ -151,8 +152,19 @@ test("repeat imports are skipped without replacing existing sessions", () => {
 test("Garmin metric labels omit missing data", () => {
   assert.deepEqual(
     garminMetricItems({
-      garmin: { calories: 412, avgHeartRate: 121, maxHeartRate: null, totalReps: 36 },
+      garmin: {
+        calories: 412,
+        avgHeartRate: 121,
+        maxHeartRate: null,
+        totalReps: 36,
+        vo2Max: 42.8,
+      },
     }),
-    [["Calories", "412"], ["Avg HR", "121 bpm"], ["Reps", "36"]],
+    [
+      ["Calories", "412"],
+      ["Avg HR", "121 bpm"],
+      ["VO₂ Max", "42.8 ml/kg/min"],
+      ["Reps", "36"],
+    ],
   );
 });

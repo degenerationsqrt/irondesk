@@ -47,6 +47,7 @@ import android.health.connect.datatypes.RestingHeartRateRecord;
 import android.health.connect.datatypes.SleepSessionRecord;
 import android.health.connect.datatypes.StepsRecord;
 import android.health.connect.datatypes.TotalCaloriesBurnedRecord;
+import android.health.connect.datatypes.Vo2MaxRecord;
 import android.health.connect.datatypes.WeightRecord;
 import android.health.connect.datatypes.units.Energy;
 import android.health.connect.datatypes.units.Mass;
@@ -64,7 +65,8 @@ import android.health.connect.datatypes.units.Mass;
                 HealthConnectPlugin.READ_WEIGHT,
                 HealthConnectPlugin.READ_BODY_FAT,
                 HealthConnectPlugin.READ_TOTAL_CALORIES_BURNED,
-                HealthConnectPlugin.READ_EXERCISE
+                HealthConnectPlugin.READ_EXERCISE,
+                HealthConnectPlugin.READ_VO2_MAX
             }
         )
     }
@@ -78,6 +80,7 @@ public class HealthConnectPlugin extends Plugin {
     static final String READ_BODY_FAT = "android.permission.health.READ_BODY_FAT";
     static final String READ_TOTAL_CALORIES_BURNED = "android.permission.health.READ_TOTAL_CALORIES_BURNED";
     static final String READ_EXERCISE = "android.permission.health.READ_EXERCISE";
+    static final String READ_VO2_MAX = "android.permission.health.READ_VO2_MAX";
 
     private static final Map<String, String> PERMISSIONS = new LinkedHashMap<>();
 
@@ -90,6 +93,7 @@ public class HealthConnectPlugin extends Plugin {
         PERMISSIONS.put("bodyFat", READ_BODY_FAT);
         PERMISSIONS.put("calories", READ_TOTAL_CALORIES_BURNED);
         PERMISSIONS.put("exercise", READ_EXERCISE);
+        PERMISSIONS.put("vo2Max", READ_VO2_MAX);
     }
 
     @PluginMethod
@@ -279,8 +283,15 @@ public class HealthConnectPlugin extends Plugin {
                 allowed(permissions, "bodyFat"),
                 summary
             );
+            CompletableFuture<Void> vo2Max = readVo2Max(
+                manager,
+                executor,
+                filter,
+                allowed(permissions, "vo2Max"),
+                summary
+            );
 
-            return CompletableFuture.allOf(longMetrics, calories, weight, bodyFat)
+            return CompletableFuture.allOf(longMetrics, calories, weight, bodyFat, vo2Max)
                 .thenApply(unused -> summary.toJson());
         }
 
@@ -474,6 +485,49 @@ public class HealthConnectPlugin extends Plugin {
             return future;
         }
 
+        private static CompletableFuture<Void> readVo2Max(
+            HealthConnectManager manager,
+            Executor executor,
+            TimeRangeFilter filter,
+            boolean allowed,
+            DaySummary summary
+        ) {
+            if (!allowed) {
+                return CompletableFuture.completedFuture(null);
+            }
+            ReadRecordsRequestUsingFilters<Vo2MaxRecord> request =
+                new ReadRecordsRequestUsingFilters.Builder<>(Vo2MaxRecord.class)
+                    .setTimeRangeFilter(filter)
+                    .setAscending(false)
+                    .setPageSize(1)
+                    .build();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            manager.readRecords(
+                request,
+                executor,
+                new OutcomeReceiver<ReadRecordsResponse<Vo2MaxRecord>, HealthConnectException>() {
+                    @Override
+                    public void onResult(ReadRecordsResponse<Vo2MaxRecord> response) {
+                        if (!response.getRecords().isEmpty()) {
+                            Vo2MaxRecord record = response.getRecords().get(0);
+                            summary.vo2Max = record.getVo2MillilitersPerMinuteKilogram();
+                            String packageName = record.getMetadata().getDataOrigin().getPackageName();
+                            if (packageName != null && !packageName.isBlank()) {
+                                summary.sourcePackages.add(packageName);
+                            }
+                        }
+                        future.complete(null);
+                    }
+
+                    @Override
+                    public void onError(HealthConnectException error) {
+                        future.completeExceptionally(error);
+                    }
+                }
+            );
+            return future;
+        }
+
         private static boolean allowed(Map<String, Boolean> permissions, String key) {
             return Boolean.TRUE.equals(permissions.get(key));
         }
@@ -503,6 +557,7 @@ public class HealthConnectPlugin extends Plugin {
             Double calories;
             Double weightPounds;
             Double bodyFatPercentage;
+            Double vo2Max;
 
             DaySummary(String date) {
                 this.date = date;
@@ -521,6 +576,7 @@ public class HealthConnectPlugin extends Plugin {
                 putRounded(result, "calories", calories, 0);
                 putRounded(result, "weightLb", weightPounds, 1);
                 putRounded(result, "bodyFat", bodyFatPercentage, 1);
+                putRounded(result, "vo2Max", vo2Max, 1);
                 result.put("sourcePackages", new JSArray(new ArrayList<>(sourcePackages)));
                 return result;
             }
