@@ -11,7 +11,7 @@ Android companion on the phone that runs Garmin Connect, then sign in to the
 same IronDesk account on the phone and website if cross-device sync is wanted.
 
 IronDesk imports daily summaries for steps, average/minimum/maximum heart rate,
-resting heart rate, sleep time, weight, body fat, calories, and exercise time.
+resting heart rate, sleep time, weight, body fat, calories, exercise time, and VO2 max.
 It does not import routes or raw sensor samples. Detailed Garmin activities and
 strength sets continue to use the existing FIT/CSV importer.
 

@@ -18,7 +18,7 @@ class HealthConnectWeb extends WebPlugin {
       permissions: {},
       missingPermissions: [],
       grantedCount: 0,
-      permissionCount: 8,
+      permissionCount: 9,
       allGranted: false,
       reason: "android-app-required",
     };
@@ -96,6 +96,7 @@ export function normalizeHealthSummary(summary, syncedAt = new Date().toISOStrin
     calories: roundedOrNull(summary.calories),
     weightLb: roundedOrNull(summary.weightLb, 1),
     bodyFat: roundedOrNull(summary.bodyFat, 1),
+    vo2Max: roundedOrNull(summary.vo2Max, 1),
     importedAt: syncedAt,
   };
 }
@@ -108,7 +109,24 @@ export function mergeHealthSummaries(current, incoming, syncedAt) {
   }
   for (const record of Array.isArray(incoming) ? incoming : []) {
     const normalized = normalizeHealthSummary(record, syncedAt);
-    if (normalized) merged.set(normalized.id, normalized);
+    if (!normalized) continue;
+    const previous = merged.get(normalized.id);
+    if (!previous) {
+      merged.set(normalized.id, normalized);
+      continue;
+    }
+    const next = {
+      ...previous,
+      ...normalized,
+      sourcePackages: [...new Set([
+        ...(previous.sourcePackages || []),
+        ...(normalized.sourcePackages || []),
+      ])].sort(),
+    };
+    for (const [key, value] of Object.entries(previous)) {
+      if (normalized[key] == null && value != null) next[key] = value;
+    }
+    merged.set(normalized.id, next);
   }
   return [...merged.values()].sort((left, right) => right.date.localeCompare(left.date));
 }
@@ -151,8 +169,8 @@ export async function performHealthConnectSync(days = HEALTH_CONNECT_DAYS) {
     error.code = status?.reason || "health-connect-unavailable";
     throw error;
   }
-  if (!status.allGranted) {
-    const error = new Error("Allow the requested Health Connect read permissions first.");
+  if (!Number(status?.grantedCount)) {
+    const error = new Error("Allow at least one Health Connect read category first.");
     error.code = "health-connect-permission-required";
     error.status = status;
     throw error;

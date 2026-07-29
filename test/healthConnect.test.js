@@ -13,12 +13,14 @@ test("Health Connect summaries normalize into stable daily records", () => {
     date: "2026-07-27",
     steps: 1234.4,
     weightLb: 220.46,
+    vo2Max: 42.84,
     sourcePackages: ["com.garmin.android.apps.connectmobile", "com.garmin.android.apps.connectmobile"],
   }, "2026-07-27T12:00:00.000Z");
 
   assert.equal(normalized.id, "health-connect:2026-07-27");
   assert.equal(normalized.steps, 1234);
   assert.equal(normalized.weightLb, 220.5);
+  assert.equal(normalized.vo2Max, 42.8);
   assert.deepEqual(normalized.sourcePackages, ["com.garmin.android.apps.connectmobile"]);
   assert.equal(normalizeHealthSummary({ date: "bad" }), null);
 });
@@ -42,6 +44,33 @@ test("new Health Connect reads replace the same day without duplicating it", () 
     "2026-07-25",
   ]);
   assert.equal(merged.find(record => record.date === "2026-07-26").steps, 7000);
+});
+
+test("partial Health Connect sync keeps previously imported categories", () => {
+  const [merged] = mergeHealthSummaries(
+    [{
+      date: "2026-07-27",
+      steps: 7000,
+      weightLb: 219.5,
+      vo2Max: 42.8,
+      sourcePackages: ["com.garmin.connect"],
+      importedAt: "old",
+    }],
+    [{
+      date: "2026-07-27",
+      steps: 8000,
+      sourcePackages: ["com.google.android.apps.healthdata"],
+    }],
+    "new",
+  );
+
+  assert.equal(merged.steps, 8000);
+  assert.equal(merged.weightLb, 219.5);
+  assert.equal(merged.vo2Max, 42.8);
+  assert.deepEqual(merged.sourcePackages, [
+    "com.garmin.connect",
+    "com.google.android.apps.healthdata",
+  ]);
 });
 
 test("Health Connect bodyweight does not overwrite a manual entry", () => {
