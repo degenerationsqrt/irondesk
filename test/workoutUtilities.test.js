@@ -4,6 +4,7 @@ import {
   DEFAULT_REST_TIMER_PREFS,
   filterAndSortSessions,
   normalizeRestTimerPrefs,
+  removeLastWorkoutSet,
   restDurationForEntry,
   sessionsToCsv,
   sessionsToGarminCsv,
@@ -76,6 +77,29 @@ test("history can isolate and search Garmin imports", () => {
       .map((item) => item.id),
     ["garmin-run"],
   );
+});
+
+test("an accidentally added workout set can be removed without mutation", () => {
+  const active = {
+    id: "active",
+    restTimerEndAt: 999,
+    restTimerDuration: 60,
+    entries: [{
+      ex: "Bench Press",
+      plannedSetCount: 1,
+      sets: [
+        { w: 185, r: 5, done: false },
+        { w: 185, r: 5, done: true },
+      ],
+    }],
+  };
+  const next = removeLastWorkoutSet(active, 0);
+
+  assert.equal(active.entries[0].sets.length, 2);
+  assert.equal(next.entries[0].sets.length, 1);
+  assert.equal(next.restTimerEndAt, null);
+  assert.equal(next.restTimerDuration, 0);
+  assert.strictEqual(removeLastWorkoutSet(next, 0), next);
 });
 
 test("history can isolate guided Train sessions", () => {

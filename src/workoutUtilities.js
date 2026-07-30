@@ -38,6 +38,30 @@ export function restDurationForEntry(preferences, entry) {
   return entry?.heavy ? prefs.heavySeconds : prefs.accessorySeconds;
 }
 
+export function removeLastWorkoutSet(activeWorkout, entryIndex) {
+  if (!activeWorkout || !Array.isArray(activeWorkout.entries)) return activeWorkout;
+  const entry = activeWorkout.entries[entryIndex];
+  const plannedSetCount = Math.max(1, Number(entry?.plannedSetCount) || 1);
+  if (
+    !entry
+    || !Array.isArray(entry.sets)
+    || entry.sets.length <= plannedSetCount
+  ) return activeWorkout;
+  const removedSet = entry.sets[entry.sets.length - 1];
+
+  return {
+    ...activeWorkout,
+    ...(removedSet?.done ? {
+      restTimerEndAt: null,
+      restTimerDuration: 0,
+    } : {}),
+    entries: activeWorkout.entries.map((item, index) => index !== entryIndex ? item : {
+      ...item,
+      sets: item.sets.slice(0, -1),
+    }),
+  };
+}
+
 export function safeSessionVolume(session) {
   const recorded = Number(session?.volume);
   if (Number.isFinite(recorded) && recorded >= 0) return recorded;

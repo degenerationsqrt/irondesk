@@ -1,12 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  healthConnectExerciseType,
+  healthConnectWorkoutPayload,
   localDateString,
+  healthSyncSummary,
+  isHealthConnectWritableSession,
   mergeHealthBodyweight,
   mergeHealthSummaries,
   normalizeHealthSummary,
   recentHealthDateRange,
 } from "../src/healthConnect.js";
+
+test("completed IronDesk workouts map to stable Health Connect exercise payloads", () => {
+  const session = {
+    id: "workout-123",
+    dayId: "Shoulders & Arms",
+    startedAt: Date.parse("2026-07-29T18:00:00.000Z"),
+    completedAt: Date.parse("2026-07-29T18:45:00.000Z"),
+    durationMin: 45,
+    entries: [
+      { ex: "Overhead Press", sets: [{ w: 95, r: 8 }, { w: 95, r: 8 }] },
+      { ex: "Lateral Raise", sets: [{ w: 20, r: 12 }] },
+    ],
+    volume: 2480,
+  };
+
+  assert.deepEqual(healthConnectWorkoutPayload(session), {
+    clientRecordId: "irondesk:workout-123",
+    clientRecordVersion: Date.parse("2026-07-29T18:45:00.000Z"),
+    title: "Shoulders & Arms",
+    notes: "Logged in IronDesk · 2 exercises · 3 logged sets · 2,480 lb volume",
+    exerciseType: "strengthTraining",
+    startTime: "2026-07-29T18:00:00.000Z",
+    endTime: "2026-07-29T18:45:00.000Z",
+  });
+});
+
+test("guided session types use matching Health Connect exercise categories", () => {
+  assert.equal(healthConnectExerciseType({ sessionType: "hiit" }), "hiit");
+  assert.equal(healthConnectExerciseType({ sessionType: "vo2" }), "hiit");
+  assert.equal(healthConnectExerciseType({ sessionType: "mma" }), "martialArts");
+  assert.equal(healthConnectExerciseType({ sessionType: "pilates" }), "pilates");
+  assert.equal(healthConnectExerciseType({ sessionType: "yoga" }), "yoga");
+  assert.equal(healthConnectExerciseType({ sessionType: "core" }), "calisthenics");
+});
+
+test("imported Garmin sessions are never written back to Health Connect", () => {
+  assert.equal(isHealthConnectWritableSession({ id: "local" }), true);
+  assert.equal(isHealthConnectWritableSession({ id: "garmin", source: "garmin" }), false);
+  assert.equal(healthConnectWorkoutPayload({ id: "garmin", source: "garmin" }), null);
+});
 
 test("Health Connect summaries normalize into stable daily records", () => {
   const normalized = normalizeHealthSummary({
@@ -101,5 +145,25 @@ test("recent Health Connect range is local and inclusive", () => {
   assert.deepEqual(recentHealthDateRange(7, now), {
     startDate: "2026-07-21",
     endDate: "2026-07-27",
+  });
+});
+
+test("Health Connect sync reports actual records instead of empty calendar days", () => {
+  assert.deepEqual(healthSyncSummary([
+    {
+      date: "2026-07-27",
+      steps: 8000,
+      restingHeartRate: 54,
+      sourcePackages: ["com.garmin.connect"],
+    },
+    {
+      date: "2026-07-28",
+      sourcePackages: [],
+    },
+  ]), {
+    daysRead: 2,
+    populatedDays: 1,
+    metricCount: 2,
+    sourcePackages: ["com.garmin.connect"],
   });
 });

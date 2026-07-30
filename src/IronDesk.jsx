@@ -1,5 +1,6 @@
 import React from "react";
 import * as Recharts from "recharts";
+import { App } from "@capacitor/app";
 import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
 import "firebase/compat/firestore";
@@ -15,6 +16,7 @@ import {
   DEFAULT_REST_TIMER_PREFS,
   filterAndSortSessions,
   normalizeRestTimerPrefs,
+  removeLastWorkoutSet,
   restDurationForEntry,
   safeSessionVolume,
   sessionsToCsv,
@@ -41,10 +43,13 @@ import { PrimaryNavigation } from "./PrimaryNavigation.jsx";
 import {
   HEALTH_CONNECT_AUTO_SYNC_KEY,
   HEALTH_CONNECT_LAST_SYNC_KEY,
+  HEALTH_CONNECT_WRITE_ENABLED_KEY,
+  healthSyncSummary,
   isNativeHealthConnect,
   mergeHealthBodyweight,
   mergeHealthSummaries,
   performHealthConnectSync,
+  writeWorkoutToHealthConnect,
 } from "./healthConnect.js";
 import {
   HEALTH_TREND_METRICS,
@@ -58,6 +63,11 @@ import {
   sessionTypeLabel,
   trackedSessionSummary,
 } from "./trainingSessions.js";
+import {
+  advanceWorkoutProgress,
+  resolveWorkoutDayIndex,
+  selectWorkoutDay,
+} from "./workoutSchedule.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -784,6 +794,7 @@ function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, 
 
 function createGeneratedActiveWorkout({
   focusKey,
+  programDayIndex,
   goal,
   mode,
   progress,
@@ -806,6 +817,7 @@ function createGeneratedActiveWorkout({
     date: today(),
     dayId: day.id,
     focusKey,
+    programDayIndex,
     mode,
     goal,
     blockNum: progress.blockNum,
@@ -821,6 +833,7 @@ function createGeneratedActiveWorkout({
       lift: row.lift || null,
       target: row.target,
       targetReps: row.reps,
+      plannedSetCount: row.sets,
       sets: Array(row.sets).fill(null).map(() => ({
         w: row.target || "",
         r: row.reps,
@@ -1092,6 +1105,13 @@ export default function IronDesk() {
       return false;
     }
   });
+  const [healthWriteEnabled, setHealthWriteEnabled] = useState(() => {
+    try {
+      return localStorage.getItem(HEALTH_CONNECT_WRITE_ENABLED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [healthSyncStatus, setHealthSyncStatus] = useState(() => {
     let syncedAt = null;
     try {
@@ -1107,7 +1127,9 @@ export default function IronDesk() {
   const [activeClearedAt, setActiveClearedAt] = useState(0);
   const [progress, setProgress] = useState({
     blockNum: 1,
-    week: 1
+    week: 1,
+    dayIndex: 0,
+    updatedAt: Date.now()
   });
   const [gender, setGender] = useState("men");
   const [goal, setGoal] = useState("vtaper");
@@ -1122,6 +1144,8 @@ export default function IronDesk() {
     groupId: null
   });
   const lastPushed = useRef(null);
+  const healthSyncInFlightRef = useRef(null);
+  const lastAutomaticHealthSyncRef = useRef(0);
   const [loaded, setLoaded] = useState(false);
   const [flash, setFlash] = useState("");
   const [cloudUser, setCloudUser] = useState(null);
@@ -1168,6 +1192,7 @@ export default function IronDesk() {
   const applyHealthSync = React.useCallback(result => {
     const days = Array.isArray(result?.days) ? result.days : [];
     const syncedAt = result?.syncedAt || new Date().toISOString();
+    const summary = healthSyncSummary(days);
     setHealthLog(current => mergeHealthSummaries(current, days, syncedAt));
     setBwLog(current => mergeHealthBodyweight(current, days));
     try {
@@ -1175,27 +1200,35 @@ export default function IronDesk() {
     } catch {}
     setHealthSyncStatus({
       state: "synced",
-      message: `Imported ${days.length} Health Connect day${days.length === 1 ? "" : "s"}.`,
+      message: summary.metricCount
+        ? `Refreshed ${summary.metricCount} health value${summary.metricCount === 1 ? "" : "s"} across ${summary.populatedDays} day${summary.populatedDays === 1 ? "" : "s"}.`
+        : "Health Connect returned no shared records for the last 7 days. Check Garmin sharing and Health Connect access.",
       syncedAt
     });
     return result;
   }, []);
   const syncHealthNow = React.useCallback(async () => {
+    if (healthSyncInFlightRef.current) return healthSyncInFlightRef.current;
     setHealthSyncStatus({
       state: "syncing",
       message: "Reading the last 7 days from Health Connect…",
       syncedAt: null
     });
-    try {
-      const result = await performHealthConnectSync();
-      return applyHealthSync(result);
-    } catch (error) {
-      setHealthSyncStatus({
-        state: error?.code === "health-connect-permission-required" ? "permission" : "error",
-        message: error?.message || "Health Connect sync failed.",
-        syncedAt: null
+    const task = performHealthConnectSync()
+      .then(applyHealthSync)
+      .catch(error => {
+        setHealthSyncStatus({
+          state: error?.code === "health-connect-permission-required" ? "permission" : "error",
+          message: error?.message || "Health Connect sync failed.",
+          syncedAt: null
+        });
+        throw error;
       });
-      throw error;
+    healthSyncInFlightRef.current = task;
+    try {
+      return await task;
+    } finally {
+      if (healthSyncInFlightRef.current === task) healthSyncInFlightRef.current = null;
     }
   }, [applyHealthSync]);
   useEffect(() => {
@@ -1259,9 +1292,52 @@ export default function IronDesk() {
     } catch {}
   }, [healthAutoSync]);
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        HEALTH_CONNECT_WRITE_ENABLED_KEY,
+        healthWriteEnabled ? "true" : "false",
+      );
+    } catch {}
+  }, [healthWriteEnabled]);
+  const runAutomaticHealthSync = React.useCallback(() => {
     if (!loaded || !healthAutoSync || !isNativeHealthConnect()) return;
-    syncHealthNow().catch(() => {});
-  }, [loaded, healthAutoSync, syncHealthNow]);
+    const now = Date.now();
+    if (now - lastAutomaticHealthSyncRef.current < 15_000) return;
+    lastAutomaticHealthSyncRef.current = now;
+    syncHealthNow().catch(() => {
+      if (lastAutomaticHealthSyncRef.current === now) {
+        lastAutomaticHealthSyncRef.current = 0;
+      }
+    });
+  }, [healthAutoSync, loaded, syncHealthNow]);
+  useEffect(() => {
+    runAutomaticHealthSync();
+    if (!loaded || !healthAutoSync || !isNativeHealthConnect()) return undefined;
+
+    let disposed = false;
+    let appStateHandle = null;
+    Promise.resolve(App.addListener("appStateChange", state => {
+      if (state?.isActive) runAutomaticHealthSync();
+    })).then(handle => {
+      if (disposed) {
+        handle?.remove();
+      } else {
+        appStateHandle = handle;
+      }
+    }).catch(() => {});
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") runAutomaticHealthSync();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", runAutomaticHealthSync);
+    return () => {
+      disposed = true;
+      appStateHandle?.remove();
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", runAutomaticHealthSync);
+    };
+  }, [healthAutoSync, loaded, runAutomaticHealthSync]);
   const persist = async () => {
     try {
       await window.storage.set("irondesk:v3", JSON.stringify({
@@ -1493,6 +1569,44 @@ export default function IronDesk() {
     setFlash(m);
     setTimeout(() => setFlash(""), 1600);
   };
+  const markHealthConnectWrite = React.useCallback((sessionId, state, details = {}) => {
+    setSessions(current => current.map(session => session.id !== sessionId ? session : {
+      ...session,
+      healthConnectWrite: {
+        state,
+        ...details,
+      },
+    }));
+  }, []);
+  const completeWorkoutSession = React.useCallback(session => {
+    const shouldWrite = healthWriteEnabled
+      && isNativeHealthConnect()
+      && session?.source !== "garmin";
+    const savedSession = shouldWrite ? {
+      ...session,
+      healthConnectWrite: {
+        state: "pending",
+      },
+    } : session;
+    setSessions(current => [savedSession, ...current]);
+    if (shouldWrite) {
+      writeWorkoutToHealthConnect(savedSession)
+        .then(result => {
+          markHealthConnectWrite(savedSession.id, "synced", {
+            recordId: result?.recordId || null,
+            writtenAt: result?.writtenAt || new Date().toISOString(),
+          });
+          note("Workout sent to Health Connect");
+        })
+        .catch(error => {
+          markHealthConnectWrite(savedSession.id, "error", {
+            message: error?.message || "Health Connect write failed.",
+          });
+          note("Workout saved in IronDesk; Health Connect needs attention");
+        });
+    }
+    return savedSession;
+  }, [healthWriteEnabled, markHealthConnectWrite]);
   const clearActiveWorkout = React.useCallback(() => {
     const clearedAt = Date.now();
     const clearedState = buildPersonalState({
@@ -1518,20 +1632,26 @@ export default function IronDesk() {
       completedAt: Date.now(),
       ...details,
     });
-    setSessions(current => [session, ...current]);
-    return session;
-  }, []);
-  const startProgramWorkout = focusKey => {
+    return completeWorkoutSession(session);
+  }, [completeWorkoutSession]);
+  const startProgramWorkout = (focusKey, programDayIndex) => {
     if (active && !window.confirm("Replace the workout currently in progress?")) return;
+    const selectedProgress = selectWorkoutDay(
+      progress,
+      programDayIndex,
+      GOALS[goal].week.length
+    );
     const workout = createGeneratedActiveWorkout({
       focusKey,
+      programDayIndex: selectedProgress.dayIndex,
       goal,
       mode,
-      progress,
+      progress: selectedProgress,
       tm,
       roundLoad,
       styleOverride,
     });
+    setProgress(selectedProgress);
     setActive(workout);
     setTab("today");
     note(`${workout.dayId} ready`);
@@ -1801,7 +1921,8 @@ export default function IronDesk() {
     onboarded,
     setOnboarded,
     restTimerPrefs,
-    setRestTimerPrefs
+    setRestTimerPrefs,
+    onWorkoutComplete: completeWorkoutSession
   }), tab === "program" && /*#__PURE__*/React.createElement(ProgramTab, {
     mode,
     tm,
@@ -1863,6 +1984,8 @@ export default function IronDesk() {
     healthLog,
     healthAutoSync,
     setHealthAutoSync,
+    healthWriteEnabled,
+    setHealthWriteEnabled,
     healthSyncStatus,
     syncHealthNow,
     clearHealthData: () => {
@@ -1933,28 +2056,61 @@ function TodayCommandCard({
   goal,
   progress,
   focusKey,
+  dayIndex,
+  totalDays,
   lastTrained,
   onStart,
+  onPrevious,
+  onNext,
   onOpenProgram
 }) {
   const focus = FOCUS[focusKey] || FOCUS.Upper;
+  const swipeStartRef = useRef(null);
+  const startSwipe = event => {
+    swipeStartRef.current = {
+      x: event.clientX,
+      y: event.clientY
+    };
+  };
+  const finishSwipe = event => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) < 50 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    if (deltaX < 0) onNext();else onPrevious();
+  };
   return (
-    <section className="today-command-card" aria-labelledby="today-command-title">
+    <section
+      className="today-command-card"
+      aria-labelledby="today-command-title"
+      onPointerDown={startSwipe}
+      onPointerUp={finishSwipe}
+    >
       <div className="today-command-heading">
         <div>
           <span className="today-command-kicker">TODAY&apos;S PLAN</span>
           <h2 id="today-command-title">{focus.title}</h2>
           <p>{GOALS[goal].label} · {mode === "gym" ? "Gym" : "Home"}</p>
         </div>
-        <span className="today-command-week">B{progress.blockNum} · W{progress.week}</span>
+        <div className="today-command-controls">
+          <span className="today-command-week">B{progress.blockNum} · W{progress.week}</span>
+          <div className="today-command-day-nav" aria-label="Choose workout day">
+            <button type="button" aria-label="Previous workout day" onClick={onPrevious}>‹</button>
+            <span>{dayIndex + 1}/{totalDays}</span>
+            <button type="button" aria-label="Next workout day" onClick={onNext}>›</button>
+          </div>
+        </div>
       </div>
       <div className="today-command-meta">
-        <span><small>Session</small><strong>Day 1 of {GOALS[goal].week.length}</strong></span>
+        <span><small>Session</small><strong>Day {dayIndex + 1} of {totalDays}</strong></span>
         <span><small>Last trained</small><strong>{lastTrained ? lastTrained.slice(5) : "First session"}</strong></span>
         <span><small>Focus</small><strong>{focus.title}</strong></span>
       </div>
+      <p className="today-command-swipe">Swipe the card or use the arrows to change workout day.</p>
       <div className="today-command-actions">
-        <button type="button" className="today-command-start" onClick={onStart}>Start today&apos;s workout</button>
+        <button type="button" className="today-command-start" onClick={onStart}>Start {focus.title}</button>
         <button type="button" className="today-command-program" onClick={onOpenProgram}>View program</button>
       </div>
     </section>
@@ -1992,9 +2148,13 @@ function Today({
   onboarded,
   setOnboarded,
   restTimerPrefs,
-  setRestTimerPrefs
+  setRestTimerPrefs,
+  onWorkoutComplete
 }) {
   const week = GOALS[goal].week;
+  const dayIds = week.map(focusKey => (FOCUS[focusKey] || FOCUS.Upper).title);
+  const dayIndex = resolveWorkoutDayIndex(progress, dayIds, sessions);
+  const selectedFocusKey = week[dayIndex] || week[0];
   const [builder, setBuilder] = useState(false);
   const [planQ, setPlanQ] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
@@ -2003,6 +2163,9 @@ function Today({
     () => mergeCardioTrendRecords(cardioLog, sessions),
     [cardioLog, sessions],
   );
+  const selectDay = nextDayIndex => {
+    setProgress(current => selectWorkoutDay(current, nextDayIndex, week.length));
+  };
   const timerEndAt = Number(active?.restTimerEndAt) || 0;
   const timer = timerEndAt > 0 ? Math.max(0, Math.ceil((timerEndAt - timerNow) / 1000)) : 0;
   useEffect(() => {
@@ -2040,12 +2203,15 @@ function Today({
     restTimerEndAt: Math.max(Date.now(), Number(current.restTimerEndAt) || Date.now()) + seconds * 1000,
     restTimerDuration: Math.max(0, Number(current.restTimerDuration) || 0) + seconds
   } : current);
-  const start = focusKey => {
+  const start = (focusKey, programDayIndex) => {
+    const selectedProgress = selectWorkoutDay(progress, programDayIndex, week.length);
+    setProgress(selectedProgress);
     setActive(createGeneratedActiveWorkout({
       focusKey,
+      programDayIndex: selectedProgress.dayIndex,
       goal,
       mode,
-      progress,
+      progress: selectedProgress,
       tm,
       roundLoad,
       styleOverride,
@@ -2072,6 +2238,7 @@ function Today({
         lift: null,
         target: null,
         targetReps: r.reps,
+        plannedSetCount: Number(r.sets) || 3,
         sets: Array(Number(r.sets) || 3).fill(null).map(() => ({
           w: "",
           r: Number(r.reps) || 10,
@@ -2081,17 +2248,16 @@ function Today({
     });
   };
   const setSet = (ei, si, field, val) => {
-    const a = {
-      ...active,
-      entries: active.entries.map((en, i) => i !== ei ? en : {
+    setActive(current => current ? {
+      ...current,
+      entries: current.entries.map((en, i) => i !== ei ? en : {
         ...en,
         sets: en.sets.map((s, j) => j !== si ? s : {
           ...s,
           [field]: val
         })
       })
-    };
-    setActive(a);
+    } : current);
   };
   const toggleDone = (ei, si) => {
     setActive(current => {
@@ -2115,20 +2281,24 @@ function Today({
     });
   };
   const addSet = ei => {
-    const a = {
-      ...active,
-      entries: active.entries.map((en, i) => i !== ei ? en : {
+    setActive(current => current ? {
+      ...current,
+      entries: current.entries.map((en, i) => i !== ei ? en : {
         ...en,
+        plannedSetCount: Number(en.plannedSetCount) || en.sets.length,
         sets: [...en.sets, {
           w: en.sets[en.sets.length - 1]?.w || "",
           r: en.targetReps,
           done: false
         }]
       })
-    };
-    setActive(a);
+    } : current);
+  };
+  const removeLastSet = ei => {
+    setActive(current => removeLastWorkoutSet(current, ei));
   };
   const finish = () => {
+    const completedAt = Date.now();
     const entries = active.entries.map(en => ({
       ex: en.ex,
       heavy: en.heavy,
@@ -2159,16 +2329,39 @@ function Today({
       id: active.id,
       date: active.date,
       dayId: active.dayId,
+      focusKey: active.focusKey,
+      programDayIndex: active.programDayIndex,
+      blockNum: active.blockNum,
+      week: active.week,
       mode: active.mode,
-      durationMin: Math.max(1, Math.round((Date.now() - active.start) / 60000)),
+      startedAt: active.start,
+      completedAt,
+      durationMin: Math.max(1, Math.round((completedAt - active.start) / 60000)),
       entries,
       volume,
       prs
     };
-    setSessions([session, ...sessions]);
+    onWorkoutComplete(session);
+    const generatedWorkout = week.includes(active.focusKey);
+    if (generatedWorkout) {
+      const nextProgress = advanceWorkoutProgress({
+        progress,
+        focusKeys: week,
+        completedFocusKey: active.focusKey,
+        completedDayIndex: active.programDayIndex,
+        completedWeek: active.week,
+        completedBlockNum: active.blockNum
+      });
+      const nextFocusKey = week[nextProgress.dayIndex] || week[0];
+      setProgress(nextProgress);
+      note(prs.length
+        ? `Saved with ${prs.length} PR${prs.length > 1 ? "s" : ""} · ${(FOCUS[nextFocusKey] || FOCUS.Upper).title} is next`
+        : `Workout saved · ${(FOCUS[nextFocusKey] || FOCUS.Upper).title} is next`);
+    } else {
+      note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
+    }
     clearActiveWorkout();
-    note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
-    setTab("history");
+    setTab("today");
   };
   if (!active) {
     const lastByDay = {};
@@ -2200,9 +2393,13 @@ function Today({
       mode,
       goal,
       progress,
-      focusKey: week[0],
-      lastTrained: lastByDay[(FOCUS[week[0]] || FOCUS.Upper).title],
-      onStart: () => start(week[0]),
+      focusKey: selectedFocusKey,
+      dayIndex,
+      totalDays: week.length,
+      lastTrained: lastByDay[(FOCUS[selectedFocusKey] || FOCUS.Upper).title],
+      onStart: () => start(selectedFocusKey, dayIndex),
+      onPrevious: () => selectDay(dayIndex - 1),
+      onNext: () => selectDay(dayIndex + 1),
       onOpenProgram: () => setTab("program")
     }), !onboarded && /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2416,10 +2613,14 @@ function Today({
       onClick: () => {
         if (progress.week > 1) setProgress({
           ...progress,
-          week: progress.week - 1
+          week: progress.week - 1,
+          dayIndex: 0,
+          updatedAt: Date.now()
         });else if (progress.blockNum > 1) setProgress({
           blockNum: progress.blockNum - 1,
-          week: 6
+          week: 6,
+          dayIndex: 0,
+          updatedAt: Date.now()
         });
       },
       style: {
@@ -2440,13 +2641,17 @@ function Today({
         if (progress.week < 6) {
           setProgress({
             ...progress,
-            week: progress.week + 1
+            week: progress.week + 1,
+            dayIndex: 0,
+            updatedAt: Date.now()
           });
           note(`Week ${progress.week + 1}`);
         } else {
           setProgress({
             blockNum: progress.blockNum + 1,
-            week: 1
+            week: 1,
+            dayIndex: 0,
+            updatedAt: Date.now()
           });
           note(`Block ${progress.blockNum + 1}`);
         }
@@ -2475,10 +2680,13 @@ function Today({
       const heavy = GOALS[goal].style === "strength";
       return /*#__PURE__*/React.createElement("button", {
         key: idx,
-        onClick: () => start(fk),
+        onClick: () => {
+          selectDay(idx);
+          start(fk, idx);
+        },
         style: {
           background: C.panel2,
-          border: `1px solid ${idx === 0 ? C.gold : heavy ? C.red : C.blue}`,
+          border: `1px solid ${idx === dayIndex ? C.gold : heavy ? C.red : C.blue}`,
           borderRadius: 12,
           padding: "13px 10px",
           cursor: "pointer",
@@ -2490,7 +2698,7 @@ function Today({
           color: C.dim,
           letterSpacing: 0.5
         }
-      }, "DAY ", idx + 1, idx === 0 ? " · TODAY" : ""), /*#__PURE__*/React.createElement("div", {
+      }, "DAY ", idx + 1, idx === dayIndex ? " · NEXT" : ""), /*#__PURE__*/React.createElement("div", {
         className: "ttl",
         style: {
           fontSize: 14,
@@ -2722,17 +2930,17 @@ function Today({
         fontSize: 12,
         cursor: "pointer"
       }
-    }, s.done ? "✓ DONE" : "LOG"))), !isCardio && /*#__PURE__*/React.createElement("button", {
-      onClick: () => addSet(ei),
-      style: {
-        background: "none",
-        border: "none",
-        color: C.dim,
-        fontSize: 12,
-        cursor: "pointer",
-        padding: "6px 0"
-      }
-    }, "+ add set"));
+    }, s.done ? "✓ DONE" : "LOG"))), !isCardio && /*#__PURE__*/React.createElement("div", {
+      className: "live-set-actions"
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      onClick: () => addSet(ei)
+    }, "+ Add Set"), en.sets.length > (Number(en.plannedSetCount) || en.sets.length) && /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      onClick: () => removeLastSet(ei),
+      className: "is-remove",
+      "aria-label": `Remove last ${en.ex} set`
+    }, "− Remove Last Set")));
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2824,21 +3032,27 @@ function ProgramTab({
   onStartWorkout
 }) {
   const g = GOALS[goal];
-  const [focusKey, setFocusKey] = useState(g.week[0]);
-  const fk = g.week.includes(focusKey) ? focusKey : g.week[0];
+  const [focusIndex, setFocusIndex] = useState(() =>
+    Math.min(g.week.length - 1, Math.max(0, Number(progress.dayIndex) || 0)));
+  const selectedFocusIndex = Math.min(g.week.length - 1, Math.max(0, focusIndex));
+  const fk = g.week[selectedFocusIndex] || g.week[0];
   const gen = generateDay(fk, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
   const deload = gen.deload;
   const advanceWeek = () => {
     if (progress.week < 6) {
       setProgress({
         ...progress,
-        week: progress.week + 1
+        week: progress.week + 1,
+        dayIndex: 0,
+        updatedAt: Date.now()
       });
       note(`Week ${progress.week + 1}`);
     } else {
       setProgress({
         blockNum: progress.blockNum + 1,
-        week: 1
+        week: 1,
+        dayIndex: 0,
+        updatedAt: Date.now()
       });
       note(`Block ${progress.blockNum + 1} \u2014 new variations`);
     }
@@ -2846,15 +3060,20 @@ function ProgramTab({
   const backWeek = () => {
     if (progress.week > 1) setProgress({
       ...progress,
-      week: progress.week - 1
+      week: progress.week - 1,
+      dayIndex: 0,
+      updatedAt: Date.now()
     });else if (progress.blockNum > 1) setProgress({
       blockNum: progress.blockNum - 1,
-      week: 6
+      week: 6,
+      dayIndex: 0,
+      updatedAt: Date.now()
     });
   };
   const setGenderGoal = gx => {
     setGender(gx);
     setGoal(GENDER_DEFAULT_GOAL[gx]);
+    setFocusIndex(0);
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
     title: "Your Plan",
@@ -2890,7 +3109,7 @@ function ProgramTab({
     key: k,
     onClick: () => {
       setGoal(k);
-      setFocusKey(gg.week[0]);
+      setFocusIndex(0);
     },
     style: {
       textAlign: "left",
@@ -2991,11 +3210,11 @@ function ProgramTab({
     const f = FOCUS[k] || FOCUS.Upper;
     return /*#__PURE__*/React.createElement("button", {
       key: i,
-      onClick: () => setFocusKey(k),
+      onClick: () => setFocusIndex(i),
       className: "ttl",
       style: {
-        background: fk === k ? C.red : C.panel2,
-        color: fk === k ? "#fff" : C.dim,
+        background: selectedFocusIndex === i ? C.red : C.panel2,
+        color: selectedFocusIndex === i ? "#fff" : C.dim,
         border: `1px solid ${C.line}`,
         borderRadius: 8,
         padding: "8px 11px",
@@ -3043,7 +3262,7 @@ function ProgramTab({
     }
   }, r.role === "cardio" ? `${r.reps} min` : `${r.sets}\u00d7${r.reps}`, r.target ? ` \u00b7 ${r.target}` : "")))), /*#__PURE__*/React.createElement("button", {
     type: "button",
-    onClick: () => onStartWorkout(fk),
+    onClick: () => onStartWorkout(fk, selectedFocusIndex),
     style: {
       width: "100%",
       marginTop: 14,
@@ -4383,6 +4602,8 @@ function Connections({
   healthLog,
   healthAutoSync,
   setHealthAutoSync,
+  healthWriteEnabled,
+  setHealthWriteEnabled,
   healthSyncStatus,
   syncHealthNow,
   clearHealthData,
@@ -4473,15 +4694,15 @@ function Connections({
           <li>
             <b>3</b>
             <div>
-              <strong>Return here and grant read access</strong>
-              <span>Tap Connect Health Connect below, then choose the health fields to share.</span>
+              <strong>Return here and grant Health Connect access</strong>
+              <span>Choose the health fields to read, then optionally allow completed workout writeback.</span>
             </div>
           </li>
           <li>
             <b>4</b>
             <div>
-              <strong>Sync, then sign into Personal Cloud</strong>
-              <span>Your phone imports summaries; cloud sync makes them visible on the website.</span>
+              <strong>Choose workout writeback, then sync your cloud</strong>
+              <span>Your phone can send completed workouts; cloud sync makes IronDesk data visible on the website.</span>
             </div>
           </li>
         </ol>
@@ -4500,6 +4721,8 @@ function Connections({
         healthLog={healthLog}
         autoSync={healthAutoSync}
         setAutoSync={setHealthAutoSync}
+        writeEnabled={healthWriteEnabled}
+        setWriteEnabled={setHealthWriteEnabled}
         syncStatus={healthSyncStatus}
         onSync={syncHealthNow}
         onClear={clearHealthData}

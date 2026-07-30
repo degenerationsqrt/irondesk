@@ -40,6 +40,8 @@ export function HealthConnectPanel({
   healthLog,
   autoSync,
   setAutoSync,
+  writeEnabled,
+  setWriteEnabled,
   syncStatus,
   onSync,
   onClear,
@@ -68,6 +70,12 @@ export function HealthConnectPanel({
     refreshStatus();
   }, [refreshStatus]);
 
+  useEffect(() => {
+    if (syncStatus?.state === "synced" || syncStatus?.state === "permission") {
+      refreshStatus();
+    }
+  }, [refreshStatus, syncStatus?.state]);
+
   const latest = useMemo(() => ({
     steps: latestHealthValue(healthLog, "steps")?.value,
     restingHeartRate: latestHealthValue(healthLog, "restingHeartRate")?.value,
@@ -77,12 +85,19 @@ export function HealthConnectPanel({
   }), [healthLog]);
 
   const missingLabels = (deviceStatus?.missingPermissions || [])
+    .filter(permission => permission !== "writeExercise")
     .map(permission => PERMISSION_LABELS[permission] || permission);
+  const hasAnyReadPermission = Number(
+    deviceStatus?.readGrantedCount ?? deviceStatus?.grantedCount,
+  ) > 0;
+  const writeGranted = Boolean(
+    deviceStatus?.permissions?.writeExercise || deviceStatus?.writeExerciseGranted,
+  );
   const connectionState = !nativeAndroid
     ? "web"
     : !deviceStatus?.available
       ? "unavailable"
-      : Number(deviceStatus?.grantedCount) > 0
+      : hasAnyReadPermission
         ? "connected"
         : "permission";
 
@@ -90,13 +105,47 @@ export function HealthConnectPanel({
     setPermissionBusy(true);
     setPermissionMessage("");
     try {
-      await HealthConnect.requestPermissions();
+      await HealthConnect.requestPermissions({ permissions: ["healthRead"] });
       const next = await refreshStatus();
-      setPermissionMessage(Number(next?.grantedCount) > 0
-        ? "Connected. IronDesk can now read your selected daily health summaries."
-        : "No health categories were allowed. You can grant them in Health Connect settings.");
+      if (Number(next?.readGrantedCount ?? next?.grantedCount) > 0) {
+        setAutoSync(true);
+        setPermissionMessage("Connected. Pulling your selected Health Connect records now…");
+        await onSync();
+        await refreshStatus();
+        setPermissionMessage("");
+      } else {
+        setPermissionMessage(
+          "No health categories were allowed. You can grant them in Health Connect settings.",
+        );
+      }
     } catch (error) {
       setPermissionMessage(error?.message || "Health Connect access was not granted.");
+    } finally {
+      setPermissionBusy(false);
+    }
+  };
+
+  const updateWriteEnabled = async checked => {
+    if (!checked) {
+      setWriteEnabled(false);
+      setPermissionMessage("Completed workouts will stay in IronDesk only.");
+      return;
+    }
+    setPermissionBusy(true);
+    setPermissionMessage("");
+    try {
+      await HealthConnect.requestPermissions({ permissions: ["healthWrite"] });
+      const next = await refreshStatus();
+      const allowed = Boolean(
+        next?.permissions?.writeExercise || next?.writeExerciseGranted,
+      );
+      setWriteEnabled(allowed);
+      setPermissionMessage(allowed
+        ? "Enabled. New completed IronDesk workouts will be sent to Health Connect."
+        : "Health Connect write access was not granted.");
+    } catch (error) {
+      setWriteEnabled(false);
+      setPermissionMessage(error?.message || "Health Connect write access was not granted.");
     } finally {
       setPermissionBusy(false);
     }
@@ -130,7 +179,7 @@ export function HealthConnectPanel({
         <div className="health-connect-title">
           <span className="health-connect-kicker">ANDROID HEALTH</span>
           <h3 id="health-connect-title">Health Connect</h3>
-          <p>Garmin → Health Connect → IronDesk, with read-only daily summaries.</p>
+          <p>Import Garmin health trends and send completed IronDesk workouts back.</p>
         </div>
         <span className={`health-connect-state is-${connectionState}`}>
           {connectionState === "connected"
@@ -166,7 +215,7 @@ export function HealthConnectPanel({
             <span><b>ID</b> IronDesk</span>
           </div>
 
-          {!deviceStatus?.allGranted ? (
+          {!hasAnyReadPermission ? (
             <div className="health-connect-permissions">
               <div>
                 <strong>Choose what IronDesk can read</strong>
@@ -187,6 +236,24 @@ export function HealthConnectPanel({
             </div>
           ) : (
             <>
+              {missingLabels.length > 0 && (
+                <div className="health-connect-permissions">
+                  <div>
+                    <strong>Connected with partial access</strong>
+                    <span>
+                      IronDesk will pull the categories you approved. Not shared: {missingLabels.join(", ")}.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="health-connect-secondary"
+                    onClick={connect}
+                    disabled={permissionBusy}
+                  >
+                    {permissionBusy ? "Opening…" : "Review Access"}
+                  </button>
+                </div>
+              )}
               <div className="health-connect-metrics">
                 <div><span>Steps</span><strong>{metric(latest?.steps)}</strong></div>
                 <div><span>Resting HR</span><strong>{metric(latest?.restingHeartRate, " bpm")}</strong></div>
@@ -194,12 +261,6 @@ export function HealthConnectPanel({
                 <div><span>Weight</span><strong>{metric(latest?.weightLb, " lb")}</strong></div>
                 <div><span>VO₂ Max</span><strong>{metric(latest?.vo2Max, " ml/kg/min")}</strong></div>
               </div>
-              {missingLabels.length > 0 && (
-                <div className="health-connect-callout">
-                  <strong>Partial access is okay.</strong>
-                  <span>Not currently shared: {missingLabels.join(", ")}. IronDesk will still sync the categories you approved.</span>
-                </div>
-              )}
               <div className="health-connect-actions">
                 <button
                   type="button"
@@ -207,7 +268,7 @@ export function HealthConnectPanel({
                   onClick={sync}
                   disabled={syncStatus?.state === "syncing"}
                 >
-                  {syncStatus?.state === "syncing" ? "Syncing 7 days…" : "Sync Last 7 Days"}
+                  {syncStatus?.state === "syncing" ? "Refreshing…" : "Refresh Health Data"}
                 </button>
                 <button type="button" className="health-connect-secondary" onClick={openSettings}>
                   Manage Access
@@ -222,6 +283,20 @@ export function HealthConnectPanel({
                 <span>
                   <strong>Sync when the Android app opens</strong>
                   <small>Foreground only; no background-health permission is requested.</small>
+                </span>
+              </label>
+              <label className="health-connect-toggle">
+                <input
+                  type="checkbox"
+                  checked={writeEnabled && writeGranted}
+                  onChange={event => updateWriteEnabled(event.target.checked)}
+                  disabled={permissionBusy}
+                />
+                <span>
+                  <strong>Send completed IronDesk workouts</strong>
+                  <small>
+                    Writes one exercise session after you finish. Stable session IDs prevent duplicates.
+                  </small>
                 </span>
               </label>
             </>
@@ -244,8 +319,8 @@ export function HealthConnectPanel({
       <div className="health-connect-privacy">
         <span aria-hidden="true">⌁</span>
         <p>
-          Read-only and user-controlled. IronDesk stores daily summaries, not raw sensor samples,
-          routes, or medical records. Detailed Garmin activities continue through FIT/CSV import.
+          User-controlled. IronDesk reads daily summaries and can write only completed IronDesk
+          exercise sessions—never Garmin imports, raw sensor samples, routes, or medical records.
         </p>
         {healthLog?.length > 0 && (
           <button type="button" onClick={onClear}>Remove imported summaries</button>

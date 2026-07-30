@@ -6,7 +6,21 @@ import {
 
 export const HEALTH_CONNECT_AUTO_SYNC_KEY = "irondesk:health-connect-auto-sync:v1";
 export const HEALTH_CONNECT_LAST_SYNC_KEY = "irondesk:health-connect-last-sync:v1";
+export const HEALTH_CONNECT_WRITE_ENABLED_KEY = "irondesk:health-connect-write-enabled:v1";
 export const HEALTH_CONNECT_DAYS = 7;
+export const HEALTH_CONNECT_METRIC_KEYS = Object.freeze([
+  "steps",
+  "averageHeartRate",
+  "minimumHeartRate",
+  "maximumHeartRate",
+  "restingHeartRate",
+  "sleepMinutes",
+  "exerciseMinutes",
+  "calories",
+  "weightLb",
+  "bodyFat",
+  "vo2Max",
+]);
 
 class HealthConnectWeb extends WebPlugin {
   async getStatus() {
@@ -18,8 +32,12 @@ class HealthConnectWeb extends WebPlugin {
       permissions: {},
       missingPermissions: [],
       grantedCount: 0,
-      permissionCount: 9,
+      permissionCount: 10,
+      readGrantedCount: 0,
+      readPermissionCount: 9,
+      writeExerciseGranted: false,
       allGranted: false,
+      allReadGranted: false,
       reason: "android-app-required",
     };
   }
@@ -30,6 +48,10 @@ class HealthConnectWeb extends WebPlugin {
 
   async readDailySummary() {
     throw new Error("Health Connect data can only be read by the IronDesk Android app.");
+  }
+
+  async writeExerciseSession() {
+    throw new Error("Completed workouts can only be written by the IronDesk Android app.");
   }
 
   async openSettings() {
@@ -159,6 +181,115 @@ export function mergeHealthBodyweight(current, healthDays) {
     String(right?.date || "").localeCompare(String(left?.date || "")));
 }
 
+export function healthSyncSummary(days) {
+  const records = Array.isArray(days) ? days : [];
+  let metricCount = 0;
+  let populatedDays = 0;
+  const sourcePackages = new Set();
+
+  for (const day of records) {
+    const dayMetricCount = HEALTH_CONNECT_METRIC_KEYS.reduce(
+      (count, key) => count + (finiteOrNull(day?.[key]) == null ? 0 : 1),
+      0,
+    );
+    if (dayMetricCount > 0) populatedDays += 1;
+    metricCount += dayMetricCount;
+    for (const packageName of Array.isArray(day?.sourcePackages) ? day.sourcePackages : []) {
+      if (packageName) sourcePackages.add(String(packageName));
+    }
+  }
+
+  return {
+    daysRead: records.length,
+    populatedDays,
+    metricCount,
+    sourcePackages: [...sourcePackages].sort(),
+  };
+}
+
+export function isHealthConnectWritableSession(session) {
+  return Boolean(
+    session
+    && String(session.id || "").trim()
+    && session.source !== "garmin"
+    && session.source !== "health-connect",
+  );
+}
+
+export function healthConnectExerciseType(session) {
+  switch (session?.sessionType) {
+    case "hiit":
+    case "vo2":
+      return "hiit";
+    case "mma":
+      return "martialArts";
+    case "pilates":
+      return "pilates";
+    case "yoga":
+      return "yoga";
+    case "core":
+      return "calisthenics";
+    default:
+      return "strengthTraining";
+  }
+}
+
+export function healthConnectWorkoutPayload(session, completedAt = Date.now()) {
+  if (!isHealthConnectWritableSession(session)) return null;
+
+  const fallbackEnd = Number(completedAt);
+  const endMs = Number.isFinite(Number(session.completedAt))
+    ? Number(session.completedAt)
+    : fallbackEnd;
+  const durationMs = Math.max(60_000, (Number(session.durationMin) || 1) * 60_000);
+  const startMs = Number.isFinite(Number(session.startedAt))
+    ? Number(session.startedAt)
+    : endMs - durationMs;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+
+  const entries = Array.isArray(session.entries) ? session.entries : [];
+  const setCount = entries.reduce(
+    (total, entry) => total + (Array.isArray(entry?.sets) ? entry.sets.length : 0),
+    0,
+  );
+  const notes = [
+    `${entries.length} exercise${entries.length === 1 ? "" : "s"}`,
+    setCount ? `${setCount} logged set${setCount === 1 ? "" : "s"}` : null,
+    Number(session.volume) > 0 ? `${Math.round(Number(session.volume)).toLocaleString("en-US")} lb volume` : null,
+  ].filter(Boolean).join(" · ");
+
+  return {
+    clientRecordId: `irondesk:${String(session.id).trim()}`,
+    clientRecordVersion: Math.max(1, Math.trunc(endMs)),
+    title: String(session.dayId || session.title || "IronDesk Workout").slice(0, 120),
+    notes: `Logged in IronDesk${notes ? ` · ${notes}` : ""}`.slice(0, 500),
+    exerciseType: healthConnectExerciseType(session),
+    startTime: new Date(startMs).toISOString(),
+    endTime: new Date(endMs).toISOString(),
+  };
+}
+
+export async function writeWorkoutToHealthConnect(session) {
+  const payload = healthConnectWorkoutPayload(session);
+  if (!payload) {
+    const error = new Error("Only completed IronDesk workouts can be sent to Health Connect.");
+    error.code = "health-connect-invalid-workout";
+    throw error;
+  }
+  const status = await HealthConnect.getStatus();
+  if (!status?.available) {
+    const error = new Error("Open the IronDesk Android app to send workouts to Health Connect.");
+    error.code = status?.reason || "health-connect-unavailable";
+    throw error;
+  }
+  if (!status?.permissions?.writeExercise && !status?.writeExerciseGranted) {
+    const error = new Error("Allow IronDesk to write exercise in Health Connect first.");
+    error.code = "health-connect-write-permission-required";
+    throw error;
+  }
+  return HealthConnect.writeExerciseSession(payload);
+}
+
 export async function performHealthConnectSync(days = HEALTH_CONNECT_DAYS) {
   const status = await HealthConnect.getStatus();
   if (!status?.available) {
@@ -169,7 +300,7 @@ export async function performHealthConnectSync(days = HEALTH_CONNECT_DAYS) {
     error.code = status?.reason || "health-connect-unavailable";
     throw error;
   }
-  if (!Number(status?.grantedCount)) {
+  if (!Number(status?.readGrantedCount ?? status?.grantedCount)) {
     const error = new Error("Allow at least one Health Connect read category first.");
     error.code = "health-connect-permission-required";
     error.status = status;

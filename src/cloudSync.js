@@ -1,3 +1,5 @@
+import { newerWorkoutProgress } from "./workoutSchedule.js";
+
 export const CLOUD_SYNC_SCHEMA = 1;
 export const CLOUD_SYNC_PREF_KEY = "irondesk:cloud-sync:v1";
 export const CLOUD_DEVICE_KEY = "irondesk:cloud-device:v1";
@@ -135,6 +137,7 @@ export function mergePersonalStates(localSource, cloudSource) {
     healthLogClearedAt,
     active: activeAfterClear(local.active) || activeAfterClear(cloud.active),
     activeClearedAt,
+    progress: newerWorkoutProgress(local.progress, cloud.progress),
   });
   return merged;
 }
