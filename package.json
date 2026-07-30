@@ -1,6 +1,6 @@
 {
   "name": "irondesk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.4.2",
     "@garmin/fitsdk": "^21.208.0",
     "fflate": "^0.8.2",

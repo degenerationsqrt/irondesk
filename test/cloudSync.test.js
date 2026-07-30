@@ -66,6 +66,30 @@ test("cloud hashes are stable and change with personal data", () => {
   assert.notEqual(first, changed);
 });
 
+test("cloud merge keeps the most recently changed workout day", () => {
+  const merged = mergePersonalStates(
+    {
+      progress: {
+        blockNum: 1,
+        week: 2,
+        dayIndex: 3,
+        updatedAt: 200,
+      },
+    },
+    {
+      progress: {
+        blockNum: 1,
+        week: 2,
+        dayIndex: 0,
+        updatedAt: 100,
+      },
+    },
+  );
+
+  assert.equal(merged.progress.dayIndex, 3);
+  assert.equal(merged.progress.updatedAt, 200);
+});
+
 test("a Health Connect clear marker prevents cloud summaries from returning", () => {
   const merged = mergePersonalStates(
     {

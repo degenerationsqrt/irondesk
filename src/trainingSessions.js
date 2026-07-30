@@ -23,6 +23,7 @@ export function buildTrackedSession({
     sessionType,
     mode,
     startedAt,
+    completedAt,
     durationMin: completedMinutes(startedAt, completedAt),
     entries: (Array.isArray(entries) ? entries : []).map((entry) => ({
       ex: entry?.ex || entry?.name || "Activity",

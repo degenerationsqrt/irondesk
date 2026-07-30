@@ -34,6 +34,7 @@ import android.health.connect.AggregateRecordsRequest;
 import android.health.connect.AggregateRecordsResponse;
 import android.health.connect.HealthConnectException;
 import android.health.connect.HealthConnectManager;
+import android.health.connect.InsertRecordsResponse;
 import android.health.connect.ReadRecordsRequestUsingFilters;
 import android.health.connect.ReadRecordsResponse;
 import android.health.connect.TimeInstantRangeFilter;
@@ -41,8 +42,12 @@ import android.health.connect.TimeRangeFilter;
 import android.health.connect.datatypes.AggregationType;
 import android.health.connect.datatypes.BodyFatRecord;
 import android.health.connect.datatypes.DataOrigin;
+import android.health.connect.datatypes.Device;
 import android.health.connect.datatypes.ExerciseSessionRecord;
+import android.health.connect.datatypes.ExerciseSessionType;
 import android.health.connect.datatypes.HeartRateRecord;
+import android.health.connect.datatypes.Metadata;
+import android.health.connect.datatypes.Record;
 import android.health.connect.datatypes.RestingHeartRateRecord;
 import android.health.connect.datatypes.SleepSessionRecord;
 import android.health.connect.datatypes.StepsRecord;
@@ -56,7 +61,7 @@ import android.health.connect.datatypes.units.Mass;
     name = "HealthConnect",
     permissions = {
         @Permission(
-            alias = "health",
+            alias = "healthRead",
             strings = {
                 HealthConnectPlugin.READ_STEPS,
                 HealthConnectPlugin.READ_HEART_RATE,
@@ -67,6 +72,12 @@ import android.health.connect.datatypes.units.Mass;
                 HealthConnectPlugin.READ_TOTAL_CALORIES_BURNED,
                 HealthConnectPlugin.READ_EXERCISE,
                 HealthConnectPlugin.READ_VO2_MAX
+            }
+        ),
+        @Permission(
+            alias = "healthWrite",
+            strings = {
+                HealthConnectPlugin.WRITE_EXERCISE
             }
         )
     }
@@ -81,6 +92,7 @@ public class HealthConnectPlugin extends Plugin {
     static final String READ_TOTAL_CALORIES_BURNED = "android.permission.health.READ_TOTAL_CALORIES_BURNED";
     static final String READ_EXERCISE = "android.permission.health.READ_EXERCISE";
     static final String READ_VO2_MAX = "android.permission.health.READ_VO2_MAX";
+    static final String WRITE_EXERCISE = "android.permission.health.WRITE_EXERCISE";
 
     private static final Map<String, String> PERMISSIONS = new LinkedHashMap<>();
 
@@ -94,6 +106,7 @@ public class HealthConnectPlugin extends Plugin {
         PERMISSIONS.put("calories", READ_TOTAL_CALORIES_BURNED);
         PERMISSIONS.put("exercise", READ_EXERCISE);
         PERMISSIONS.put("vo2Max", READ_VO2_MAX);
+        PERMISSIONS.put("writeExercise", WRITE_EXERCISE);
     }
 
     @PluginMethod
@@ -103,12 +116,16 @@ public class HealthConnectPlugin extends Plugin {
         JSObject permissions = new JSObject();
         JSArray missing = new JSArray();
         int grantedCount = 0;
+        int readGrantedCount = 0;
 
         for (Map.Entry<String, String> entry : PERMISSIONS.entrySet()) {
             boolean granted = available && isGranted(entry.getValue());
             permissions.put(entry.getKey(), granted);
             if (granted) {
                 grantedCount += 1;
+                if (!"writeExercise".equals(entry.getKey())) {
+                    readGrantedCount += 1;
+                }
             } else {
                 missing.put(entry.getKey());
             }
@@ -122,7 +139,11 @@ public class HealthConnectPlugin extends Plugin {
         result.put("missingPermissions", missing);
         result.put("grantedCount", grantedCount);
         result.put("permissionCount", PERMISSIONS.size());
+        result.put("readGrantedCount", readGrantedCount);
+        result.put("readPermissionCount", PERMISSIONS.size() - 1);
+        result.put("writeExerciseGranted", available && isGranted(WRITE_EXERCISE));
         result.put("allGranted", available && grantedCount == PERMISSIONS.size());
+        result.put("allReadGranted", available && readGrantedCount == PERMISSIONS.size() - 1);
         if (!available) {
             result.put("reason", "android-14-required");
         }
@@ -155,6 +176,22 @@ public class HealthConnectPlugin extends Plugin {
         Api34Impl.readDailySummary(this, call, permissionSnapshot());
     }
 
+    @PluginMethod
+    public void writeExerciseSession(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            call.reject("Health Connect requires Android 14 or newer.", "HEALTH_CONNECT_UNAVAILABLE");
+            return;
+        }
+        if (!isGranted(WRITE_EXERCISE)) {
+            call.reject(
+                "Allow IronDesk to write exercise in Health Connect first.",
+                "HEALTH_CONNECT_WRITE_PERMISSION_REQUIRED"
+            );
+            return;
+        }
+        Api34Impl.writeExerciseSession(this, call);
+    }
+
     private boolean isGranted(String permission) {
         return ContextCompat.checkSelfPermission(getContext(), permission)
             == android.content.pm.PackageManager.PERMISSION_GRANTED;
@@ -172,6 +209,122 @@ public class HealthConnectPlugin extends Plugin {
     private static final class Api34Impl {
         private static final int MAX_DAYS = 31;
         private static final double GRAMS_PER_POUND = 453.59237d;
+
+        static void writeExerciseSession(
+            HealthConnectPlugin plugin,
+            PluginCall call
+        ) {
+            String clientRecordId = call.getString("clientRecordId", "").trim();
+            String title = call.getString("title", "IronDesk Workout").trim();
+            String notes = call.getString("notes", "").trim();
+            String exerciseType = call.getString("exerciseType", "strengthTraining");
+            Long clientRecordVersion = call.getLong("clientRecordVersion", 1L);
+            Instant startTime;
+            Instant endTime;
+
+            if (clientRecordId.isBlank()) {
+                call.reject("A stable IronDesk session ID is required.", "INVALID_EXERCISE_SESSION");
+                return;
+            }
+
+            try {
+                startTime = Instant.parse(call.getString("startTime", ""));
+                endTime = Instant.parse(call.getString("endTime", ""));
+            } catch (RuntimeException error) {
+                call.reject(
+                    "Workout start and end times must be valid ISO timestamps.",
+                    "INVALID_EXERCISE_SESSION",
+                    error
+                );
+                return;
+            }
+
+            if (!endTime.isAfter(startTime)) {
+                call.reject(
+                    "Workout end time must be after its start time.",
+                    "INVALID_EXERCISE_SESSION"
+                );
+                return;
+            }
+
+            HealthConnectManager manager = plugin.getContext().getSystemService(HealthConnectManager.class);
+            if (manager == null) {
+                call.reject("Health Connect is not available on this device.", "HEALTH_CONNECT_UNAVAILABLE");
+                return;
+            }
+
+            Device device = new Device.Builder()
+                .setManufacturer(Build.MANUFACTURER)
+                .setModel(Build.MODEL)
+                .setType(Device.DEVICE_TYPE_PHONE)
+                .build();
+            Metadata metadata = new Metadata.Builder()
+                .setClientRecordId(clientRecordId)
+                .setClientRecordVersion(clientRecordVersion == null ? 1L : clientRecordVersion)
+                .setRecordingMethod(Metadata.RECORDING_METHOD_ACTIVELY_RECORDED)
+                .setDevice(device)
+                .build();
+            ExerciseSessionRecord.Builder recordBuilder = new ExerciseSessionRecord.Builder(
+                metadata,
+                startTime,
+                endTime,
+                exerciseSessionType(exerciseType)
+            ).setTitle(title.isBlank() ? "IronDesk Workout" : title);
+            if (!notes.isBlank()) {
+                recordBuilder.setNotes(notes);
+            }
+
+            List<Record> records = new ArrayList<>();
+            records.add(recordBuilder.build());
+            manager.insertRecords(
+                records,
+                plugin.getContext().getMainExecutor(),
+                new OutcomeReceiver<InsertRecordsResponse, HealthConnectException>() {
+                    @Override
+                    public void onResult(InsertRecordsResponse response) {
+                        JSObject result = new JSObject();
+                        result.put("clientRecordId", clientRecordId);
+                        result.put("writtenAt", Instant.now().toString());
+                        if (!response.getRecords().isEmpty()) {
+                            result.put("recordId", response.getRecords().get(0).getMetadata().getId());
+                        }
+                        call.resolve(result);
+                    }
+
+                    @Override
+                    public void onError(HealthConnectException error) {
+                        call.reject(
+                            "Health Connect could not save this completed workout.",
+                            "HEALTH_CONNECT_WRITE_FAILED",
+                            error
+                        );
+                    }
+                }
+            );
+        }
+
+        private static int exerciseSessionType(String type) {
+            if (type == null) {
+                return ExerciseSessionType.EXERCISE_SESSION_TYPE_STRENGTH_TRAINING;
+            }
+            switch (type) {
+                case "hiit":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING;
+                case "martialArts":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_MARTIAL_ARTS;
+                case "pilates":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_PILATES;
+                case "yoga":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_YOGA;
+                case "calisthenics":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_CALISTHENICS;
+                case "otherWorkout":
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_OTHER_WORKOUT;
+                case "strengthTraining":
+                default:
+                    return ExerciseSessionType.EXERCISE_SESSION_TYPE_STRENGTH_TRAINING;
+            }
+        }
 
         static void readDailySummary(
             HealthConnectPlugin plugin,

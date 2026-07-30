@@ -18,6 +18,7 @@ test("guided Train modes create complete history sessions", () => {
   });
 
   assert.equal(session.durationMin, 10);
+  assert.equal(session.completedAt, 601_000);
   assert.equal(session.entries[0].ex, "Plank");
   assert.equal(session.entries[0].summary, "3 × 45 sec");
   assert.equal(sessionTypeLabel(session), "CORE");
