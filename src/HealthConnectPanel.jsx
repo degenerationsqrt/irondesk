@@ -6,6 +6,7 @@ import React, {
 } from "react";
 import {
   HealthConnect,
+  healthSourceAppNames,
   isNativeHealthConnect,
 } from "./healthConnect.js";
 import { latestHealthValue } from "./trendData.js";
@@ -83,6 +84,7 @@ export function HealthConnectPanel({
     weightLb: latestHealthValue(healthLog, "weightLb")?.value,
     vo2Max: latestHealthValue(healthLog, "vo2Max")?.value,
   }), [healthLog]);
+  const sourceApps = useMemo(() => healthSourceAppNames(healthLog), [healthLog]);
 
   const missingLabels = (deviceStatus?.missingPermissions || [])
     .filter(permission => permission !== "writeExercise")
@@ -179,7 +181,7 @@ export function HealthConnectPanel({
         <div className="health-connect-title">
           <span className="health-connect-kicker">ANDROID HEALTH</span>
           <h3 id="health-connect-title">Health Connect</h3>
-          <p>Import Garmin health trends and send completed IronDesk workouts back.</p>
+          <p>Import Garmin or Samsung Health trends and send completed IronDesk workouts back.</p>
         </div>
         <span className={`health-connect-state is-${connectionState}`}>
           {connectionState === "connected"
@@ -208,7 +210,7 @@ export function HealthConnectPanel({
       ) : (
         <>
           <div className="health-connect-flow" aria-label="Health data flow">
-            <span><b>G</b> Garmin Connect</span>
+            <span><b>⌚</b> Garmin / Samsung</span>
             <i aria-hidden="true">→</i>
             <span><b>♥</b> Health Connect</span>
             <i aria-hidden="true">→</i>
@@ -261,6 +263,12 @@ export function HealthConnectPanel({
                 <div><span>Weight</span><strong>{metric(latest?.weightLb, " lb")}</strong></div>
                 <div><span>VO₂ Max</span><strong>{metric(latest?.vo2Max, " ml/kg/min")}</strong></div>
               </div>
+              {sourceApps.length > 0 && (
+                <div className="health-connect-sources">
+                  <strong>Detected source{sourceApps.length === 1 ? "" : "s"}</strong>
+                  <span>{sourceApps.join(" · ")}</span>
+                </div>
+              )}
               <div className="health-connect-actions">
                 <button
                   type="button"

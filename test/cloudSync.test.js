@@ -6,6 +6,8 @@ import {
   createCloudEnvelope,
   getOrCreateCloudDeviceId,
   mergePersonalStates,
+  newerTrainingMode,
+  recordTombstoneKey,
   personalStateHash,
 } from "../src/cloudSync.js";
 
@@ -15,11 +17,28 @@ test("cloud state keeps only supported IronDesk fields", () => {
     maxes: { bench: 225 },
     secret: "not-synced",
   });
-  assert.deepEqual(state.sessions, [{ id: "one" }]);
+  assert.deepEqual(state.sessions, [{ id: "one", entries: [], prs: [] }]);
   assert.deepEqual(state.maxes, { bench: 225 });
   assert.equal("secret" in state, false);
   assert.deepEqual(state.cardioLog, []);
   assert.deepEqual(state.healthLog, []);
+});
+
+test("cloud state migrates legacy profile settings before another device uses them", () => {
+  const state = buildPersonalState({
+    gender: "male",
+    goal: "muscle",
+    progress: { block: 2, week: 12, dayIndex: -1 },
+  });
+  assert.equal(state.gender, "men");
+  assert.equal(state.goal, "vtaper");
+  assert.deepEqual(state.progress, {
+    block: 2,
+    blockNum: 2,
+    week: 6,
+    dayIndex: 0,
+    updatedAt: 0,
+  });
 });
 
 test("first cloud connection merges histories without losing either device", () => {
@@ -64,6 +83,30 @@ test("cloud hashes are stable and change with personal data", () => {
   const changed = personalStateHash({ sessions: [{ id: "two" }] });
   assert.equal(first, repeated);
   assert.notEqual(first, changed);
+});
+
+test("the newest Home or Gym selection wins cloud merges", () => {
+  assert.deepEqual(
+    newerTrainingMode(
+      { mode: "gym", modeUpdatedAt: 300 },
+      { mode: "home", modeUpdatedAt: 200 },
+    ),
+    { mode: "gym", modeUpdatedAt: 300 },
+  );
+  assert.deepEqual(
+    newerTrainingMode(
+      { mode: "home", modeUpdatedAt: 200 },
+      { mode: "gym", modeUpdatedAt: 400 },
+    ),
+    { mode: "gym", modeUpdatedAt: 400 },
+  );
+});
+
+test("legacy cloud mode keeps its existing merge behavior", () => {
+  assert.deepEqual(
+    newerTrainingMode({ mode: "home" }, { mode: "gym" }),
+    { mode: "gym", modeUpdatedAt: 0 },
+  );
 });
 
 test("cloud merge keeps the most recently changed workout day", () => {
@@ -176,8 +219,57 @@ test("a workout started after the clear marker still syncs", () => {
     },
   );
 
-  assert.deepEqual(merged.active, active);
+  assert.deepEqual(merged.active, { ...active, entries: [] });
   assert.equal(merged.activeClearedAt, clearedAt);
+});
+
+test("deleted workout history cannot return from an older cloud copy", () => {
+  const deleted = { id: "deleted-session", date: "2026-07-27" };
+  const key = recordTombstoneKey("sessions", deleted);
+  const merged = mergePersonalStates(
+    {
+      sessions: [],
+      deletedRecords: { sessions: { [key]: 500 } },
+    },
+    { sessions: [deleted] },
+  );
+
+  assert.deepEqual(merged.sessions, []);
+  assert.equal(merged.deletedRecords.sessions[key], 500);
+});
+
+test("deleted bodyweight and cardio records cannot return from cloud", () => {
+  const weight = { id: "weight-old", date: "2026-07-27", weight: 220 };
+  const cardio = { id: "cardio-old", date: "2026-07-27", minutes: 30 };
+  const merged = mergePersonalStates(
+    {
+      bwLog: [],
+      cardioLog: [],
+      deletedRecords: {
+        bwLog: { [recordTombstoneKey("bwLog", weight)]: 600 },
+        cardioLog: { [recordTombstoneKey("cardioLog", cardio)]: 700 },
+      },
+    },
+    { bwLog: [weight], cardioLog: [cardio] },
+  );
+
+  assert.deepEqual(merged.bwLog, []);
+  assert.deepEqual(merged.cardioLog, []);
+});
+
+test("bodyweight merges keep one entry per date and prefer this device", () => {
+  const merged = mergePersonalStates(
+    {
+      bwLog: [{ id: "local", date: "2026-07-27", weight: 219 }],
+    },
+    {
+      bwLog: [{ id: "cloud", date: "2026-07-27", weight: 221 }],
+    },
+  );
+
+  assert.equal(merged.bwLog.length, 1);
+  assert.equal(merged.bwLog[0].id, "local");
+  assert.equal(merged.bwLog[0].weight, 219);
 });
 
 test("cloud envelopes include device and reject oversized snapshots", () => {

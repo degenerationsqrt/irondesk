@@ -24,8 +24,14 @@ test("web, service worker, and Android releases use the same version", async () 
   assert.equal(packageLock.packages[""].version, APP_VERSION);
   assert.match(serviceWorker, new RegExp(`irondesk-v${APP_VERSION.replaceAll(".", "\\.")}`));
   assert.match(androidBuild, new RegExp(`versionName "${APP_VERSION.replaceAll(".", "\\.")}"`));
-  assert.match(androidBuild, /versionCode 6/);
+  assert.match(androidBuild, /versionCode 7/);
   assert.equal(packageJson.dependencies["@capacitor/app"], "^8.1.1");
   assert.match(capacitorBuild, /implementation project\(':capacitor-app'\)/);
   assert.match(capacitorSettings, /project\(':capacitor-app'\)/);
+});
+
+test("offline service-worker fallback returns HTML only for page navigation", async () => {
+  const serviceWorker = await readFile(new URL("public/sw.js", root), "utf8");
+  assert.match(serviceWorker, /event\.request\.mode === "navigate"/);
+  assert.match(serviceWorker, /return Response\.error\(\)/);
 });

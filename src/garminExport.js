@@ -122,6 +122,24 @@ function exerciseProfile(exerciseName) {
   return { category: "totalBody", subtype: 0 };
 }
 
+function activityProfile(session) {
+  switch (session?.sessionType) {
+    case "hiit":
+    case "vo2":
+      return { sport: "hiit", subSport: "hiit" };
+    case "mma":
+      return { sport: "mixedMartialArts", subSport: "generic" };
+    case "pilates":
+      return { sport: "fitnessEquipment", subSport: "pilates" };
+    case "yoga":
+      return { sport: "training", subSport: "yoga" };
+    case "core":
+      return { sport: "training", subSport: "cardioTraining" };
+    default:
+      return { sport: "training", subSport: "strengthTraining" };
+  }
+}
+
 function fitWeightKg(set) {
   const pounds = positiveNumber(set?.w) || 0;
   return Math.round((pounds / LB_PER_KG) * 1000) / 1000;
@@ -140,13 +158,31 @@ function writeCommonFileId(encoder, session, type) {
   return start;
 }
 
+export function isGarminActivityExportableSession(session) {
+  if (!session || session.source === "garmin" || session.source === "health-connect") return false;
+  const hasIdentity = Boolean(
+    String(session.id || session.sourceKey || session.date || session.startedAt || "").trim(),
+  );
+  const hasCompletedContent = completedSets(session).length > 0
+    || Boolean(session.sessionType)
+    || Number(session.durationMin) > 0
+    || Number(session.completedAt) > 0;
+  return hasIdentity && hasCompletedContent;
+}
+
+export function isGarminWorkoutExportableSession(session) {
+  return session?.source !== "garmin"
+    && session?.source !== "health-connect"
+    && completedSets(session).length > 0;
+}
+
 export function isGarminExportableSession(session) {
-  return session?.source !== "garmin" && completedSets(session).length > 0;
+  return isGarminActivityExportableSession(session);
 }
 
 export function createGarminActivityFit(session) {
-  if (!isGarminExportableSession(session)) {
-    throw new Error("Choose an IronDesk workout with at least one completed set.");
+  if (!isGarminActivityExportableSession(session)) {
+    throw new Error("Choose a completed IronDesk activity from Progress History.");
   }
   const encoder = new Encoder();
   const start = writeCommonFileId(encoder, session, "activity");
@@ -158,6 +194,7 @@ export function createGarminActivityFit(session) {
   const calories = boundedInteger(session?.garmin?.calories, 0, 0, 65534);
   const avgHeartRate = boundedInteger(session?.garmin?.avgHeartRate, 0, 0, 254);
   const maxHeartRate = boundedInteger(session?.garmin?.maxHeartRate, 0, 0, 254);
+  const profile = activityProfile(session);
 
   encoder.onMesg(Profile.MesgNum.DEVICE_INFO, {
     deviceIndex: "creator",
@@ -211,8 +248,8 @@ export function createGarminActivityFit(session) {
     startTime: start,
     totalElapsedTime: durationSeconds,
     totalTimerTime: durationSeconds,
-    sport: "training",
-    subSport: "strengthTraining",
+    sport: profile.sport,
+    subSport: profile.subSport,
     ...(calories ? { totalCalories: calories } : {}),
     ...(avgHeartRate ? { avgHeartRate } : {}),
     ...(maxHeartRate ? { maxHeartRate } : {}),
@@ -230,7 +267,7 @@ export function createGarminActivityFit(session) {
     eventType: "stop",
     firstLapIndex: 0,
     numLaps: 1,
-    totalCycles: Math.round(totalReps),
+    ...(totalReps ? { totalCycles: Math.round(totalReps) } : {}),
   });
   encoder.onMesg(Profile.MesgNum.ACTIVITY, {
     timestamp: end,
@@ -279,7 +316,7 @@ function workoutStepMessages(session, restSeconds) {
 }
 
 export function createGarminWorkoutFit(session, { restSeconds = 90, workoutName } = {}) {
-  if (!isGarminExportableSession(session)) {
+  if (!isGarminWorkoutExportableSession(session)) {
     throw new Error("Choose an IronDesk workout with at least one completed set.");
   }
   const safeRestSeconds = boundedInteger(restSeconds, 90, 15, 600);
@@ -306,8 +343,8 @@ export function createGarminWorkoutFit(session, { restSeconds = 90, workoutName 
 }
 
 export function createGarminActivityPack(sessions) {
-  const exportable = (Array.isArray(sessions) ? sessions : []).filter(isGarminExportableSession);
-  if (!exportable.length) throw new Error("Select at least one IronDesk workout with completed sets.");
+  const exportable = (Array.isArray(sessions) ? sessions : []).filter(isGarminActivityExportableSession);
+  if (!exportable.length) throw new Error("Select at least one completed IronDesk activity.");
   const files = {};
   exportable.forEach((session) => {
     let name = fitFileName(session);

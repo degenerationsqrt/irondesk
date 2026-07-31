@@ -1,4 +1,4 @@
-const CACHE_NAME = "irondesk-v0.5.0";
+const CACHE_NAME = "irondesk-v0.6.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -35,6 +35,11 @@ self.addEventListener("fetch", event => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request).then(cached => cached || caches.match("./index.html"))),
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate") return caches.match("./index.html");
+        return Response.error();
+      }),
   );
 });

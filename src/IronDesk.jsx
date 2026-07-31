@@ -15,7 +15,9 @@ import {
 import {
   DEFAULT_REST_TIMER_PREFS,
   filterAndSortSessions,
+  normalizeActiveWorkout,
   normalizeRestTimerPrefs,
+  normalizeSessionHistory,
   removeLastWorkoutSet,
   restDurationForEntry,
   safeSessionVolume,
@@ -36,6 +38,7 @@ import {
   getOrCreateCloudDeviceId,
   mergePersonalStates,
   personalStateHash,
+  recordTombstoneKey,
 } from "./cloudSync.js";
 import { HealthConnectPanel } from "./HealthConnectPanel.jsx";
 import { AppUpdateBanner } from "./AppUpdateBanner.jsx";
@@ -68,6 +71,7 @@ import {
   resolveWorkoutDayIndex,
   selectWorkoutDay,
 } from "./workoutSchedule.js";
+import { normalizeGender, normalizeGoal, normalizeWorkoutProgress } from "./profileState.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -154,7 +158,7 @@ function downloadFile(contents, filename, type) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function solveLoadout(targetTotal, bar, pairs) {
   const perSide = Math.max(0, (targetTotal - bar) / 2);
@@ -1002,7 +1006,7 @@ var FB = function () {
   };
 }();
 function computeStats(sessions, maxes) {
-  var ironDeskSessions = sessions.filter(function (session) {
+  var ironDeskSessions = (Array.isArray(sessions) ? sessions : []).filter(function (session) {
     return session?.source !== "garmin";
   });
   var best = {
@@ -1012,8 +1016,8 @@ function computeStats(sessions, maxes) {
     deadlift: 0
   };
   ironDeskSessions.forEach(function (s) {
-    s.entries.forEach(function (en) {
-      if (en.lift && best.hasOwnProperty(en.lift)) en.sets.forEach(function (st) {
+    (Array.isArray(s?.entries) ? s.entries : []).forEach(function (en) {
+      if (en?.lift && Object.prototype.hasOwnProperty.call(best, en.lift)) (Array.isArray(en?.sets) ? en.sets : []).forEach(function (st) {
         var estimate = estimatedMaxForSet(st.w, st.r);
         if (estimate == null) return;
         var e = Math.round(estimate);
@@ -1026,7 +1030,7 @@ function computeStats(sessions, maxes) {
   });
   var cut = localDateKey(new Date(Date.now() - 7 * 864e5));
   var wk = ironDeskSessions.filter(function (s) {
-    return s.date >= cut;
+    return String(s?.date || "") >= cut;
   });
   return {
     bench: best.bench,
@@ -1034,7 +1038,7 @@ function computeStats(sessions, maxes) {
     ohp: best.ohp,
     deadlift: best.deadlift,
     weekVolume: wk.reduce(function (a, s) {
-      return a + s.volume;
+      return a + safeSessionVolume(s);
     }, 0),
     weekSessions: wk.length
   };
@@ -1089,11 +1093,17 @@ class Boundary extends React.Component {
 export default function IronDesk() {
   const [tab, setTab] = useState("today");
   const [mode, setMode] = useState("home");
+  const [modeUpdatedAt, setModeUpdatedAt] = useState(0);
   const [maxes, setMaxes] = useState(D_MAXES);
   const [homePlates, setHomePlates] = useState(D_HOME);
   const [gymPlates, setGymPlates] = useState(D_GYM);
   const [bar, setBar] = useState(45);
   const [sessions, setSessions] = useState([]);
+  const [deletedRecords, setDeletedRecords] = useState({
+    sessions: {},
+    bwLog: {},
+    cardioLog: {},
+  });
   const [bwLog, setBwLog] = useState([]);
   const [cardioLog, setCardioLog] = useState([]);
   const [healthLog, setHealthLog] = useState([]);
@@ -1144,6 +1154,7 @@ export default function IronDesk() {
     groupId: null
   });
   const lastPushed = useRef(null);
+  const flashSequenceRef = useRef(0);
   const healthSyncInFlightRef = useRef(null);
   const lastAutomaticHealthSyncRef = useRef(0);
   const [loaded, setLoaded] = useState(false);
@@ -1171,7 +1182,9 @@ export default function IronDesk() {
     gymPlates,
     bar,
     mode,
+    modeUpdatedAt,
     sessions,
+    deletedRecords,
     bwLog,
     cardioLog,
     healthLog,
@@ -1186,7 +1199,7 @@ export default function IronDesk() {
     onboarded,
     macros,
     restTimerPrefs
-  }), [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
+  }), [maxes, homePlates, gymPlates, bar, mode, modeUpdatedAt, sessions, deletedRecords, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
   const personalStateRef = useRef(personalState);
   personalStateRef.current = personalState;
   const applyHealthSync = React.useCallback(result => {
@@ -1241,23 +1254,29 @@ export default function IronDesk() {
           s.homePlates && setHomePlates(s.homePlates);
           s.gymPlates && setGymPlates(s.gymPlates);
           s.bar && setBar(s.bar);
-          s.mode && setMode(s.mode);
-          s.sessions && setSessions(s.sessions);
+          if (s.mode === "home" || s.mode === "gym") {
+            setMode(s.mode);
+            setModeUpdatedAt(Math.max(1, Number(s.modeUpdatedAt) || Date.now()));
+          }
+          s.sessions && setSessions(normalizeSessionHistory(s.sessions));
+          s.deletedRecords && setDeletedRecords(s.deletedRecords);
           s.bwLog && setBwLog(s.bwLog);
           s.cardioLog && setCardioLog(s.cardioLog);
           s.healthLog && setHealthLog(s.healthLog);
           if (s.healthLogClearedAt != null) setHealthLogClearedAt(Number(s.healthLogClearedAt) || 0);
           const storedActiveClearedAt = Number(s.activeClearedAt) || 0;
           setActiveClearedAt(storedActiveClearedAt);
-          if (s.active) {
-            const activeStartedAt = Number(s.active.start) || Date.parse(s.active.startedAt || "") || 0;
+          const storedActive = normalizeActiveWorkout(s.active);
+          if (storedActive) {
+            const activeStartedAt = Number(storedActive.start) || Date.parse(storedActive.startedAt || "") || 0;
             if (storedActiveClearedAt <= 0 || activeStartedAt > storedActiveClearedAt) {
-              setActive(s.active);
+              setActive(storedActive);
             }
           }
-          s.progress && setProgress(s.progress);
-          s.gender && setGender(s.gender);
-          s.goal && setGoal(s.goal);
+          if (s.progress) setProgress(normalizeWorkoutProgress(s.progress));
+          const storedGender = normalizeGender(s.gender);
+          setGender(storedGender);
+          setGoal(normalizeGoal(s.goal, storedGender));
           s.styleOverride && setStyleOverride(s.styleOverride);
           s.customDays && setCustomDays(s.customDays);
           s.macros && setMacros(s.macros);
@@ -1346,7 +1365,9 @@ export default function IronDesk() {
         gymPlates,
         bar,
         mode,
+        modeUpdatedAt,
         sessions,
+        deletedRecords,
         bwLog,
         cardioLog,
         healthLog,
@@ -1366,7 +1387,7 @@ export default function IronDesk() {
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, sessions, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
+  }, [maxes, homePlates, gymPlates, bar, mode, modeUpdatedAt, sessions, deletedRecords, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
 
   useEffect(() => FB.onAuth(user => {
     setCloudUser(user || null);
@@ -1388,17 +1409,20 @@ export default function IronDesk() {
     state.homePlates && setHomePlates(state.homePlates);
     state.gymPlates && setGymPlates(state.gymPlates);
     if (state.bar != null) setBar(state.bar);
-    state.mode && setMode(state.mode);
-    Array.isArray(state.sessions) && setSessions(state.sessions);
+    if (state.mode === "home" || state.mode === "gym") setMode(state.mode);
+    if (state.modeUpdatedAt != null) setModeUpdatedAt(Number(state.modeUpdatedAt) || 0);
+    Array.isArray(state.sessions) && setSessions(normalizeSessionHistory(state.sessions));
+    if (state.deletedRecords) setDeletedRecords(state.deletedRecords);
     Array.isArray(state.bwLog) && setBwLog(state.bwLog);
     Array.isArray(state.cardioLog) && setCardioLog(state.cardioLog);
     Array.isArray(state.healthLog) && setHealthLog(state.healthLog);
     if (state.healthLogClearedAt != null) setHealthLogClearedAt(Number(state.healthLogClearedAt) || 0);
-    if (Object.prototype.hasOwnProperty.call(state, "active")) setActive(state.active || null);
+    if (Object.prototype.hasOwnProperty.call(state, "active")) setActive(normalizeActiveWorkout(state.active));
     if (state.activeClearedAt != null) setActiveClearedAt(Number(state.activeClearedAt) || 0);
-    state.progress && setProgress(state.progress);
-    state.gender && setGender(state.gender);
-    state.goal && setGoal(state.goal);
+    if (state.progress) setProgress(normalizeWorkoutProgress(state.progress));
+    const storedGender = normalizeGender(state.gender);
+    setGender(storedGender);
+    setGoal(normalizeGoal(state.goal, storedGender));
     if (Object.prototype.hasOwnProperty.call(state, "styleOverride")) setStyleOverride(state.styleOverride || null);
     Array.isArray(state.customDays) && setCustomDays(state.customDays);
     if (typeof state.onboarded === "boolean") setOnboarded(state.onboarded);
@@ -1566,9 +1590,40 @@ export default function IronDesk() {
     /* eslint-disable-next-line */
   }, [sessions, loaded]);
   const note = m => {
+    const sequence = flashSequenceRef.current + 1;
+    flashSequenceRef.current = sequence;
     setFlash(m);
-    setTimeout(() => setFlash(""), 1600);
+    setTimeout(() => {
+      if (flashSequenceRef.current === sequence) setFlash("");
+    }, 1600);
   };
+  const deleteTrackedRecord = React.useCallback((field, record) => {
+    const key = recordTombstoneKey(field, record);
+    const deletedAt = Date.now();
+    const currentState = personalStateRef.current;
+    const nextDeletedRecords = {
+      ...(currentState.deletedRecords || {}),
+      [field]: {
+        ...(currentState.deletedRecords?.[field] || {}),
+        [key]: deletedAt,
+      },
+    };
+    const nextRecords = (Array.isArray(currentState[field]) ? currentState[field] : [])
+      .filter(item => recordTombstoneKey(field, item) !== key);
+    const nextState = buildPersonalState({
+      ...currentState,
+      [field]: nextRecords,
+      deletedRecords: nextDeletedRecords,
+    });
+    personalStateRef.current = nextState;
+    try {
+      window.storage.set("irondesk:v3", JSON.stringify(nextState));
+    } catch {}
+    setDeletedRecords(nextState.deletedRecords);
+    if (field === "sessions") setSessions(nextRecords);
+    if (field === "bwLog") setBwLog(nextRecords);
+    if (field === "cardioLog") setCardioLog(nextRecords);
+  }, []);
   const markHealthConnectWrite = React.useCallback((sessionId, state, details = {}) => {
     setSessions(current => current.map(session => session.id !== sessionId ? session : {
       ...session,
@@ -1578,6 +1633,25 @@ export default function IronDesk() {
       },
     }));
   }, []);
+  const sendSessionToHealthConnect = React.useCallback(session => {
+    markHealthConnectWrite(session.id, "pending");
+    return writeWorkoutToHealthConnect(session)
+      .then(result => {
+        markHealthConnectWrite(session.id, "synced", {
+          recordId: result?.recordId || null,
+          writtenAt: result?.writtenAt || new Date().toISOString(),
+        });
+        note("Workout sent to Health Connect");
+        return result;
+      })
+      .catch(error => {
+        markHealthConnectWrite(session.id, "error", {
+          message: error?.message || "Health Connect write failed.",
+        });
+        note("Workout saved in IronDesk; Health Connect needs attention");
+        return null;
+      });
+  }, [markHealthConnectWrite]);
   const completeWorkoutSession = React.useCallback(session => {
     const shouldWrite = healthWriteEnabled
       && isNativeHealthConnect()
@@ -1588,25 +1662,34 @@ export default function IronDesk() {
         state: "pending",
       },
     } : session;
-    setSessions(current => [savedSession, ...current]);
+    const sessionKey = recordTombstoneKey("sessions", savedSession);
+    setDeletedRecords(current => {
+      if (!current?.sessions?.[sessionKey]) return current;
+      const nextSessions = { ...current.sessions };
+      delete nextSessions[sessionKey];
+      return { ...current, sessions: nextSessions };
+    });
+    setSessions(current => [
+      savedSession,
+      ...current.filter(item => recordTombstoneKey("sessions", item) !== sessionKey),
+    ]);
     if (shouldWrite) {
-      writeWorkoutToHealthConnect(savedSession)
-        .then(result => {
-          markHealthConnectWrite(savedSession.id, "synced", {
-            recordId: result?.recordId || null,
-            writtenAt: result?.writtenAt || new Date().toISOString(),
-          });
-          note("Workout sent to Health Connect");
-        })
-        .catch(error => {
-          markHealthConnectWrite(savedSession.id, "error", {
-            message: error?.message || "Health Connect write failed.",
-          });
-          note("Workout saved in IronDesk; Health Connect needs attention");
-        });
+      sendSessionToHealthConnect(savedSession);
     }
     return savedSession;
-  }, [healthWriteEnabled, markHealthConnectWrite]);
+  }, [healthWriteEnabled, sendSessionToHealthConnect]);
+  const retryHealthConnectWrite = React.useCallback(session => {
+    if (!isNativeHealthConnect()) {
+      note("Open IronDesk on Android to send this workout");
+      return;
+    }
+    if (!healthWriteEnabled) {
+      note("Enable completed-workout writeback in Connect first");
+      setTab("connections");
+      return;
+    }
+    sendSessionToHealthConnect(session);
+  }, [healthWriteEnabled, sendSessionToHealthConnect]);
   const clearActiveWorkout = React.useCallback(() => {
     const clearedAt = Date.now();
     const clearedState = buildPersonalState({
@@ -1621,6 +1704,23 @@ export default function IronDesk() {
     setActive(null);
     setActiveClearedAt(current => Math.max(current, clearedAt));
   }, []);
+  const selectTrainingMode = nextMode => {
+    if (nextMode !== "home" && nextMode !== "gym") return;
+    if (active?.mode && active.mode !== nextMode) {
+      note(`Current workout stays ${active.mode === "gym" ? "Gym" : "Home"}. Finish or discard it before switching.`);
+      setTab("today");
+      return;
+    }
+    if (mode === nextMode) return;
+    const changedAt = Date.now();
+    personalStateRef.current = buildPersonalState({
+      ...personalStateRef.current,
+      mode: nextMode,
+      modeUpdatedAt: changedAt,
+    });
+    setMode(nextMode);
+    setModeUpdatedAt(changedAt);
+  };
   const plates = mode === "gym" ? gymPlates : homePlates;
   const setPlates = mode === "gym" ? setGymPlates : setHomePlates;
   const roundLoad = x => mode === "gym" ? Math.round(x / 2.5) * 2.5 : Math.round(x / 5) * 5;
@@ -1660,7 +1760,9 @@ export default function IronDesk() {
   // PR map: best e1RM per exercise across all finished sessions
   const prMap = useMemo(() => {
     const m = {};
-    sessions.forEach(s => s.entries.forEach(en => en.sets.forEach(st => {
+    (Array.isArray(sessions) ? sessions : []).forEach(s => (
+      Array.isArray(s?.entries) ? s.entries : []
+    ).forEach(en => (Array.isArray(en?.sets) ? en.sets : []).forEach(st => {
       const e = estimatedMaxForSet(st.w, st.r);
       if (e == null) return;
       if (!m[en.ex] || e > m[en.ex]) m[en.ex] = e;
@@ -1674,7 +1776,9 @@ export default function IronDesk() {
       gymPlates,
       bar,
       mode,
+      modeUpdatedAt,
       sessions,
+      deletedRecords,
       bwLog,
       cardioLog,
       healthLog,
@@ -1706,6 +1810,10 @@ export default function IronDesk() {
   };
   const importData = file => {
     if (!file) return;
+    if (Number(file.size) > 10 * 1024 * 1024) {
+      note("Import failed — backup is larger than 10 MB");
+      return;
+    }
     const rd = new FileReader();
     rd.onload = () => {
       try {
@@ -1715,8 +1823,12 @@ export default function IronDesk() {
         s.plates && setHomePlates(s.plates);
         s.gymPlates && setGymPlates(s.gymPlates);
         if (s.bar != null) setBar(s.bar);
-        s.mode && setMode(s.mode);
-        Array.isArray(s.sessions) && setSessions(s.sessions);
+        if (s.mode === "home" || s.mode === "gym") {
+          setMode(s.mode);
+          setModeUpdatedAt(Math.max(1, Number(s.modeUpdatedAt) || Date.now()));
+        }
+        Array.isArray(s.sessions) && setSessions(normalizeSessionHistory(s.sessions));
+        if (s.deletedRecords) setDeletedRecords(s.deletedRecords);
         // v2 logs → keep bw/cardio
         s.bwLog && setBwLog(s.bwLog);
         s.cardioLog && setCardioLog(s.cardioLog);
@@ -1727,19 +1839,21 @@ export default function IronDesk() {
             Number(s.activeClearedAt) || 0,
             s.active ? 0 : Date.now(),
           );
-          const activeStartedAt = Number(s.active?.start) || Date.parse(s.active?.startedAt || "") || 0;
+          const restoredActive = normalizeActiveWorkout(s.active);
+          const activeStartedAt = Number(restoredActive?.start) || Date.parse(restoredActive?.startedAt || "") || 0;
           setActive(
-            s.active && (importedActiveClearedAt <= 0 || activeStartedAt > importedActiveClearedAt)
-              ? s.active
+            restoredActive && (importedActiveClearedAt <= 0 || activeStartedAt > importedActiveClearedAt)
+              ? restoredActive
               : null,
           );
           setActiveClearedAt(importedActiveClearedAt);
         } else if (s.activeClearedAt != null) {
           setActiveClearedAt(Number(s.activeClearedAt) || 0);
         }
-        s.progress && setProgress(s.progress);
-        s.gender && setGender(s.gender);
-        s.goal && setGoal(s.goal);
+        if (s.progress) setProgress(normalizeWorkoutProgress(s.progress));
+        const importedGender = normalizeGender(s.gender);
+        setGender(importedGender);
+        setGoal(normalizeGoal(s.goal, importedGender));
         if (Object.prototype.hasOwnProperty.call(s, "styleOverride")) setStyleOverride(s.styleOverride || null);
         Array.isArray(s.customDays) && setCustomDays(s.customDays);
         if (Object.prototype.hasOwnProperty.call(s, "macros")) setMacros(s.macros || null);
@@ -1750,6 +1864,7 @@ export default function IronDesk() {
         note("Import failed");
       }
     };
+    rd.onerror = () => note("Import failed — file could not be read");
     rd.readAsText(file);
   };
   const importGarminFiles = async files => {
@@ -1790,6 +1905,14 @@ export default function IronDesk() {
       throw new Error(failedFiles[0] || "No Garmin activities were found.");
     }
     const merged = mergeGarminSessions(sessions, importedSessions);
+    const restoredKeys = new Set(importedSessions.map(session => recordTombstoneKey("sessions", session)));
+    setDeletedRecords(current => {
+      if (!restoredKeys.size || !current?.sessions) return current;
+      const nextSessions = Object.fromEntries(
+        Object.entries(current.sessions).filter(([key]) => !restoredKeys.has(key)),
+      );
+      return nextSessions === current.sessions ? current : { ...current, sessions: nextSessions };
+    });
     setSessions(merged.sessions);
     note(merged.added
       ? `${merged.added} Garmin activit${merged.added === 1 ? "y" : "ies"} imported`
@@ -1866,10 +1989,16 @@ export default function IronDesk() {
     }
   }, [["home", "Home"], ["gym", "Gym"]].map(([m, l]) => /*#__PURE__*/React.createElement("button", {
     key: m,
-    onClick: () => setMode(m),
+    type: "button",
+    "aria-pressed": mode === m,
+    title: active?.mode && active.mode !== m
+      ? `Finish or discard the current ${active.mode === "gym" ? "Gym" : "Home"} workout before switching`
+      : `Use ${l} equipment`,
+    onClick: () => selectTrainingMode(m),
     className: "ttl",
     style: {
       padding: "6px 12px",
+      minHeight: 32,
       borderRadius: 6,
       border: "none",
       cursor: "pointer",
@@ -1902,7 +2031,6 @@ export default function IronDesk() {
     setActive,
     clearActiveWorkout,
     sessions,
-    setSessions,
     prMap,
     note,
     setTab,
@@ -1969,7 +2097,9 @@ export default function IronDesk() {
     note
   }), tab === "history" && /*#__PURE__*/React.createElement(History, {
     sessions,
-    setSessions,
+    onDeleteSession: session => deleteTrackedRecord("sessions", session),
+    onRetryHealthConnect: retryHealthConnectWrite,
+    canUseHealthConnect: isNativeHealthConnect(),
     exportCsv
   }), tab === "connections" && /*#__PURE__*/React.createElement(Connections, {
     firebaseReady: FB.ready,
@@ -2019,7 +2149,10 @@ export default function IronDesk() {
     setBwLog,
     cardioLog,
     setCardioLog,
-    healthLog
+    healthLog,
+    note,
+    onDeleteBodyweight: entry => deleteTrackedRecord("bwLog", entry),
+    onDeleteCardio: entry => deleteTrackedRecord("cardioLog", entry)
   }), tab === "tools" && /*#__PURE__*/React.createElement(Tools, {
     mode,
     plates,
@@ -2129,7 +2262,6 @@ function Today({
   setActive,
   clearActiveWorkout,
   sessions,
-  setSessions,
   prMap,
   note,
   setTab,
@@ -2869,7 +3001,7 @@ function Today({
         color: C.dim,
         marginBottom: 8
       }
-    }, en.target ? `Target ${en.target} lb · ` : "", isDB ? "Weight is per dumbbell" : en.note), en.target && !isCardio && !isAb && !isDB && /*#__PURE__*/React.createElement("div", {
+    }, en.target ? `Target ${en.target} lb${isDB || en.note ? " · " : ""}` : "", isDB ? "Weight is per dumbbell" : en.note), en.target && !isCardio && !isAb && !isDB && /*#__PURE__*/React.createElement("div", {
       style: {
         marginBottom: 8
       }
@@ -2989,8 +3121,8 @@ function WeekSummary({
   sessions
 }) {
   const cut = localDateKey(new Date(Date.now() - 7 * 864e5));
-  const wk = sessions.filter(s => s.date >= cut);
-  const vol = wk.reduce((a, s) => a + s.volume, 0);
+  const wk = (Array.isArray(sessions) ? sessions : []).filter(s => String(s?.date || "") >= cut);
+  const vol = wk.reduce((a, s) => a + safeSessionVolume(s), 0);
   const prs = wk.reduce((a, s) => a + (s.prs?.length || 0), 0);
   return /*#__PURE__*/React.createElement(Panel, {
     title: "Last 7 Days",
@@ -3312,7 +3444,9 @@ function ProgramTab({
 /* ============ HISTORY ============ */
 function History({
   sessions,
-  setSessions,
+  onDeleteSession,
+  onRetryHealthConnect,
+  canUseHealthConnect,
   exportCsv
 }) {
   const [open, setOpen] = useState(null);
@@ -3330,7 +3464,7 @@ function History({
   const hasFilters = Boolean(query) || modeFilter !== "all" || range !== "all";
   const del = target => {
     if (window.confirm("Delete this session?")) {
-      setSessions(sessions.filter(session => target?.id ? session.id !== target.id : session !== target));
+      onDeleteSession(target);
     }
   };
   const resetFilters = () => {
@@ -3510,6 +3644,27 @@ function History({
                         )}
                       </div>
                     )}
+                    {!isGarmin && session.healthConnectWrite && (
+                      <div className={`history-health-write is-${session.healthConnectWrite.state || "idle"}`}>
+                        <div>
+                          <strong>
+                            {session.healthConnectWrite.state === "synced"
+                              ? "Sent to Health Connect"
+                              : session.healthConnectWrite.state === "pending"
+                                ? "Sending to Health Connect…"
+                                : "Health Connect writeback failed"}
+                          </strong>
+                          {session.healthConnectWrite.message && (
+                            <small>{session.healthConnectWrite.message}</small>
+                          )}
+                        </div>
+                        {canUseHealthConnect && session.healthConnectWrite.state === "error" && (
+                          <button type="button" onClick={() => onRetryHealthConnect(session)}>
+                            Retry
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {entries.length === 0 ? (
                       <span className="history-legacy-note">
                         {isGarmin
@@ -3646,18 +3801,16 @@ function Trends({
   setBwLog,
   cardioLog,
   setCardioLog,
-  healthLog
+  healthLog,
+  note,
+  onDeleteBodyweight,
+  onDeleteCardio
 }) {
   const [sel, setSel] = useState("bench");
   const [bw, setBw] = useState({
     date: today(),
     weight: 242,
     bf: ""
-  });
-  const [cd, setCd] = useState({
-    date: today(),
-    type: "Bike",
-    minutes: 30
   });
   const cardioTrendLog = useMemo(
     () => mergeCardioTrendRecords(cardioLog, sessions),
@@ -3700,22 +3853,28 @@ function Trends({
     fat: Math.round(x.weight * x.bf / 100)
   })), [bwData]);
   const addBw = () => {
-    if (!Number(bw.weight)) return;
+    const weight = Number(bw.weight);
+    const bodyFat = bw.bf === "" ? null : Number(bw.bf);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bw.date)) {
+      note("Choose a bodyweight date");
+      return;
+    }
+    if (!Number.isFinite(weight) || weight <= 0 || weight > 1500) {
+      note("Enter a valid bodyweight");
+      return;
+    }
+    if (bodyFat != null && (!Number.isFinite(bodyFat) || bodyFat <= 0 || bodyFat >= 75)) {
+      note("Body fat must be between 0 and 75%");
+      return;
+    }
     const entry = {
       id: uid(),
       date: bw.date,
-      weight: Number(bw.weight)
+      weight
     };
-    if (Number(bw.bf) > 0) entry.bf = Number(bw.bf);
-    setBwLog([entry, ...bwLog.filter(x => x.date !== bw.date)]);
-  };
-  const addCd = () => {
-    if (!Number(cd.minutes)) return;
-    setCardioLog([{
-      id: uid(),
-      ...cd,
-      minutes: Number(cd.minutes)
-    }, ...cardioLog]);
+    if (bodyFat != null) entry.bf = bodyFat;
+    setBwLog(current => [entry, ...current.filter(x => x.date !== bw.date)]);
+    note("Bodyweight logged");
   };
   const ttStyle = {
     contentStyle: {
@@ -3732,7 +3891,7 @@ function Trends({
     cardioLog: cardioLog,
     trendLog: cardioTrendLog,
     setCardioLog: setCardioLog,
-    note: () => {}
+    note: note
   }), /*#__PURE__*/React.createElement(Panel, {
     title: "Strength Trend",
     sub: "e1RM from your logged sessions — flat or rising while weight drops = recomp working"
@@ -4016,56 +4175,25 @@ function Trends({
       fontSize: 12
     }
   }, Math.round(x.weight * (1 - x.bf / 100)), " lean"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setBwLog(bwLog.filter(b => b.id !== x.id)),
+    "aria-label": `Delete bodyweight from ${x.date}`,
+    onClick: () => {
+      if (window.confirm("Delete this bodyweight entry?")) onDeleteBodyweight(x);
+    },
     style: {
       background: "none",
       border: "none",
       color: C.dim,
       cursor: "pointer",
-      fontSize: 15
+      fontSize: 15,
+      minWidth: 32,
+      minHeight: 32
     }
   }, "×"))))), /*#__PURE__*/React.createElement(HealthRecoveryTrends, {
     healthLog: healthLog
   }), /*#__PURE__*/React.createElement(Panel, {
-    title: "Cardio",
-    sub: "Mostly zone 2 — protect leg recovery"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      alignItems: "flex-end",
-      marginBottom: 10,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "date",
-    "aria-label": "Cardio date",
-    value: cd.date,
-    onChange: e => setCd({
-      ...cd,
-      date: e.target.value
-    }),
-    style: inp(120)
-  }), /*#__PURE__*/React.createElement("select", {
-    value: cd.type,
-    onChange: e => setCd({
-      ...cd,
-      type: e.target.value
-    }),
-    style: inp(110)
-  }, ["Bike", "Incline Walk", "Run", "Rower", "Jump Rope", "Stairs", "Other"].map(t => /*#__PURE__*/React.createElement("option", {
-    key: t
-  }, t))), /*#__PURE__*/React.createElement(MiniIn, {
-    value: cd.minutes,
-    onChange: v => setCd({
-      ...cd,
-      minutes: v
-    }),
-    suffix: "min"
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: addCd,
-    style: btnSm()
-  }, "+ Log")), cardioTrendLog.slice(0, 6).map(x => /*#__PURE__*/React.createElement("div", {
+    title: "Recent Cardio",
+    sub: "One log, one history — Garmin activities appear automatically"
+  }, cardioTrendLog.length ? cardioTrendLog.slice(0, 6).map(x => /*#__PURE__*/React.createElement("div", {
     key: x.id,
     style: {
       display: "flex",
@@ -4089,14 +4217,21 @@ function Trends({
       color: C.gold
     }
   }, x.minutes, " min"), x.source !== "garmin" && /*#__PURE__*/React.createElement("button", {
-    onClick: () => setCardioLog(cardioLog.filter(c => c.id !== x.id)),
+    "aria-label": `Delete cardio from ${x.date}`,
+    onClick: () => {
+      if (window.confirm("Delete this cardio entry?")) onDeleteCardio(x);
+    },
     style: {
       background: "none",
       border: "none",
       color: C.dim,
-      cursor: "pointer"
+      cursor: "pointer",
+      minWidth: 32,
+      minHeight: 32
     }
-  }, "×")))));
+  }, "×"))) : /*#__PURE__*/React.createElement(Empty, {
+    text: "Log cardio above or import a Garmin activity."
+  })));
 }
 
 /* ============ TOOLS ============ */
@@ -4641,8 +4776,8 @@ function Connections({
           <span className="connection-center-kicker">ONE PLACE FOR EVERY DEVICE</span>
           <h2 id="connection-center-title">Connection Center</h2>
           <p>
-            Bring Garmin health summaries, detailed FIT/CSV activities, and your private
-            IronDesk cloud copy together without hunting through Settings.
+            Bring Garmin and Samsung Health summaries, detailed FIT/CSV activities, and your
+            private IronDesk cloud copy together without hunting through Settings.
           </p>
         </div>
         <span className="connection-center-device">
@@ -4667,6 +4802,56 @@ function Connections({
           <b>Manage ↓</b>
         </button>
       </div>
+
+      <section className="watch-provider-grid" aria-label="Watch connection options">
+        <article className="watch-provider-card is-ready">
+          <div className="watch-provider-heading">
+            <span className="watch-provider-mark is-samsung" aria-hidden="true">S</span>
+            <div>
+              <small>AVAILABLE IN THE ANDROID APP</small>
+              <h3>Samsung Galaxy Watch</h3>
+            </div>
+            <b>Works now</b>
+          </div>
+          <p>Galaxy Watch → Samsung Health → Health Connect → IronDesk</p>
+          <ol>
+            <li>Sync the watch with Samsung Health on the phone.</li>
+            <li>In Samsung Health, allow Health Connect read and write access.</li>
+            <li>Connect IronDesk below, then enable completed-workout writeback.</li>
+          </ol>
+          <a
+            href="https://developer.samsung.com/health/health-connect-faq.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Samsung setup details ↗
+          </a>
+        </article>
+
+        <article className="watch-provider-card is-planned">
+          <div className="watch-provider-heading">
+            <span className="watch-provider-mark is-apple" aria-hidden="true">●</span>
+            <div>
+              <small>SEPARATE IPHONE APP REQUIRED</small>
+              <h3>Apple Watch</h3>
+            </div>
+            <b>HealthKit</b>
+          </div>
+          <p>Apple Watch → Apple Health → IronDesk iPhone app</p>
+          <ol>
+            <li>Apple Watch does not connect to Android Health Connect.</li>
+            <li>An IronDesk iPhone target must request HealthKit read and share access.</li>
+            <li>Personal Cloud Sync can then show approved summaries on the website.</li>
+          </ol>
+          <a
+            href="https://developer.apple.com/documentation/healthkit"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Apple HealthKit requirements ↗
+          </a>
+        </article>
+      </section>
 
       <section className="connection-guide">
         <div className="connection-guide-heading">
@@ -5686,26 +5871,44 @@ function CardioQuickLog({
   });
   const displayLog = Array.isArray(trendLog) ? trendLog : cardioLog || [];
   const add = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date)) {
+      note("Choose a cardio date");
+      return;
+    }
     const e = {
       id: uid(),
       date: form.date,
       type
     };
     if (type === "steps") {
-      if (!Number(form.steps)) {
-        note("Enter steps");
+      const steps = Number(form.steps);
+      if (!Number.isFinite(steps) || steps <= 0 || steps > 200000) {
+        note("Enter steps from 1 to 200,000");
         return;
       }
-      e.steps = Number(form.steps);
+      e.steps = Math.round(steps);
     } else {
-      if (!Number(form.minutes) && !Number(form.miles)) {
+      const minutes = Number(form.minutes) || 0;
+      const miles = Number(form.miles) || 0;
+      if (
+        !Number.isFinite(minutes)
+        || !Number.isFinite(miles)
+        || minutes < 0
+        || minutes > 1440
+        || miles < 0
+        || miles > 500
+      ) {
+        note("Use 0–1,440 minutes and 0–500 miles");
+        return;
+      }
+      if (!minutes && !miles) {
         note("Enter minutes or miles");
         return;
       }
-      e.minutes = Number(form.minutes) || 0;
-      e.miles = Number(form.miles) || 0;
+      e.minutes = minutes;
+      e.miles = miles;
     }
-    setCardioLog([e, ...(cardioLog || [])]);
+    setCardioLog(current => [e, ...(current || [])]);
     setForm({
       date: form.date,
       minutes: "",

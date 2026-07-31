@@ -4,6 +4,7 @@ import {
   healthConnectExerciseType,
   healthConnectWorkoutPayload,
   localDateString,
+  healthSourceAppNames,
   healthSyncSummary,
   isHealthConnectWritableSession,
   mergeHealthBodyweight,
@@ -35,6 +36,21 @@ test("completed IronDesk workouts map to stable Health Connect exercise payloads
     startTime: "2026-07-29T18:00:00.000Z",
     endTime: "2026-07-29T18:45:00.000Z",
   });
+});
+
+test("Health Connect writeback preserves ISO timestamps from restored history", () => {
+  const payload = healthConnectWorkoutPayload({
+    id: "restored-workout",
+    dayId: "Restored Workout",
+    startedAt: "2026-07-29T18:00:00.000Z",
+    completedAt: "2026-07-29T18:45:00.000Z",
+    durationMin: 45,
+    entries: [],
+  });
+
+  assert.equal(payload.startTime, "2026-07-29T18:00:00.000Z");
+  assert.equal(payload.endTime, "2026-07-29T18:45:00.000Z");
+  assert.equal(payload.clientRecordVersion, Date.parse("2026-07-29T18:45:00.000Z"));
 });
 
 test("guided session types use matching Health Connect exercise categories", () => {
@@ -166,4 +182,16 @@ test("Health Connect sync reports actual records instead of empty calendar days"
     metricCount: 2,
     sourcePackages: ["com.garmin.connect"],
   });
+});
+
+test("Health Connect source packages identify Samsung and Garmin routes", () => {
+  assert.deepEqual(healthSourceAppNames([
+    {
+      sourcePackages: [
+        "com.sec.android.app.shealth",
+        "com.garmin.android.apps.connectmobile",
+      ],
+    },
+    { sourcePackages: ["com.sec.android.app.shealth"] },
+  ]), ["Samsung Health", "Garmin Connect"]);
 });

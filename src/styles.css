@@ -947,6 +947,67 @@ body {
   background: #4ade80;
 }
 
+@media (max-width: 600px) {
+  button,
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  a[href] {
+    min-height: 44px !important;
+  }
+
+  a[href] {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+.history-health-write {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 2px;
+  padding: 9px 10px;
+  border: 1px solid #2d3a34;
+  border-radius: 8px;
+  color: #82dca7;
+  background: rgb(74 222 128 / 6%);
+}
+
+.history-health-write.is-error {
+  border-color: rgb(225 29 42 / 38%);
+  color: #ff939c;
+  background: rgb(225 29 42 / 7%);
+}
+
+.history-health-write strong,
+.history-health-write small {
+  display: block;
+}
+
+.history-health-write strong {
+  font-size: 10.5px;
+}
+
+.history-health-write small {
+  margin-top: 3px;
+  color: #8f9298;
+  font-size: 9px;
+}
+
+.history-health-write button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .live-set-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1500,6 +1561,10 @@ body {
 .garmin-session-stats {
   border-left: 1px solid #2b353c;
   text-align: center;
+}
+
+.garmin-session-stats.is-duration {
+  grid-column: span 2;
 }
 
 .garmin-session-stats b {
@@ -2132,6 +2197,25 @@ body {
   white-space: nowrap;
 }
 
+.health-connect-sources {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid #29363c;
+  border-radius: 9px;
+  color: #9ba8ae;
+  background: #10171a;
+  font-size: 9.5px;
+}
+
+.health-connect-sources strong {
+  color: #d6dddf;
+  text-transform: uppercase;
+}
+
 .health-connect-actions {
   display: flex;
   gap: 8px;
@@ -2446,8 +2530,12 @@ body {
     padding: 7px;
   }
 
-  .garmin-session-row .garmin-session-stats:last-child {
+  .garmin-session-row .garmin-session-stats:last-child:not(.is-duration) {
     display: none;
+  }
+
+  .garmin-session-stats.is-duration {
+    grid-column: auto;
   }
 
   .garmin-session-main strong {
@@ -2543,6 +2631,12 @@ body {
 
   .health-connect-metrics {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .health-connect-sources {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .health-connect-actions {
@@ -2965,6 +3059,113 @@ body {
   font-size: 9px;
 }
 
+.watch-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.watch-provider-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid #303038;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #17171b, #111114);
+}
+
+.watch-provider-card.is-ready {
+  border-color: rgb(64 122 255 / 42%);
+  background: linear-gradient(145deg, rgb(36 76 168 / 15%), #111114 55%);
+}
+
+.watch-provider-card.is-planned {
+  border-color: rgb(180 180 187 / 30%);
+}
+
+.watch-provider-heading {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.watch-provider-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  font-weight: 900;
+}
+
+.watch-provider-mark.is-samsung {
+  color: #fff;
+  background: #1428a0;
+}
+
+.watch-provider-mark.is-apple {
+  color: #111;
+  background: #f3f3f4;
+}
+
+.watch-provider-heading small,
+.watch-provider-heading h3 {
+  display: block;
+  margin: 0;
+}
+
+.watch-provider-heading small {
+  color: #767681;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.55px;
+}
+
+.watch-provider-heading h3 {
+  margin-top: 3px;
+  color: #f5f5f6;
+  font: 700 16px/1.1 "Oswald", sans-serif;
+}
+
+.watch-provider-heading > b {
+  padding: 5px 7px;
+  border: 1px solid #3b3b44;
+  border-radius: 999px;
+  color: #b8bec3;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.watch-provider-card.is-ready .watch-provider-heading > b {
+  border-color: rgb(74 222 128 / 34%);
+  color: #72e69c;
+}
+
+.watch-provider-card > p {
+  margin: 13px 0 9px;
+  color: #c8c8cd;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.watch-provider-card ol {
+  margin: 0;
+  padding-left: 18px;
+  color: #8c8c95;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.watch-provider-card a {
+  display: inline-block;
+  margin-top: 11px;
+  color: #77c9ff;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .connection-guide {
   margin-bottom: 14px;
   padding: 18px;
@@ -3113,6 +3314,7 @@ body {
 
   .today-command-actions,
   .connection-status-grid,
+  .watch-provider-grid,
   .connection-guide ol {
     grid-template-columns: 1fr;
   }
