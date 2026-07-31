@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   DEFAULT_REST_TIMER_PREFS,
   filterAndSortSessions,
+  normalizeActiveWorkout,
   normalizeRestTimerPrefs,
+  normalizeSessionHistory,
   removeLastWorkoutSet,
   restDurationForEntry,
   sessionsToCsv,
@@ -77,6 +79,22 @@ test("history can isolate and search Garmin imports", () => {
       .map((item) => item.id),
     ["garmin-run"],
   );
+});
+
+test("legacy and malformed workout history is normalized without crashing", () => {
+  assert.deepEqual(normalizeSessionHistory([
+    null,
+    { id: "legacy" },
+    { id: "broken", entries: [{ ex: "Bench", sets: null }, null], prs: null },
+  ]), [
+    { id: "legacy", entries: [], prs: [] },
+    { id: "broken", entries: [{ ex: "Bench", sets: [] }], prs: [] },
+  ]);
+  assert.deepEqual(normalizeActiveWorkout({ id: "active", entries: null }), {
+    id: "active",
+    entries: [],
+  });
+  assert.equal(normalizeActiveWorkout("bad"), null);
 });
 
 test("an accidentally added workout set can be removed without mutation", () => {

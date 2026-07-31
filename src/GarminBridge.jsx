@@ -5,7 +5,8 @@ import {
   garminActivityPackName,
   garminExportSummary,
   garminWorkoutFileName,
-  isGarminExportableSession,
+  isGarminActivityExportableSession,
+  isGarminWorkoutExportableSession,
 } from "./garminExport.js";
 
 const GARMIN_CONNECT_IMPORT_URL = "https://connect.garmin.com/modern/import-data";
@@ -77,8 +78,12 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
   const [workoutName, setWorkoutName] = useState("");
   const [status, setStatus] = useState(null);
 
-  const exportable = useMemo(
-    () => (Array.isArray(sessions) ? sessions : []).filter(isGarminExportableSession),
+  const activitySessions = useMemo(
+    () => (Array.isArray(sessions) ? sessions : []).filter(isGarminActivityExportableSession),
+    [sessions],
+  );
+  const strengthSessions = useMemo(
+    () => (Array.isArray(sessions) ? sessions : []).filter(isGarminWorkoutExportableSession),
     [sessions],
   );
   const importedCount = useMemo(
@@ -87,23 +92,23 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
   );
   const visibleSessions = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return exportable.slice(0, 30);
-    return exportable
+    if (!needle) return activitySessions.slice(0, 30);
+    return activitySessions
       .filter((session) =>
         `${sessionLabel(session)} ${session?.date || ""}`.toLowerCase().includes(needle))
       .slice(0, 30);
-  }, [exportable, query]);
+  }, [activitySessions, query]);
   const selectedSessions = useMemo(
-    () => exportable.filter((session) => selectedIds.has(sessionKey(session))),
-    [exportable, selectedIds],
+    () => activitySessions.filter((session) => selectedIds.has(sessionKey(session))),
+    [activitySessions, selectedIds],
   );
   const watchSession = useMemo(
-    () => exportable.find((session) => sessionKey(session) === watchSessionId) || exportable[0] || null,
-    [exportable, watchSessionId],
+    () => strengthSessions.find((session) => sessionKey(session) === watchSessionId) || strengthSessions[0] || null,
+    [strengthSessions, watchSessionId],
   );
   const totalSets = useMemo(
-    () => exportable.reduce((total, session) => total + garminExportSummary(session).sets, 0),
-    [exportable],
+    () => activitySessions.reduce((total, session) => total + garminExportSummary(session).sets, 0),
+    [activitySessions],
   );
   const watchSummary = watchSession ? garminExportSummary(watchSession) : null;
 
@@ -184,8 +189,8 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
       <section className="garmin-bridge-metrics" aria-label="Garmin export readiness">
         <div>
           <span>READY</span>
-          <strong>{exportable.length}</strong>
-          <small>IronDesk sessions</small>
+          <strong>{activitySessions.length}</strong>
+          <small>Progress activities</small>
         </div>
         <div>
           <span>SETS</span>
@@ -283,20 +288,29 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
                     <strong>{sessionLabel(session)}</strong>
                     <small>{session.mode === "gym" ? "Gym" : "Home"} · {summary.durationMinutes} min</small>
                   </span>
-                  <span className="garmin-session-stats">
-                    <b>{summary.sets}</b>
-                    <small>sets</small>
-                  </span>
-                  <span className="garmin-session-stats">
-                    <b>{summary.reps}</b>
-                    <small>reps</small>
-                  </span>
+                  {summary.sets > 0 ? (
+                    <>
+                      <span className="garmin-session-stats">
+                        <b>{summary.sets}</b>
+                        <small>sets</small>
+                      </span>
+                      <span className="garmin-session-stats">
+                        <b>{summary.reps}</b>
+                        <small>reps</small>
+                      </span>
+                    </>
+                  ) : (
+                    <span className="garmin-session-stats is-duration">
+                      <b>{summary.durationMinutes}</b>
+                      <small>minutes</small>
+                    </span>
+                  )}
                 </label>
               );
             }) : (
               <div className="garmin-bridge-empty">
-                <strong>{exportable.length ? "No sessions match your search" : "No completed IronDesk sets yet"}</strong>
-                <span>Finish a workout in IronDesk and it will appear here automatically.</span>
+                <strong>{activitySessions.length ? "No sessions match your search" : "No completed IronDesk activities yet"}</strong>
+                <span>Finished strength, VO₂, HIIT, core, yoga, Pilates, and MMA sessions appear here automatically.</span>
               </div>
             )}
           </div>
@@ -357,7 +371,7 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
                       setStatus(null);
                     }}
                   >
-                    {exportable.slice(0, 30).map((session) => (
+                    {strengthSessions.slice(0, 30).map((session) => (
                       <option key={sessionKey(session)} value={sessionKey(session)}>
                         {session.date} · {sessionLabel(session)}
                       </option>

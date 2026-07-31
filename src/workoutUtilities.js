@@ -68,6 +68,34 @@ export function safeSessionVolume(session) {
   return workoutVolume(Array.isArray(session?.entries) ? session.entries : []);
 }
 
+function normalizeEntries(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .filter(entry => entry && typeof entry === "object")
+    .map(entry => ({
+      ...entry,
+      sets: (Array.isArray(entry.sets) ? entry.sets : [])
+        .filter(set => set && typeof set === "object"),
+    }));
+}
+
+export function normalizeSessionHistory(value) {
+  return (Array.isArray(value) ? value : [])
+    .filter(session => session && typeof session === "object")
+    .map(session => ({
+      ...session,
+      entries: normalizeEntries(session.entries),
+      prs: Array.isArray(session.prs) ? session.prs.filter(Boolean) : [],
+    }));
+}
+
+export function normalizeActiveWorkout(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    ...value,
+    entries: normalizeEntries(value.entries),
+  };
+}
+
 export function filterAndSortSessions(
   sessions,
   { query = "", mode = "all", range = "all", sort = "newest", now = new Date() } = {},

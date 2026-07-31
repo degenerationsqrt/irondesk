@@ -123,6 +123,14 @@ export function normalizeHealthSummary(summary, syncedAt = new Date().toISOStrin
   };
 }
 
+function timestampMilliseconds(value) {
+  if (value == null || value === "") return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function mergeHealthSummaries(current, incoming, syncedAt) {
   const merged = new Map();
   for (const record of Array.isArray(current) ? current : []) {
@@ -207,6 +215,28 @@ export function healthSyncSummary(days) {
   };
 }
 
+export function healthSourceAppNames(days) {
+  const names = new Set();
+  for (const day of Array.isArray(days) ? days : []) {
+    for (const value of Array.isArray(day?.sourcePackages) ? day.sourcePackages : []) {
+      const packageName = String(value || "").toLowerCase();
+      if (!packageName) continue;
+      if (packageName.includes("shealth") || packageName.includes("samsung")) {
+        names.add("Samsung Health");
+      } else if (packageName.includes("garmin")) {
+        names.add("Garmin Connect");
+      } else if (packageName.includes("fitbit")) {
+        names.add("Fitbit");
+      } else if (packageName.includes("google") && packageName.includes("fitness")) {
+        names.add("Google Fit");
+      } else {
+        names.add("Another Health Connect app");
+      }
+    }
+  }
+  return [...names];
+}
+
 export function isHealthConnectWritableSession(session) {
   return Boolean(
     session
@@ -237,14 +267,10 @@ export function healthConnectExerciseType(session) {
 export function healthConnectWorkoutPayload(session, completedAt = Date.now()) {
   if (!isHealthConnectWritableSession(session)) return null;
 
-  const fallbackEnd = Number(completedAt);
-  const endMs = Number.isFinite(Number(session.completedAt))
-    ? Number(session.completedAt)
-    : fallbackEnd;
+  const fallbackEnd = timestampMilliseconds(completedAt) ?? Date.now();
+  const endMs = timestampMilliseconds(session.completedAt) ?? fallbackEnd;
   const durationMs = Math.max(60_000, (Number(session.durationMin) || 1) * 60_000);
-  const startMs = Number.isFinite(Number(session.startedAt))
-    ? Number(session.startedAt)
-    : endMs - durationMs;
+  const startMs = timestampMilliseconds(session.startedAt) ?? endMs - durationMs;
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
 
   const entries = Array.isArray(session.entries) ? session.entries : [];
