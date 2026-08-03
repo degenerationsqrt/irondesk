@@ -18,7 +18,7 @@ test("customer navigation has exactly five primary destinations", () => {
 });
 
 test("existing workout screens map into the Train destination", () => {
-  for (const tab of ["program", "core", "hiit", "mma", "pilates", "yoga"]) {
+  for (const tab of ["program", "guide", "core", "hiit", "mma", "pilates", "yoga"]) {
     assert.equal(navigationGroupForTab(tab).key, "train");
   }
 });

@@ -3272,6 +3272,492 @@ body {
   scroll-margin-top: 18px;
 }
 
+.exercise-howto-inline {
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid rgb(59 154 225 / 45%);
+  border-radius: 7px;
+  color: #75c8ff;
+  background: rgb(59 154 225 / 9%);
+  font: 700 9px/1 "Archivo", sans-serif;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.exercise-howto-inline:hover,
+.exercise-howto-inline:focus-visible {
+  border-color: #75c8ff;
+  background: rgb(59 154 225 / 17%);
+}
+
+.exercise-guide {
+  display: grid;
+  gap: 14px;
+}
+
+.exercise-guide-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  overflow: hidden;
+  border: 1px solid #303038;
+  border-left: 4px solid #3b9ae1;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 90% 15%, rgb(59 154 225 / 18%), transparent 35%),
+    linear-gradient(145deg, #19191e, #111114);
+}
+
+.exercise-guide-hero span,
+.exercise-guide-detail-heading span,
+.exercise-guide-chatgpt > span {
+  color: #65bdf7;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.25px;
+}
+
+.exercise-guide-hero h2 {
+  margin: 5px 0 3px;
+  color: #fff;
+  font: 700 28px/1 "Oswald", sans-serif;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-hero p {
+  max-width: 510px;
+  margin: 0;
+  color: #92929c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.exercise-guide-hero button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid rgb(74 222 128 / 45%);
+  border-radius: 9px;
+  color: #72e69c;
+  background: rgb(74 222 128 / 8%);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.exercise-guide-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid #34343d;
+  border-radius: 13px;
+  background: #1b1b20;
+  box-shadow: 0 9px 28px rgb(0 0 0 / 16%);
+}
+
+.exercise-guide-search:focus-within {
+  border-color: rgb(59 154 225 / 75%);
+  box-shadow: 0 0 0 3px rgb(59 154 225 / 10%);
+}
+
+.exercise-guide-search > b {
+  color: #65bdf7;
+  font-size: 20px;
+}
+
+.exercise-guide-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #f5f5f6;
+  background: transparent;
+  font: 600 13px/1.3 "Archivo", sans-serif;
+}
+
+.exercise-guide-search input::placeholder {
+  color: #6f6f78;
+}
+
+.exercise-guide-search button {
+  border: 0;
+  color: #9a9aa3;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.exercise-guide-layout {
+  display: grid;
+  grid-template-columns: minmax(225px, 0.75fr) minmax(0, 1.65fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.exercise-guide-results,
+.exercise-guide-detail {
+  border: 1px solid #2e2e35;
+  border-radius: 15px;
+  background: #151518;
+}
+
+.exercise-guide-results {
+  position: sticky;
+  top: 12px;
+  overflow: hidden;
+}
+
+.exercise-guide-results-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 13px;
+  border-bottom: 1px solid #292930;
+  background: #1a1a1f;
+}
+
+.exercise-guide-results-heading strong {
+  color: #eeeef0;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-results-heading span {
+  color: #72727c;
+  font-size: 9px;
+}
+
+.exercise-guide-list {
+  max-height: 640px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #3d3d47 transparent;
+}
+
+.exercise-guide-list > button {
+  display: flex;
+  width: 100%;
+  min-height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #25252b;
+  color: #e8e8eb;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.exercise-guide-list > button:hover,
+.exercise-guide-list > button:focus-visible,
+.exercise-guide-list > button.is-active {
+  background: rgb(59 154 225 / 10%);
+  box-shadow: inset 3px 0 #3b9ae1;
+}
+
+.exercise-guide-list > button span {
+  min-width: 0;
+}
+
+.exercise-guide-list > button strong,
+.exercise-guide-list > button small {
+  display: block;
+}
+
+.exercise-guide-list > button strong {
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exercise-guide-list > button small {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #777781;
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exercise-guide-list > button > b {
+  padding: 4px 6px;
+  border-radius: 999px;
+  color: #77e59d;
+  background: rgb(74 222 128 / 10%);
+  font-size: 7.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-list > button > i {
+  color: #555560;
+  font-size: 19px;
+  font-style: normal;
+}
+
+.exercise-guide-empty {
+  display: grid;
+  gap: 5px;
+  padding: 24px 15px;
+  text-align: center;
+}
+
+.exercise-guide-empty strong {
+  color: #d8d8dc;
+  font-size: 12px;
+}
+
+.exercise-guide-empty span {
+  color: #777781;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.exercise-guide-detail {
+  min-width: 0;
+  padding: 19px;
+}
+
+.exercise-guide-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.exercise-guide-detail-heading h3 {
+  margin: 4px 0 0;
+  color: #fff;
+  font: 700 23px/1.1 "Oswald", sans-serif;
+  text-transform: uppercase;
+}
+
+.exercise-guide-detail-heading > b {
+  padding: 6px 8px;
+  border: 1px solid rgb(74 222 128 / 28%);
+  border-radius: 7px;
+  color: #74e39b;
+  background: rgb(74 222 128 / 7%);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.exercise-guide-facts > span {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #2c2c33;
+  border-radius: 10px;
+  background: #1b1b20;
+}
+
+.exercise-guide-facts small,
+.exercise-guide-facts strong {
+  display: block;
+}
+
+.exercise-guide-facts small {
+  color: #6f6f78;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-facts strong {
+  margin-top: 5px;
+  color: #d6d6da;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.exercise-guide-section {
+  margin-top: 17px;
+}
+
+.exercise-guide-section h4,
+.exercise-guide-chatgpt h4 {
+  margin: 0 0 10px;
+  color: #f0f0f2;
+  font: 700 13px/1.1 "Oswald", sans-serif;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.exercise-guide-section ol,
+.exercise-guide-section ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.exercise-guide-section ol li {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid #292930;
+  border-radius: 9px;
+  color: #bfc0c6;
+  background: #1a1a1f;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.exercise-guide-section ol li b {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 7px;
+  color: #fff;
+  background: #267fb8;
+  font-size: 9px;
+}
+
+.exercise-guide-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.exercise-guide-columns .exercise-guide-section {
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.exercise-guide-columns .is-cues {
+  border: 1px solid rgb(74 222 128 / 22%);
+  background: rgb(74 222 128 / 5%);
+}
+
+.exercise-guide-columns .is-mistakes {
+  border: 1px solid rgb(225 29 42 / 22%);
+  background: rgb(225 29 42 / 5%);
+}
+
+.exercise-guide-section ul li {
+  position: relative;
+  padding-left: 13px;
+  color: #a5a5ad;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.exercise-guide-section ul li::before {
+  position: absolute;
+  left: 0;
+  color: #65bdf7;
+  content: "•";
+}
+
+.exercise-guide-chatgpt {
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid rgb(101 189 247 / 28%);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 95% 0%, rgb(101 189 247 / 12%), transparent 36%),
+    #19191e;
+}
+
+.exercise-guide-chatgpt h4 {
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.exercise-guide-chatgpt p {
+  margin: 0 0 10px;
+  color: #85858e;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.exercise-guide-chatgpt textarea {
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid #34343d;
+  border-radius: 9px;
+  outline: 0;
+  padding: 10px;
+  color: #eeeeef;
+  background: #111114;
+  font: 500 10.5px/1.45 "Archivo", sans-serif;
+}
+
+.exercise-guide-chatgpt textarea:focus {
+  border-color: #65bdf7;
+}
+
+.exercise-guide-chatgpt > div {
+  display: grid;
+  grid-template-columns: 0.7fr 1.3fr;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.exercise-guide-chatgpt button,
+.exercise-guide-chatgpt a {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+  box-sizing: border-box;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.exercise-guide-chatgpt button {
+  border: 1px solid #3c3c45;
+  color: #c8c8ce;
+  background: #222228;
+}
+
+.exercise-guide-chatgpt a {
+  border: 1px solid #3b9ae1;
+  color: #fff;
+  background: #267fb8;
+}
+
+.exercise-guide-chatgpt > small {
+  display: block;
+  margin-top: 8px;
+  color: #76df9b;
+  font-size: 9px;
+}
+
+.exercise-guide-safety {
+  margin: 13px 0 0;
+  color: #797982;
+  font-size: 8.5px;
+  line-height: 1.45;
+}
+
 @media (max-width: 600px) {
   .navigation-shell {
     margin-top: 10px;
@@ -3327,5 +3813,52 @@ body {
 
   .connection-center-device {
     align-self: flex-start;
+  }
+
+  .exercise-guide-hero {
+    padding: 17px 14px;
+    flex-direction: column;
+  }
+
+  .exercise-guide-hero h2 {
+    font-size: 24px;
+  }
+
+  .exercise-guide-hero button {
+    width: 100%;
+  }
+
+  .exercise-guide-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .exercise-guide-results {
+    position: static;
+  }
+
+  .exercise-guide-list {
+    max-height: 280px;
+  }
+
+  .exercise-guide-detail {
+    padding: 15px 13px;
+  }
+
+  .exercise-guide-detail-heading,
+  .exercise-guide-facts,
+  .exercise-guide-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .exercise-guide-detail-heading {
+    display: grid;
+  }
+
+  .exercise-guide-detail-heading > b {
+    justify-self: start;
+  }
+
+  .exercise-guide-chatgpt > div {
+    grid-template-columns: 1fr;
   }
 }
