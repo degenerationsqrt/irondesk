@@ -42,6 +42,7 @@ import {
 } from "./cloudSync.js";
 import { HealthConnectPanel } from "./HealthConnectPanel.jsx";
 import { AppUpdateBanner } from "./AppUpdateBanner.jsx";
+import { ExerciseGuide } from "./ExerciseGuide.jsx";
 import { PrimaryNavigation } from "./PrimaryNavigation.jsx";
 import {
   HEALTH_CONNECT_AUTO_SYNC_KEY,
@@ -704,6 +705,48 @@ const COMPOUNDS = {
   ohp: ["Overhead Press", "Push Press", "Standing Military Press"],
   deadlift: ["Deadlift", "Barbell Row", "Romanian Deadlift"]
 };
+function collectExerciseGuideItems(sessions, active) {
+  const items = [];
+  Object.entries(LIB).forEach(([category, movements]) => {
+    movements.forEach((movement) => items.push({
+      name: movement.n,
+      category,
+      equipment: movement.eq,
+    }));
+  });
+  Object.entries(COMPOUNDS).forEach(([lift, movements]) => {
+    const categories = {
+      bench: "Chest",
+      squat: "Legs",
+      ohp: "Shoulders",
+      deadlift: "Posterior Chain",
+    };
+    movements.forEach((name) => items.push({
+      name,
+      category: categories[lift],
+      equipment: "Barbell",
+    }));
+  });
+  Object.values(DISCIPLINES).forEach((discipline) => {
+    Object.values(discipline.lib).flat().forEach((movement) => items.push({
+      name: movement.n,
+      category: discipline.name,
+      equipment: discipline.name === "MMA" ? "Training space or combat equipment" : "Mat or clear floor",
+      cue: movement.cue,
+    }));
+  });
+  (Array.isArray(sessions) ? sessions : []).forEach((session) => {
+    (Array.isArray(session?.entries) ? session.entries : []).forEach((entry) => items.push({
+      name: entry?.ex || entry?.name,
+      category: session?.sessionType ? "Guided training" : "Workout history",
+    }));
+  });
+  (Array.isArray(active?.entries) ? active.entries : []).forEach((entry) => items.push({
+    name: entry?.ex || entry?.name,
+    category: "Current workout",
+  }));
+  return items;
+}
 function pick(arr, n) {
   return arr[(n % arr.length + arr.length) % arr.length];
 }
@@ -1926,6 +1969,10 @@ export default function IronDesk() {
       failedFiles
     };
   };
+  const exerciseGuideItems = collectExerciseGuideItems(sessions, active);
+  const activeExerciseNames = (Array.isArray(active?.entries) ? active.entries : [])
+    .map((entry) => entry?.ex || entry?.name)
+    .filter(Boolean);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -2064,6 +2111,11 @@ export default function IronDesk() {
     setGoal,
     styleOverride,
     onStartWorkout: startProgramWorkout
+  }), tab === "guide" && /*#__PURE__*/React.createElement(ExerciseGuide, {
+    items: exerciseGuideItems,
+    activeExerciseNames,
+    note,
+    onReturnToWorkout: active ? () => setTab("today") : null
   }), tab === "core" && /*#__PURE__*/React.createElement(CoreTab, {
     mode,
     note,
@@ -2297,6 +2349,12 @@ function Today({
   );
   const selectDay = nextDayIndex => {
     setProgress(current => selectWorkoutDay(current, nextDayIndex, week.length));
+  };
+  const openExerciseGuide = exerciseName => {
+    try {
+      sessionStorage.setItem("irondesk:exercise-guide-query", exerciseName);
+    } catch {}
+    setTab("guide");
   };
   const timerEndAt = Number(active?.restTimerEndAt) || 0;
   const timer = timerEndAt > 0 ? Math.max(0, Math.ceil((timerEndAt - timerNow) / 1000)) : 0;
@@ -2991,11 +3049,19 @@ function Today({
       color: C.gold
     }, "GLUTES")), /*#__PURE__*/React.createElement("span", {
       style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
         fontSize: 12,
         color: C.gold,
         fontWeight: 700
       }
-    }, isCardio ? `${en.targetReps} min` : `${en.sets.length}×${en.targetReps}`)), (en.note || en.target) && /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "exercise-howto-inline",
+      onClick: () => openExerciseGuide(en.ex),
+      "aria-label": `How to perform ${en.ex}`
+    }, "How to"), isCardio ? `${en.targetReps} min` : `${en.sets.length}×${en.targetReps}`)), (en.note || en.target) && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
         color: C.dim,

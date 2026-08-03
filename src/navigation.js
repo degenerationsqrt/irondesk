@@ -11,6 +11,7 @@ export const PRIMARY_NAVIGATION = [
     defaultTab: "program",
     tabs: [
       ["program", "Program"],
+      ["guide", "Exercise Guide"],
       ["core", "Core"],
       ["hiit", "HIIT"],
       ["mma", "MMA"],

@@ -180,6 +180,26 @@ export function isGarminExportableSession(session) {
   return isGarminActivityExportableSession(session);
 }
 
+function garminSessionTime(session) {
+  for (const value of [session?.completedAt, session?.startedAt]) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return numeric;
+    const parsed = Date.parse(String(value || ""));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+export function sortGarminSessionsNewestFirst(sessions) {
+  return (Array.isArray(sessions) ? sessions : [])
+    .map((session, index) => ({ session, index }))
+    .sort((a, b) =>
+      String(b.session?.date || "").localeCompare(String(a.session?.date || ""))
+      || garminSessionTime(b.session) - garminSessionTime(a.session)
+      || a.index - b.index)
+    .map(({ session }) => session);
+}
+
 export function createGarminActivityFit(session) {
   if (!isGarminActivityExportableSession(session)) {
     throw new Error("Choose a completed IronDesk activity from Progress History.");

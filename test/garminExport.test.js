@@ -10,6 +10,7 @@ import {
   isGarminActivityExportableSession,
   isGarminExportableSession,
   isGarminWorkoutExportableSession,
+  sortGarminSessionsNewestFirst,
 } from "../src/garminExport.js";
 import { parseGarminFit } from "../src/garminImport.js";
 
@@ -61,6 +62,35 @@ test("completed IronDesk activities are eligible but Garmin imports are not", ()
   assert.equal(isGarminExportableSession({ ...session, source: "garmin" }), false);
   assert.equal(isGarminActivityExportableSession({ ...session, entries: [] }), true);
   assert.equal(isGarminWorkoutExportableSession({ ...session, entries: [] }), false);
+});
+
+test("Garmin Bridge sessions roll forward with the newest workout first", () => {
+  const storedOutOfOrder = [
+    { id: "jul-29", date: "2026-07-29", startedAt: "2026-07-29T17:00:00Z" },
+    { id: "jul-28", date: "2026-07-28", startedAt: "2026-07-28T17:00:00Z" },
+    { id: "jul-30-late", date: "2026-07-30", startedAt: "2026-07-30T19:00:00Z" },
+    { id: "jul-30-early", date: "2026-07-30", startedAt: "2026-07-30T16:00:00Z" },
+  ];
+
+  assert.deepEqual(
+    sortGarminSessionsNewestFirst(storedOutOfOrder).map((item) => item.id),
+    ["jul-30-late", "jul-30-early", "jul-29", "jul-28"],
+  );
+  assert.deepEqual(storedOutOfOrder.map((item) => item.id), [
+    "jul-29",
+    "jul-28",
+    "jul-30-late",
+    "jul-30-early",
+  ]);
+
+  const rollingWindow = Array.from({ length: 31 }, (_, index) => ({
+    id: `jul-${index + 1}`,
+    date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+  }));
+  const newestThirty = sortGarminSessionsNewestFirst(rollingWindow).slice(0, 30);
+  assert.equal(newestThirty[0].id, "jul-31");
+  assert.equal(newestThirty.at(-1).id, "jul-2");
+  assert.equal(newestThirty.some((item) => item.id === "jul-1"), false);
 });
 
 test("guided Progress History sessions create Garmin activity FIT files", () => {

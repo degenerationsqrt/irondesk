@@ -7,6 +7,7 @@ import {
   garminWorkoutFileName,
   isGarminActivityExportableSession,
   isGarminWorkoutExportableSession,
+  sortGarminSessionsNewestFirst,
 } from "./garminExport.js";
 
 const GARMIN_CONNECT_IMPORT_URL = "https://connect.garmin.com/modern/import-data";
@@ -79,11 +80,15 @@ export function GarminBridge({ sessions, note, onOpenImport }) {
   const [status, setStatus] = useState(null);
 
   const activitySessions = useMemo(
-    () => (Array.isArray(sessions) ? sessions : []).filter(isGarminActivityExportableSession),
+    () => sortGarminSessionsNewestFirst(
+      (Array.isArray(sessions) ? sessions : []).filter(isGarminActivityExportableSession),
+    ),
     [sessions],
   );
   const strengthSessions = useMemo(
-    () => (Array.isArray(sessions) ? sessions : []).filter(isGarminWorkoutExportableSession),
+    () => sortGarminSessionsNewestFirst(
+      (Array.isArray(sessions) ? sessions : []).filter(isGarminWorkoutExportableSession),
+    ),
     [sessions],
   );
   const importedCount = useMemo(
