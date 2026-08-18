@@ -147,7 +147,11 @@ window.storage = {
 
 /* ============ MATH ============ */
 const today = () => localDateKey();
-const uid = () => Math.random().toString(36).slice(2, 9);
+const uid = () => {
+  const arr = new Uint8Array(7);
+  window.crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => "0123456789abcdefghijklmnopqrstuvwxyz"[b % 36]).join("");
+};
 function downloadFile(contents, filename, type) {
   const blob = new Blob([contents], {
     type
@@ -965,7 +969,11 @@ var FB = function () {
       });
     },
     createGroup: function (uid, name, groupName) {
-      var code = Math.random().toString(36).slice(2, 8).toUpperCase();
+      var arr = new Uint8Array(6);
+      window.crypto.getRandomValues(arr);
+      var code = Array.from(arr).map(function (b) {
+        return "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[b % 36];
+      }).join("");
       var ref = db().collection("groups").doc();
       return ref.set({
         name: groupName,
