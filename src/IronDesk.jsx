@@ -3885,19 +3885,22 @@ function Trends({
   const liftName = LIFTS.find(l => l.key === sel)?.name;
   const e1rmData = useMemo(() => {
     const pts = [];
-    [...sessions].reverse().forEach(s => (Array.isArray(s?.entries) ? s.entries : []).forEach(en => {
-      if (en.lift === sel || en.ex === liftName) {
-        const estimates = (Array.isArray(en?.sets) ? en.sets : [])
-          .map(st => epley(st.w, st.r))
-          .filter(Number.isFinite);
-        if (estimates.length) {
-          pts.push({
-            date: s.date,
-            e1rm: Math.round(Math.max(...estimates))
-          });
+    for (let i = sessions.length - 1; i >= 0; i--) {
+      const s = sessions[i];
+      (Array.isArray(s?.entries) ? s.entries : []).forEach(en => {
+        if (en.lift === sel || en.ex === liftName) {
+          const estimates = (Array.isArray(en?.sets) ? en.sets : [])
+            .map(st => epley(st.w, st.r))
+            .filter(Number.isFinite);
+          if (estimates.length) {
+            pts.push({
+              date: s.date,
+              e1rm: Math.round(Math.max(...estimates))
+            });
+          }
         }
-      }
-    }));
+      });
+    }
     return pts;
   }, [sessions, sel, liftName]);
   const volData = useMemo(() => {
