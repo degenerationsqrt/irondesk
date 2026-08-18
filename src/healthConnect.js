@@ -164,11 +164,13 @@ export function mergeHealthSummaries(current, incoming, syncedAt) {
 export function mergeHealthBodyweight(current, healthDays) {
   const byDate = new Map();
   for (const entry of Array.isArray(current) ? current : []) {
-    if (entry?.date) byDate.set(String(entry.date), entry);
+    const date = entry?.date;
+    if (date) byDate.set(typeof date === "string" ? date : String(date), entry);
   }
 
   for (const day of Array.isArray(healthDays) ? healthDays : []) {
-    const date = String(day?.date || "");
+    const rawDate = day?.date;
+    const date = typeof rawDate === "string" ? rawDate : String(rawDate || "");
     const weight = finiteOrNull(day?.weightLb);
     if (!date || weight == null || weight <= 0) continue;
     const existing = byDate.get(date);
@@ -186,7 +188,7 @@ export function mergeHealthBodyweight(current, healthDays) {
   }
 
   return [...byDate.values()].sort((left, right) =>
-    String(right?.date || "").localeCompare(String(left?.date || "")));
+    (right.date < left.date ? -1 : right.date > left.date ? 1 : 0));
 }
 
 export function healthSyncSummary(days) {
