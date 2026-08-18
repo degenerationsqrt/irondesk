@@ -178,7 +178,13 @@ function solveLoadout(targetTotal, bar, pairs) {
       combo: [...combo]
     };
     if (i >= denoms.length || sum > perSide + maxD) return;
-    for (let k = denoms[i].n; k >= 0; k--) go(i + 1, sum + k * denoms[i].w, [...combo, ...Array(k).fill(denoms[i].w)]);
+    const w = denoms[i].w;
+    const n = denoms[i].n;
+    for (let j = 0; j < n; j++) combo.push(w);
+    for (let k = n; k >= 0; k--) {
+      go(i + 1, sum + k * w, combo);
+      if (k > 0) combo.pop();
+    }
   };
   go(0, 0, []);
   const counts = {};
