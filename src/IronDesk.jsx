@@ -147,7 +147,7 @@ window.storage = {
 
 /* ============ MATH ============ */
 const today = () => localDateKey();
-const uid = () => Math.random().toString(36).slice(2, 9);
+const uid = () => crypto.randomUUID();
 function downloadFile(contents, filename, type) {
   const blob = new Blob([contents], {
     type
