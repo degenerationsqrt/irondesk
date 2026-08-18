@@ -321,7 +321,7 @@ export function exerciseGuideFor(item) {
   const normalized = name.toLowerCase();
   const rule = GUIDE_RULES.find((candidate) => candidate.match.test(normalized)) || DEFAULT_GUIDE;
   const sourceCue = String(source.cue || "").trim();
-  return {
+  const guide = {
     name: name || "Exercise",
     key: (name || "Exercise").toLowerCase(),
     category: source.category || rule.category,
@@ -331,6 +331,16 @@ export function exerciseGuideFor(item) {
     cues: uniqueStrings([sourceCue, ...rule.cues]),
     mistakes: [...rule.mistakes],
   };
+  guide.searchString = [
+    guide.name,
+    guide.category,
+    guide.equipment,
+    ...(guide.muscles || []),
+    ...(guide.steps || []),
+    ...(guide.cues || []),
+    ...(guide.mistakes || []),
+  ].join(" ").toLowerCase();
+  return guide;
 }
 
 export function createExerciseGuideCatalog(items) {
@@ -358,12 +368,14 @@ export function searchExerciseGuides(catalog, query) {
   const terms = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return Array.isArray(catalog) ? catalog : [];
   return (Array.isArray(catalog) ? catalog : []).filter((guide) => {
-    const haystack = [
+    const haystack = guide.searchString || [
       guide.name,
       guide.category,
       guide.equipment,
       ...(guide.muscles || []),
+      ...(guide.steps || []),
       ...(guide.cues || []),
+      ...(guide.mistakes || []),
     ].join(" ").toLowerCase();
     return terms.every((term) => haystack.includes(term));
   });
