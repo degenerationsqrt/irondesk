@@ -298,3 +298,19 @@ test("a stable cloud device id is created once per browser", () => {
   assert.equal(getOrCreateCloudDeviceId(storage, cryptoSource), "device-id");
   assert.equal(getOrCreateCloudDeviceId(storage, { randomUUID: () => "other" }), "device-id");
 });
+
+test("cloud device id uses getRandomValues fallback if randomUUID is missing", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const cryptoSource = {
+    getRandomValues: (array) => {
+      for (let i = 0; i < array.length; i++) array[i] = 1; // 010101...
+    }
+  };
+  const id = getOrCreateCloudDeviceId(storage, cryptoSource);
+  assert.ok(id.startsWith("device-"));
+  assert.ok(id.endsWith("-01010101010101010101010101010101"));
+});
