@@ -1133,6 +1133,16 @@ class Boundary extends React.Component {
     return this.props.children;
   }
 }
+let stateSaveTimeout = null;
+const scheduleStateSave = (state) => {
+  if (stateSaveTimeout) clearTimeout(stateSaveTimeout);
+  stateSaveTimeout = setTimeout(() => {
+    try {
+      window.storage.set("irondesk:v3", JSON.stringify(state));
+    } catch (e) {}
+  }, 1000);
+};
+
 export default function IronDesk() {
   const [tab, setTab] = useState("today");
   const [mode, setMode] = useState("home");
@@ -1400,33 +1410,31 @@ export default function IronDesk() {
       window.removeEventListener("focus", runAutomaticHealthSync);
     };
   }, [healthAutoSync, loaded, runAutomaticHealthSync]);
-  const persist = async () => {
-    try {
-      await window.storage.set("irondesk:v3", JSON.stringify({
-        maxes,
-        homePlates,
-        gymPlates,
-        bar,
-        mode,
-        modeUpdatedAt,
-        sessions,
-        deletedRecords,
-        bwLog,
-        cardioLog,
-        healthLog,
-        healthLogClearedAt,
-        active,
-        activeClearedAt,
-        progress,
-        gender,
-        goal,
-        styleOverride,
-        customDays,
-        onboarded,
-        macros,
-        restTimerPrefs
-      }));
-    } catch (e) {}
+  const persist = () => {
+    scheduleStateSave({
+      maxes,
+      homePlates,
+      gymPlates,
+      bar,
+      mode,
+      modeUpdatedAt,
+      sessions,
+      deletedRecords,
+      bwLog,
+      cardioLog,
+      healthLog,
+      healthLogClearedAt,
+      active,
+      activeClearedAt,
+      progress,
+      gender,
+      goal,
+      styleOverride,
+      customDays,
+      onboarded,
+      macros,
+      restTimerPrefs
+    });
   };
   useEffect(() => {
     if (loaded) persist(); /* eslint-disable-next-line */
@@ -1659,9 +1667,7 @@ export default function IronDesk() {
       deletedRecords: nextDeletedRecords,
     });
     personalStateRef.current = nextState;
-    try {
-      window.storage.set("irondesk:v3", JSON.stringify(nextState));
-    } catch {}
+    scheduleStateSave(nextState);
     setDeletedRecords(nextState.deletedRecords);
     if (field === "sessions") setSessions(nextRecords);
     if (field === "bwLog") setBwLog(nextRecords);
@@ -1741,9 +1747,7 @@ export default function IronDesk() {
       activeClearedAt: clearedAt
     });
     personalStateRef.current = clearedState;
-    try {
-      window.storage.set("irondesk:v3", JSON.stringify(clearedState));
-    } catch {}
+    scheduleStateSave(clearedState);
     setActive(null);
     setActiveClearedAt(current => Math.max(current, clearedAt));
   }, []);
