@@ -1072,9 +1072,15 @@ function computeStats(sessions, maxes) {
     if (!best[k]) best[k] = maxes[k] || 0;
   });
   var cut = localDateKey(new Date(Date.now() - 7 * 864e5));
-  var wk = ironDeskSessions.filter(function (s) {
-    return String(s?.date || "") >= cut;
-  });
+  var wk = [];
+  for (var i = 0; i < ironDeskSessions.length; i++) {
+    var s = ironDeskSessions[i];
+    if ((s?.date || "") >= cut) {
+      wk.push(s);
+    } else if (s?.date) {
+      break;
+    }
+  }
   return {
     bench: best.bench,
     squat: best.squat,
