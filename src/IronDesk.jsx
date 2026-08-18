@@ -203,6 +203,7 @@ const LIFTS = [{
   key: "deadlift",
   name: "Deadlift"
 }];
+const LIFT_NAMES = Object.fromEntries(LIFTS.map(l => [l.key, l.name]));
 const LIFT_COLORS = {
   bench: "#e11d2a",
   squat: "#d9a441",
@@ -3882,7 +3883,7 @@ function Trends({
     () => mergeCardioTrendRecords(cardioLog, sessions),
     [cardioLog, sessions],
   );
-  const liftName = LIFTS.find(l => l.key === sel)?.name;
+  const liftName = LIFT_NAMES[sel];
   const e1rmData = useMemo(() => {
     const pts = [];
     [...sessions].reverse().forEach(s => (Array.isArray(s?.entries) ? s.entries : []).forEach(en => {
