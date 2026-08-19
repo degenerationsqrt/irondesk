@@ -60,6 +60,7 @@ import {
   healthTrendSeries,
   latestHealthValue,
   mergeCardioTrendRecords,
+  strengthE1rmTrend,
   weekStartKey,
 } from "./trendData.js";
 import {
@@ -73,6 +74,11 @@ import {
   selectWorkoutDay,
 } from "./workoutSchedule.js";
 import { normalizeGender, normalizeGoal, normalizeWorkoutProgress } from "./profileState.js";
+import { computeCrewStats } from "./crewStats.js";
+import { buildCrewInviteToken, parseCrewInviteToken } from "./crewInvites.js";
+import { solveLoadout } from "./loadout.js";
+import { createInviteCode, createRecordId } from "./secureIds.js";
+import { createBufferedStatePersistence } from "./statePersistence.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -147,7 +153,7 @@ window.storage = {
 
 /* ============ MATH ============ */
 const today = () => localDateKey();
-const uid = () => Math.random().toString(36).slice(2, 9);
+const uid = () => createRecordId();
 function downloadFile(contents, filename, type) {
   const blob = new Blob([contents], {
     type
@@ -161,34 +167,6 @@ function downloadFile(contents, filename, type) {
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function solveLoadout(targetTotal, bar, pairs) {
-  const perSide = Math.max(0, (targetTotal - bar) / 2);
-  const denoms = pairs.filter(p => p.weight > 0 && Math.floor(p.count / 2) > 0).map(p => ({
-    w: p.weight,
-    n: Math.floor(p.count / 2)
-  })).sort((a, b) => b.w - a.w);
-  let best = {
-    sum: 0,
-    combo: []
-  };
-  const maxD = denoms.reduce((a, d) => Math.max(a, d.w), 0);
-  const go = (i, sum, combo) => {
-    if (Math.abs(sum - perSide) < Math.abs(best.sum - perSide)) best = {
-      sum,
-      combo: [...combo]
-    };
-    if (i >= denoms.length || sum > perSide + maxD) return;
-    for (let k = denoms[i].n; k >= 0; k--) go(i + 1, sum + k * denoms[i].w, [...combo, ...Array(k).fill(denoms[i].w)]);
-  };
-  go(0, 0, []);
-  const counts = {};
-  best.combo.forEach(w => counts[w] = (counts[w] || 0) + 1);
-  return {
-    total: bar + best.sum * 2,
-    counts
-  };
-}
-
 /* ============ DATA ============ */
 const LIFTS = [{
   key: "bench",
@@ -965,7 +943,12 @@ var FB = function () {
       });
     },
     createGroup: function (uid, name, groupName) {
-      var code = Math.random().toString(36).slice(2, 8).toUpperCase();
+      var code;
+      try {
+        code = createInviteCode();
+      } catch (error) {
+        return Promise.reject(error);
+      }
       var ref = db().collection("groups").doc();
       return ref.set({
         name: groupName,
@@ -980,26 +963,33 @@ var FB = function () {
       }).then(function () {
         return {
           groupId: ref.id,
-          code: code,
+          code: buildCrewInviteToken(ref.id, code),
           name: groupName
         };
       });
     },
-    joinGroup: function (uid, name, code) {
-      return db().collection("groups").where("code", "==", code.toUpperCase()).limit(1).get().then(function (qs) {
-        if (qs.empty) throw new Error("No group with that code");
-        var doc = qs.docs[0];
-        return doc.ref.collection("members").doc(uid).set({
+    joinGroup: function (uid, name, token) {
+      var invite;
+      try {
+        invite = parseCrewInviteToken(token);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      var groupRef = db().collection("groups").doc(invite.groupId);
+      return groupRef.collection("members").doc(uid).set({
           name: name,
+          inviteCode: invite.code,
           updatedAt: Date.now()
         }).then(function () {
+          return groupRef.get();
+        }).then(function (doc) {
+          if (!doc.exists) throw new Error("This crew no longer exists.");
           return {
             groupId: doc.id,
-            code: code.toUpperCase(),
+            code: invite.token,
             name: doc.data().name
           };
         });
-      });
     },
     watchMembers: function (groupId, cb) {
       return db().collection("groups").doc(groupId).collection("members").onSnapshot(function (qs) {
@@ -1048,44 +1038,6 @@ var FB = function () {
     }
   };
 }();
-function computeStats(sessions, maxes) {
-  var ironDeskSessions = (Array.isArray(sessions) ? sessions : []).filter(function (session) {
-    return session?.source !== "garmin";
-  });
-  var best = {
-    bench: 0,
-    squat: 0,
-    ohp: 0,
-    deadlift: 0
-  };
-  ironDeskSessions.forEach(function (s) {
-    (Array.isArray(s?.entries) ? s.entries : []).forEach(function (en) {
-      if (en?.lift && Object.prototype.hasOwnProperty.call(best, en.lift)) (Array.isArray(en?.sets) ? en.sets : []).forEach(function (st) {
-        var estimate = estimatedMaxForSet(st.w, st.r);
-        if (estimate == null) return;
-        var e = Math.round(estimate);
-        if (e > best[en.lift]) best[en.lift] = e;
-      });
-    });
-  });
-  ["bench", "squat", "ohp", "deadlift"].forEach(function (k) {
-    if (!best[k]) best[k] = maxes[k] || 0;
-  });
-  var cut = localDateKey(new Date(Date.now() - 7 * 864e5));
-  var wk = ironDeskSessions.filter(function (s) {
-    return String(s?.date || "") >= cut;
-  });
-  return {
-    bench: best.bench,
-    squat: best.squat,
-    ohp: best.ohp,
-    deadlift: best.deadlift,
-    weekVolume: wk.reduce(function (a, s) {
-      return a + safeSessionVolume(s);
-    }, 0),
-    weekSessions: wk.length
-  };
-}
 const CREW_KEY = "irondesk:crew";
 class Boundary extends React.Component {
   constructor(p) {
@@ -1245,6 +1197,12 @@ export default function IronDesk() {
   }), [maxes, homePlates, gymPlates, bar, mode, modeUpdatedAt, sessions, deletedRecords, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs]);
   const personalStateRef = useRef(personalState);
   personalStateRef.current = personalState;
+  const statePersistenceRef = useRef(null);
+  if (!statePersistenceRef.current) {
+    statePersistenceRef.current = createBufferedStatePersistence({
+      write: state => window.storage.set("irondesk:v3", JSON.stringify(state))
+    });
+  }
   const applyHealthSync = React.useCallback(result => {
     const days = Array.isArray(result?.days) ? result.days : [];
     const syncedAt = result?.syncedAt || new Date().toISOString();
@@ -1400,37 +1358,35 @@ export default function IronDesk() {
       window.removeEventListener("focus", runAutomaticHealthSync);
     };
   }, [healthAutoSync, loaded, runAutomaticHealthSync]);
-  const persist = async () => {
-    try {
-      await window.storage.set("irondesk:v3", JSON.stringify({
-        maxes,
-        homePlates,
-        gymPlates,
-        bar,
-        mode,
-        modeUpdatedAt,
-        sessions,
-        deletedRecords,
-        bwLog,
-        cardioLog,
-        healthLog,
-        healthLogClearedAt,
-        active,
-        activeClearedAt,
-        progress,
-        gender,
-        goal,
-        styleOverride,
-        customDays,
-        onboarded,
-        macros,
-        restTimerPrefs
-      }));
-    } catch (e) {}
-  };
   useEffect(() => {
-    if (loaded) persist(); /* eslint-disable-next-line */
-  }, [maxes, homePlates, gymPlates, bar, mode, modeUpdatedAt, sessions, deletedRecords, bwLog, cardioLog, healthLog, healthLogClearedAt, active, activeClearedAt, progress, gender, goal, styleOverride, customDays, onboarded, macros, restTimerPrefs, loaded]);
+    if (loaded) statePersistenceRef.current.schedule(personalState);
+  }, [personalState, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return undefined;
+    const persistence = statePersistenceRef.current;
+    const flush = () => persistence.flush().catch(() => undefined);
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    let disposed = false;
+    let appStateHandle = null;
+    Promise.resolve(App.addListener("appStateChange", state => {
+      if (!state?.isActive) flush();
+    })).then(handle => {
+      if (disposed) handle?.remove();
+      else appStateHandle = handle;
+    }).catch(() => {});
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      disposed = true;
+      appStateHandle?.remove();
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      flush();
+    };
+  }, [loaded]);
 
   useEffect(() => FB.onAuth(user => {
     setCloudUser(user || null);
@@ -1628,7 +1584,7 @@ export default function IronDesk() {
     if (c.uid && c.groupId && sessions[0] && sessions[0].id !== lastPushed.current) {
       lastPushed.current = sessions[0].id;
       FB.pushPRs(c.groupId, c.uid, c.name, sessions[0].prs || []).catch(function () {});
-      FB.syncStats(c.groupId, c.uid, computeStats(sessions, maxes)).catch(function () {});
+      FB.syncStats(c.groupId, c.uid, computeCrewStats(sessions, maxes)).catch(function () {});
     }
     /* eslint-disable-next-line */
   }, [sessions, loaded]);
@@ -1659,9 +1615,7 @@ export default function IronDesk() {
       deletedRecords: nextDeletedRecords,
     });
     personalStateRef.current = nextState;
-    try {
-      window.storage.set("irondesk:v3", JSON.stringify(nextState));
-    } catch {}
+    statePersistenceRef.current.saveNow(nextState).catch(() => undefined);
     setDeletedRecords(nextState.deletedRecords);
     if (field === "sessions") setSessions(nextRecords);
     if (field === "bwLog") setBwLog(nextRecords);
@@ -1706,16 +1660,27 @@ export default function IronDesk() {
       },
     } : session;
     const sessionKey = recordTombstoneKey("sessions", savedSession);
-    setDeletedRecords(current => {
-      if (!current?.sessions?.[sessionKey]) return current;
-      const nextSessions = { ...current.sessions };
-      delete nextSessions[sessionKey];
-      return { ...current, sessions: nextSessions };
-    });
-    setSessions(current => [
+    const currentState = personalStateRef.current;
+    const nextSessionTombstones = { ...(currentState.deletedRecords?.sessions || {}) };
+    delete nextSessionTombstones[sessionKey];
+    const nextDeletedRecords = {
+      ...(currentState.deletedRecords || {}),
+      sessions: nextSessionTombstones,
+    };
+    const nextSessions = [
       savedSession,
-      ...current.filter(item => recordTombstoneKey("sessions", item) !== sessionKey),
-    ]);
+      ...(Array.isArray(currentState.sessions) ? currentState.sessions : [])
+        .filter(item => recordTombstoneKey("sessions", item) !== sessionKey),
+    ];
+    const nextState = buildPersonalState({
+      ...currentState,
+      sessions: nextSessions,
+      deletedRecords: nextDeletedRecords,
+    });
+    personalStateRef.current = nextState;
+    statePersistenceRef.current.saveNow(nextState).catch(() => undefined);
+    setDeletedRecords(nextState.deletedRecords);
+    setSessions(nextState.sessions);
     if (shouldWrite) {
       sendSessionToHealthConnect(savedSession);
     }
@@ -1741,9 +1706,7 @@ export default function IronDesk() {
       activeClearedAt: clearedAt
     });
     personalStateRef.current = clearedState;
-    try {
-      window.storage.set("irondesk:v3", JSON.stringify(clearedState));
-    } catch {}
+    statePersistenceRef.current.saveNow(clearedState).catch(() => undefined);
     setActive(null);
     setActiveClearedAt(current => Math.max(current, clearedAt));
   }, []);
@@ -3883,23 +3846,10 @@ function Trends({
     [cardioLog, sessions],
   );
   const liftName = LIFTS.find(l => l.key === sel)?.name;
-  const e1rmData = useMemo(() => {
-    const pts = [];
-    [...sessions].reverse().forEach(s => (Array.isArray(s?.entries) ? s.entries : []).forEach(en => {
-      if (en.lift === sel || en.ex === liftName) {
-        const estimates = (Array.isArray(en?.sets) ? en.sets : [])
-          .map(st => epley(st.w, st.r))
-          .filter(Number.isFinite);
-        if (estimates.length) {
-          pts.push({
-            date: s.date,
-            e1rm: Math.round(Math.max(...estimates))
-          });
-        }
-      }
-    }));
-    return pts;
-  }, [sessions, sel, liftName]);
+  const e1rmData = useMemo(
+    () => strengthE1rmTrend(sessions, sel, liftName),
+    [sessions, sel, liftName],
+  );
   const volData = useMemo(() => {
     const byWeek = {};
     sessions.forEach(s => {
@@ -5369,7 +5319,7 @@ function Crew({
     const u2 = FB.watchFeed(grp.groupId, setFeed);
     FB.syncStats(grp.groupId, user.uid, Object.assign({
       name: user.displayName || "Lifter"
-    }, computeStats(sessions, maxes))).catch(function () {});
+    }, computeCrewStats(sessions, maxes))).catch(function () {});
     return function () {
       u1 && u1();
       u2 && u2();
@@ -5559,8 +5509,8 @@ function Crew({
         ...grpForm,
         code: e.target.value
       }),
-      autoCapitalize: "characters",
-      placeholder: "6-char code",
+      autoCapitalize: "none",
+      placeholder: "Paste the full invite code",
       style: inp("100%")
     })), /*#__PURE__*/React.createElement("button", {
       onClick: doJoin,
@@ -5592,6 +5542,7 @@ function Crew({
   const byVol = [...members].sort((a, b) => (b.weekVolume || 0) - (a.weekVolume || 0));
   const bySess = [...members].sort((a, b) => (b.weekSessions || 0) - (a.weekSessions || 0));
   const lifters = members.length;
+  const inviteToken = buildCrewInviteToken(grp.groupId, grp.code);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Panel, {
     title: grp.name,
     sub: `${lifters} member${lifters !== 1 ? "s" : ""} · share code to add your crew`
@@ -5619,14 +5570,15 @@ function Crew({
   }, "JOIN CODE"), /*#__PURE__*/React.createElement("div", {
     className: "ttl",
     style: {
-      fontSize: 22,
+      fontSize: 14,
       fontWeight: 700,
       color: C.gold,
-      letterSpacing: 3
+      letterSpacing: 1,
+      overflowWrap: "anywhere"
     }
-  }, grp.code)), /*#__PURE__*/React.createElement("button", {
+  }, inviteToken)), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
-      if (navigator.clipboard) navigator.clipboard.writeText(grp.code);
+      if (navigator.clipboard) navigator.clipboard.writeText(inviteToken);
       note("Code copied");
     },
     style: {
