@@ -24,7 +24,7 @@ test("web, service worker, and Android releases use the same version", async () 
   assert.equal(packageLock.packages[""].version, APP_VERSION);
   assert.match(serviceWorker, new RegExp(`irondesk-v${APP_VERSION.replaceAll(".", "\\.")}`));
   assert.match(androidBuild, new RegExp(`versionName "${APP_VERSION.replaceAll(".", "\\.")}"`));
-  assert.match(androidBuild, /versionCode 8/);
+  assert.match(androidBuild, /versionCode 9/);
   assert.equal(packageJson.dependencies["@capacitor/app"], "^8.1.1");
   assert.match(capacitorBuild, /implementation project\(':capacitor-app'\)/);
   assert.match(capacitorSettings, /project\(':capacitor-app'\)/);
