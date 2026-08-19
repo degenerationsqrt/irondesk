@@ -29,6 +29,11 @@ test("exercise search matches names, muscles, and equipment", () => {
 
   assert.deepEqual(searchExerciseGuides(catalog, "squat").map((guide) => guide.name), ["Back Squat"]);
   assert.deepEqual(searchExerciseGuides(catalog, "lats gym").map((guide) => guide.name), ["Lat Pulldown"]);
+  assert.equal(typeof catalog[0].searchString, "string");
+  assert.deepEqual(
+    searchExerciseGuides(catalog, "knees inward").map((guide) => guide.name),
+    ["Back Squat"],
+  );
 });
 
 test("ChatGPT handoff contains only the selected exercise guidance and question", () => {

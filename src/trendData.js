@@ -1,3 +1,5 @@
+import { epley } from "./trainingMath.js";
+
 const METERS_PER_MILE = 1609.344;
 
 function finite(value) {
@@ -109,4 +111,24 @@ export function healthTrendSeries(healthLog, metricKey) {
 export function latestHealthValue(healthLog, metricKey) {
   const series = healthTrendSeries(healthLog, metricKey);
   return series.length ? series[series.length - 1] : null;
+}
+
+export function strengthE1rmTrend(sessions, liftKey, liftName) {
+  const points = [];
+  const history = Array.isArray(sessions) ? sessions : [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const session = history[index];
+    for (const entry of Array.isArray(session?.entries) ? session.entries : []) {
+      if (entry?.lift !== liftKey && entry?.ex !== liftName) continue;
+      const estimates = (Array.isArray(entry?.sets) ? entry.sets : [])
+        .map(set => epley(set.w, set.r))
+        .filter(Number.isFinite);
+      if (!estimates.length) continue;
+      points.push({
+        date: session.date,
+        e1rm: Math.round(Math.max(...estimates)),
+      });
+    }
+  }
+  return points;
 }

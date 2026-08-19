@@ -257,8 +257,19 @@ export function createCloudEnvelope(state, {
 export function getOrCreateCloudDeviceId(storage, cryptoSource = globalThis.crypto) {
   const current = storage?.getItem?.(CLOUD_DEVICE_KEY);
   if (current) return current;
-  const generated = cryptoSource?.randomUUID?.()
-    || `device-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  let generated = "";
+  if (typeof cryptoSource?.randomUUID === "function") {
+    generated = cryptoSource.randomUUID();
+  } else if (typeof cryptoSource?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoSource.getRandomValues(bytes);
+    const randomPart = Array.from(bytes)
+      .map(byte => byte.toString(16).padStart(2, "0"))
+      .join("");
+    generated = `device-${Date.now().toString(36)}-${randomPart}`;
+  } else {
+    generated = `device-${Date.now().toString(36)}`;
+  }
   storage?.setItem?.(CLOUD_DEVICE_KEY, generated);
   return generated;
 }

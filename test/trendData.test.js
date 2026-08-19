@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   garminSessionsToCardioRecords,
   healthTrendSeries,
+  latestHealthValue,
   mergeCardioTrendRecords,
   normalizeCardioType,
+  strengthE1rmTrend,
   weekStartKey,
 } from "../src/trendData.js";
 
@@ -98,5 +100,37 @@ test("Health Connect values become chronological metric series", () => {
   assert.deepEqual(series, [
     { date: "2026-07-25", value: 42.7, source: "health-connect" },
     { date: "2026-07-27", value: 43.2, source: "health-connect" },
+  ]);
+});
+
+test("latestHealthValue returns the most recent value or null", () => {
+  const log = [
+    { date: "2026-07-27", vo2Max: 43.2 },
+    { date: "2026-07-25", vo2Max: 42.7 },
+    { date: "2026-07-26", vo2Max: null },
+  ];
+  assert.deepEqual(latestHealthValue(log, "vo2Max"), {
+    date: "2026-07-27",
+    value: 43.2,
+    source: "health-connect",
+  });
+  assert.equal(latestHealthValue(log, "missingMetric"), null);
+  assert.equal(latestHealthValue([], "vo2Max"), null);
+});
+
+test("strength e1RM trend preserves chronological output without copying history", () => {
+  const trend = strengthE1rmTrend([
+    {
+      date: "2026-07-27",
+      entries: [{ lift: "squat", sets: [{ w: 225, r: 5 }] }],
+    },
+    {
+      date: "2026-07-20",
+      entries: [{ ex: "Squat", sets: [{ w: 205, r: 5 }] }],
+    },
+  ], "squat", "Squat");
+  assert.deepEqual(trend, [
+    { date: "2026-07-20", e1rm: 239 },
+    { date: "2026-07-27", e1rm: 263 },
   ]);
 });

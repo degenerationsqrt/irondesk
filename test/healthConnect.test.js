@@ -153,6 +153,7 @@ test("Health Connect bodyweight does not overwrite a manual entry", () => {
   assert.equal(merged.find(entry => entry.date === "2026-07-27").weight, 219);
   assert.equal(merged.find(entry => entry.date === "2026-07-26").weight, 219.4);
   assert.equal(merged.find(entry => entry.date === "2026-07-26").bf, 17.5);
+  assert.deepEqual(merged.map(entry => entry.date), ["2026-07-27", "2026-07-26"]);
 });
 
 test("recent Health Connect range is local and inclusive", () => {

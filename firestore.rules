@@ -15,13 +15,26 @@ service cloud.firestore {
     }
 
     match /groups/{groupId} {
-      allow read: if signedIn();
+      allow get: if isMember(groupId)
+        || (signedIn() && resource.data.owner == request.auth.uid);
+      allow list: if false;
       allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
       allow update, delete: if signedIn() && resource.data.owner == request.auth.uid;
 
       match /members/{memberId} {
         allow read: if isMember(groupId) || (signedIn() && request.auth.uid == memberId);
-        allow create, update: if signedIn()
+        allow create: if signedIn()
+          && request.auth.uid == memberId
+          && request.resource.data.name is string
+          && (
+            get(/databases/$(database)/documents/groups/$(groupId)).data.owner == request.auth.uid
+            || (
+              request.resource.data.inviteCode is string
+              && request.resource.data.inviteCode
+                == get(/databases/$(database)/documents/groups/$(groupId)).data.code
+            )
+          );
+        allow update: if signedIn()
           && request.auth.uid == memberId
           && request.resource.data.name is string;
         allow delete: if signedIn()
