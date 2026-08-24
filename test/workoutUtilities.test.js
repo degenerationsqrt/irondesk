@@ -40,6 +40,7 @@ test("old saved data receives safe rest timer defaults without mutation", () => 
   assert.deepEqual(normalizeRestTimerPrefs(undefined), DEFAULT_REST_TIMER_PREFS);
   assert.deepEqual(normalizeRestTimerPrefs({ enabled: false, accessorySeconds: 45 }), {
     enabled: false,
+    finisherSeconds: 45,
     accessorySeconds: 45,
     heavySeconds: 180,
   });
@@ -48,6 +49,7 @@ test("old saved data receives safe rest timer defaults without mutation", () => 
 test("rest duration is optional and skips cardio/core entries", () => {
   assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { heavy: true }), 180);
   assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { heavy: false }), 60);
+  assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { role: "finisher" }), 45);
   assert.equal(restDurationForEntry(DEFAULT_REST_TIMER_PREFS, { role: "cardio" }), 0);
   assert.equal(restDurationForEntry({ enabled: false }, { heavy: true }), 0);
 });

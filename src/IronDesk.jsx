@@ -79,6 +79,16 @@ import { buildCrewInviteToken, parseCrewInviteToken } from "./crewInvites.js";
 import { solveLoadout } from "./loadout.js";
 import { createInviteCode, createRecordId } from "./secureIds.js";
 import { createBufferedStatePersistence } from "./statePersistence.js";
+import {
+  READINESS_LEVELS,
+  anchorPlanForFocus,
+  anchorPrescription,
+  applyWorkoutReadiness,
+  evaluateAnchorProgression,
+  progressedAnchorTarget,
+  pumpFinisherRows,
+  readinessSuggestionFromSleep,
+} from "./trainingStructure.js";
 
 const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
@@ -733,7 +743,17 @@ function poolFor(group, mode) {
 }
 
 /* Build one day's workout from goal + focus + location + week (for variation + deload) */
-function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, styleOverride) {
+function generateDay(
+  focusKey,
+  goalKey,
+  mode,
+  blockNum,
+  weekIdx,
+  tm,
+  roundLoad,
+  styleOverride,
+  sessions = [],
+) {
   const f = FOCUS[focusKey] || FOCUS.Upper;
   const goal = GOALS[goalKey] || GOALS.vtaper;
   const style = STYLES[styleOverride] ? styleOverride : goal.style;
@@ -742,41 +762,56 @@ function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, 
   const rows = [];
   let slotN = blockNum * 7 + weekIdx; // rotates exercises each week/block
 
-  // 1) Heavy anchor — ONLY a real barbell compound gets a calculated %1RM load.
-  if (f.lift && COMPOUNDS[f.lift]) {
-    const compName = pick(COMPOUNDS[f.lift], slotN++);
-    const target = roundLoad(tm(f.lift) * st.comp.pct * (deload ? 0.85 : 1));
-    rows.push({
-      ex: compName,
-      role: "comp",
-      lift: f.lift,
-      heavy: !deload && style === "strength",
-      drop: false,
-      sets: deload ? Math.max(2, st.comp.sets - 1) : st.comp.sets,
-      reps: st.comp.reps,
-      target,
-      note: ""
-    });
-  }
+  // 1) Every generated day starts with one controlled strength anchor.
+  const anchor = anchorPlanForFocus(focusKey, slotN++);
+  const prescription = anchorPrescription(style, deload);
+  const baseTarget = roundLoad(tm(anchor.lift) * prescription.pct);
+  const target = progressedAnchorTarget(
+    baseTarget,
+    anchor.lift,
+    anchor.exercise,
+    sessions,
+    mode === "gym" ? 2.5 : 5,
+  );
+  rows.push({
+    ex: anchor.exercise,
+    role: "comp",
+    lift: anchor.lift,
+    heavy: !deload,
+    drop: false,
+    sets: prescription.sets,
+    reps: prescription.reps,
+    target,
+    baseTarget,
+    note: deload ? "Deload anchor · clean reps only" : "Strength anchor · stop with 1–3 reps in reserve"
+  });
 
-  // 2) Accessories + isolation from the focus pools — NO computed load, athlete enters weight.
-  f.pools.forEach(([group, count]) => {
-    const pool = poolFor(group, mode);
-    for (let i = 0; i < count; i++) {
-      const ex = pick(pool, slotN++);
-      const sc = i === 0 ? st.acc : st.iso;
+  // 2) Keep the build-work section concise, then finish with a distinct pump circuit.
+  const finisherRows = pumpFinisherRows(focusKey, mode, deload);
+  const finisherNames = new Set(finisherRows.map(row => row.ex));
+  const usedExercises = new Set([anchor.exercise, ...finisherNames]);
+  let accessoryCount = 0;
+  f.pools.forEach(([group, requestedCount]) => {
+    const fullPool = poolFor(group, mode);
+    for (let index = 0; index < requestedCount && accessoryCount < 2; index += 1) {
+      const available = fullPool.filter(exercise => !usedExercises.has(exercise.n));
+      if (!available.length) break;
+      const ex = pick(available, slotN++);
+      const sc = accessoryCount === 0 ? st.acc : st.iso;
       rows.push({
         ex: ex.n,
-        role: i === 0 ? "acc" : "iso",
+        role: accessoryCount === 0 ? "acc" : "iso",
         lift: null,
         db: /\bDB\b|Dumbbell/i.test(ex.n),
         heavy: false,
-        drop: style !== "strength" && !deload && i > 0,
+        drop: false,
         sets: deload ? Math.max(2, sc.sets - 1) : sc.sets,
         reps: sc.reps,
         target: null,
         note: group === "Glutes" ? "Glute focus" : ""
       });
+      usedExercises.add(ex.n);
+      accessoryCount += 1;
     }
   });
 
@@ -794,6 +829,7 @@ function generateDay(focusKey, goalKey, mode, blockNum, weekIdx, tm, roundLoad, 
     drop: false,
     note: "Bodyweight — reps only"
   });
+  rows.push(...finisherRows);
   const isHeavy = style === "strength";
   const cardio = focusKey === "Cond" ? CARDIO_BY_FOCUS.cond : isHeavy ? CARDIO_BY_FOCUS.heavy : CARDIO_BY_FOCUS.pump;
   const cmin = Math.round(cardio[1] * (deload ? 0.6 : 1) / 5) * 5;
@@ -826,6 +862,7 @@ function createGeneratedActiveWorkout({
   tm,
   roundLoad,
   styleOverride,
+  sessions = [],
 }) {
   const day = generateDay(
     focusKey,
@@ -836,6 +873,7 @@ function createGeneratedActiveWorkout({
     tm,
     roundLoad,
     styleOverride,
+    sessions,
   );
   return {
     id: uid(),
@@ -848,6 +886,8 @@ function createGeneratedActiveWorkout({
     blockNum: progress.blockNum,
     week: progress.week,
     start: Date.now(),
+    readiness: "normal",
+    loadIncrement: mode === "gym" ? 2.5 : 5,
     entries: day.rows.map(row => ({
       ex: row.ex,
       heavy: Boolean(row.heavy),
@@ -857,8 +897,14 @@ function createGeneratedActiveWorkout({
       note: row.note || "",
       lift: row.lift || null,
       target: row.target,
+      baseTarget: row.baseTarget ?? row.target ?? null,
       targetReps: row.reps,
       plannedSetCount: row.sets,
+      baseSetCount: row.sets,
+      circuitId: row.circuitId || null,
+      circuitOrder: row.circuitOrder || null,
+      restSeconds: row.restSeconds || null,
+      readinessSkipped: false,
       sets: Array(row.sets).fill(null).map(() => ({
         w: row.target || "",
         r: row.reps,
@@ -867,7 +913,7 @@ function createGeneratedActiveWorkout({
     })),
   };
 }
-const RULES = ["Heavy compounds (3–5 reps) are the muscle-protecting signal. Never drop-set them.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Drop sets only on isolation last sets. Max 2–3 per session.", "Rate of loss ~1–2 lb/week. Faster = lean mass going.", "Safety pins set before every heavy solo bench or squat.", "All reps clean → +5 lb upper / +10 lb lower. Miss → repeat."];
+const RULES = ["Start every generated workout with one controlled strength anchor. Keep 1–3 clean reps in reserve.", "Trim pump rounds before cutting strength intensity when sleep, soreness, or warm-ups are poor.", "Finish with three pump movements for 3 rounds of 15–20 reps and 30–45 seconds rest.", "Protein ~1g per lb of target bodyweight daily, front-loaded early.", "Rate of loss ~1–2 lb/week. Faster can increase lean-mass loss risk.", "Safety pins set before every heavy solo bench or squat.", "All anchor sets clean → +5 lb upper / +10 lb lower. Miss once → repeat. Miss twice → reset 5%."];
 
 /* ============ THEME ============ */
 const C = {
@@ -1756,6 +1802,7 @@ export default function IronDesk() {
       tm,
       roundLoad,
       styleOverride,
+      sessions,
     });
     setProgress(selectedProgress);
     setActive(workout);
@@ -2060,6 +2107,7 @@ export default function IronDesk() {
     setOnboarded,
     restTimerPrefs,
     setRestTimerPrefs,
+    healthLog,
     onWorkoutComplete: completeWorkoutSession
   }), tab === "program" && /*#__PURE__*/React.createElement(ProgramTab, {
     mode,
@@ -2073,6 +2121,7 @@ export default function IronDesk() {
     setGender,
     setGoal,
     styleOverride,
+    sessions,
     onStartWorkout: startProgramWorkout
   }), tab === "guide" && /*#__PURE__*/React.createElement(ExerciseGuide, {
     items: exerciseGuideItems,
@@ -2265,6 +2314,38 @@ function TodayCommandCard({
   );
 }
 
+function ReadinessControl({ value, suggestion, locked, onChange }) {
+  const current = READINESS_LEVELS[value] ? value : "normal";
+  return (
+    <section className="readiness-control" aria-labelledby="readiness-title">
+      <div className="readiness-heading">
+        <div>
+          <strong id="readiness-title">Today&apos;s readiness</strong>
+          <span>Preserve the anchor; reduce pump volume first.</span>
+        </div>
+        {locked ? <small>Locked after first logged set</small> : null}
+      </div>
+      <div className="readiness-options">
+        {Object.entries(READINESS_LEVELS).map(([key, option]) => (
+          <button
+            type="button"
+            key={key}
+            aria-pressed={current === key}
+            disabled={locked}
+            onClick={() => onChange(key)}
+          >
+            <strong>{option.label}</strong>
+            <span>{option.short}</span>
+          </button>
+        ))}
+      </div>
+      <p className={`readiness-suggestion is-${suggestion.level}`}>
+        Suggested: {READINESS_LEVELS[suggestion.level].label}. {suggestion.reason}
+      </p>
+    </section>
+  );
+}
+
 function Today({
   mode,
   maxes,
@@ -2296,6 +2377,7 @@ function Today({
   setOnboarded,
   restTimerPrefs,
   setRestTimerPrefs,
+  healthLog,
   onWorkoutComplete
 }) {
   const week = GOALS[goal].week;
@@ -2368,6 +2450,7 @@ function Today({
       tm,
       roundLoad,
       styleOverride,
+      sessions,
     }));
   };
   const startCustom = cd => {
@@ -2452,12 +2535,21 @@ function Today({
   };
   const finish = () => {
     const completedAt = Date.now();
+    const anchorProgression = evaluateAnchorProgression(active, sessions);
     const entries = active.entries.map(en => ({
       ex: en.ex,
       heavy: en.heavy,
       lift: en.lift,
       role: en.role,
       db: !!en.db,
+      target: en.target ?? null,
+      targetReps: en.targetReps ?? null,
+      plannedSetCount: en.plannedSetCount ?? en.sets.length,
+      baseTarget: en.baseTarget ?? en.target ?? null,
+      baseSetCount: en.baseSetCount ?? en.sets.length,
+      circuitId: en.circuitId || null,
+      circuitOrder: en.circuitOrder || null,
+      restSeconds: en.restSeconds || null,
       sets: en.sets.filter(s => s.done && Number(s.w) >= 0 && Number(s.r) > 0).map(s => ({
         w: Number(s.w),
         r: Number(s.r)
@@ -2492,7 +2584,9 @@ function Today({
       durationMin: Math.max(1, Math.round((completedAt - active.start) / 60000)),
       entries,
       volume,
-      prs
+      prs,
+      readiness: active.readiness || "normal",
+      anchorProgression
     };
     onWorkoutComplete(session);
     const generatedWorkout = week.includes(active.focusKey);
@@ -2507,11 +2601,17 @@ function Today({
       });
       const nextFocusKey = week[nextProgress.dayIndex] || week[0];
       setProgress(nextProgress);
-      note(prs.length
+      const savedMessage = prs.length
         ? `Saved with ${prs.length} PR${prs.length > 1 ? "s" : ""} · ${(FOCUS[nextFocusKey] || FOCUS.Upper).title} is next`
-        : `Workout saved · ${(FOCUS[nextFocusKey] || FOCUS.Upper).title} is next`);
+        : `Workout saved · ${(FOCUS[nextFocusKey] || FOCUS.Upper).title} is next`;
+      note(anchorProgression?.message
+        ? `${savedMessage} · ${anchorProgression.message}`
+        : savedMessage);
     } else {
-      note(prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved");
+      const savedMessage = prs.length ? `Done — ${prs.length} PR${prs.length > 1 ? "s" : ""}!` : "Workout saved";
+      note(anchorProgression?.message
+        ? `${savedMessage} · ${anchorProgression.message}`
+        : savedMessage);
     }
     clearActiveWorkout();
     setTab("today");
@@ -2881,9 +2981,20 @@ function Today({
       sessions: sessions
     }));
   }
-  const heavyDay = GOALS[active.goal || goal].style === "strength";
+  const heavyDay = active.entries.some(entry => entry.heavy);
   const doneCount = active.entries.reduce((a, en) => a + en.sets.filter(s => s.done).length, 0);
   const totalCount = active.entries.reduce((a, en) => a + en.sets.length, 0);
+  const readinessSuggestion = readinessSuggestionFromSleep(
+    latestHealthValue(healthLog, "sleepMinutes")?.value,
+  );
+  const updateReadiness = level => {
+    if (doneCount > 0) {
+      note("Readiness locks after the first logged set");
+      return;
+    }
+    setActive(current => applyWorkoutReadiness(current, level));
+    note(READINESS_LEVELS[level].description);
+  };
   return /*#__PURE__*/React.createElement(React.Fragment, null, timer > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "sticky",
@@ -2949,7 +3060,7 @@ function Today({
     })}`
   }, /*#__PURE__*/React.createElement("div", {
     className: "live-rest-control"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("strong", null, "Auto rest"), /*#__PURE__*/React.createElement("span", null, restTimerPrefs.enabled ? `${restTimerPrefs.accessorySeconds}s accessory · ${restTimerPrefs.heavySeconds}s heavy` : "Timer will not start after sets")), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("strong", null, "Auto rest"), /*#__PURE__*/React.createElement("span", null, restTimerPrefs.enabled ? `${restTimerPrefs.finisherSeconds || 45}s pump · ${restTimerPrefs.accessorySeconds}s accessory · ${restTimerPrefs.heavySeconds}s anchor` : "Timer will not start after sets")), /*#__PURE__*/React.createElement("button", {
     type: "button",
     role: "switch",
     "aria-checked": restTimerPrefs.enabled,
@@ -2958,7 +3069,12 @@ function Today({
       enabled: !current.enabled
     })),
     className: `switch-button ${restTimerPrefs.enabled ? "is-on" : ""}`
-  }, restTimerPrefs.enabled ? "ON" : "OFF")), /*#__PURE__*/React.createElement("div", {
+  }, restTimerPrefs.enabled ? "ON" : "OFF")), active.focusKey !== "custom" && /*#__PURE__*/React.createElement(ReadinessControl, {
+    value: active.readiness || "normal",
+    suggestion: readinessSuggestion,
+    locked: doneCount > 0,
+    onChange: updateReadiness
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 6,
       background: C.panel2,
@@ -2976,6 +3092,7 @@ function Today({
   })), active.entries.map((en, ei) => {
     const isCardio = en.role === "cardio",
       isAb = en.role === "ab",
+      isFinisher = en.role === "finisher",
       isDB = !!en.db;
     return /*#__PURE__*/React.createElement("div", {
       key: ei,
@@ -2984,7 +3101,8 @@ function Today({
         background: C.panel2,
         borderRadius: 12,
         padding: "12px 12px 8px",
-        border: `1px solid ${C.line}`
+        border: `1px solid ${isFinisher ? "rgba(59,154,225,.62)" : C.line}`,
+        opacity: en.readinessSkipped ? 0.58 : 1
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -3000,7 +3118,11 @@ function Today({
       }
     }, en.ex, en.heavy && /*#__PURE__*/React.createElement(Badge, {
       color: C.red
-    }, "HEAVY"), en.drop && /*#__PURE__*/React.createElement(Badge, {
+    }, "ANCHOR"), isFinisher && /*#__PURE__*/React.createElement(Badge, {
+      color: C.blue
+    }, "PUMP"), en.readinessSkipped && /*#__PURE__*/React.createElement(Badge, {
+      color: C.dim
+    }, "SKIPPED"), en.drop && /*#__PURE__*/React.createElement(Badge, {
       color: C.blue
     }, "DROP"), isCardio && /*#__PURE__*/React.createElement(Badge, {
       color: C.green
@@ -3030,7 +3152,7 @@ function Today({
         color: C.dim,
         marginBottom: 8
       }
-    }, en.target ? `Target ${en.target} lb${isDB || en.note ? " · " : ""}` : "", isDB ? "Weight is per dumbbell" : en.note), en.target && !isCardio && !isAb && !isDB && /*#__PURE__*/React.createElement("div", {
+    }, en.readinessSkipped ? "Skipped for recovery · " : "", en.target ? `Target ${en.target} lb${isDB || en.note ? " · " : ""}` : "", isDB ? "Weight is per dumbbell" : en.note), en.target && !isCardio && !isAb && !isDB && /*#__PURE__*/React.createElement("div", {
       style: {
         marginBottom: 8
       }
@@ -3091,7 +3213,7 @@ function Today({
         fontSize: 12,
         cursor: "pointer"
       }
-    }, s.done ? "✓ DONE" : "LOG"))), !isCardio && /*#__PURE__*/React.createElement("div", {
+    }, s.done ? "✓ DONE" : "LOG"))), !isCardio && !en.readinessSkipped && /*#__PURE__*/React.createElement("div", {
       className: "live-set-actions"
     }, /*#__PURE__*/React.createElement("button", {
       type: "button",
@@ -3190,6 +3312,7 @@ function ProgramTab({
   setGender,
   setGoal,
   styleOverride,
+  sessions,
   onStartWorkout
 }) {
   const g = GOALS[goal];
@@ -3197,7 +3320,17 @@ function ProgramTab({
     Math.min(g.week.length - 1, Math.max(0, Number(progress.dayIndex) || 0)));
   const selectedFocusIndex = Math.min(g.week.length - 1, Math.max(0, focusIndex));
   const fk = g.week[selectedFocusIndex] || g.week[0];
-  const gen = generateDay(fk, goal, mode, progress.blockNum, progress.week - 1, tm, roundLoad, styleOverride);
+  const gen = generateDay(
+    fk,
+    goal,
+    mode,
+    progress.blockNum,
+    progress.week - 1,
+    tm,
+    roundLoad,
+    styleOverride,
+    sessions,
+  );
   const deload = gen.deload;
   const advanceWeek = () => {
     if (progress.week < 6) {
@@ -3359,7 +3492,7 @@ function ProgramTab({
     }
   }, progress.week >= 6 ? "Start Next Block \u2192" : "Advance Week \u2192"))), /*#__PURE__*/React.createElement(Panel, {
     title: `Suggested Week \u2014 ${mode === "gym" ? "Gym" : "Home"}`,
-    sub: "Tap a day to preview its generated workout"
+    sub: "Strength anchor → build work → three-movement pump finisher"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -3405,7 +3538,9 @@ function ProgramTab({
     }
   }, r.ex, r.heavy && /*#__PURE__*/React.createElement(Badge, {
     color: C.red
-  }, "HEAVY"), r.drop && /*#__PURE__*/React.createElement(Badge, {
+  }, "ANCHOR"), r.role === "finisher" && /*#__PURE__*/React.createElement(Badge, {
+    color: C.blue
+  }, "PUMP"), r.drop && /*#__PURE__*/React.createElement(Badge, {
     color: C.blue
   }, "DROP"), r.role === "cardio" && /*#__PURE__*/React.createElement(Badge, {
     color: C.green
@@ -5238,6 +5373,18 @@ function RestTimerSettings({
     </div>
     <div className="rest-setting-grid">
       <label>
+        <span>Pump circuit</span>
+        <select
+          value={prefs.finisherSeconds}
+          disabled={!prefs.enabled}
+          onChange={(event) => update("finisherSeconds", Number(event.target.value))}
+        >
+          {options.filter((seconds) => seconds <= 60).map((seconds) => (
+            <option value={seconds} key={seconds}>{seconds} seconds</option>
+          ))}
+        </select>
+      </label>
+      <label>
         <span>Accessory sets</span>
         <select
           value={prefs.accessorySeconds}
@@ -5250,7 +5397,7 @@ function RestTimerSettings({
         </select>
       </label>
       <label>
-        <span>Heavy sets</span>
+        <span>Anchor sets</span>
         <select
           value={prefs.heavySeconds}
           disabled={!prefs.enabled}
