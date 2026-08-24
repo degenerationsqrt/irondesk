@@ -2,6 +2,7 @@ import { localDateKey, setVolume, workoutVolume } from "./trainingMath.js";
 
 export const DEFAULT_REST_TIMER_PREFS = Object.freeze({
   enabled: true,
+  finisherSeconds: 45,
   accessorySeconds: 60,
   heavySeconds: 180,
 });
@@ -24,6 +25,10 @@ export function normalizeRestTimerPrefs(value) {
   const source = value && typeof value === "object" ? value : {};
   return {
     enabled: typeof source.enabled === "boolean" ? source.enabled : DEFAULT_REST_TIMER_PREFS.enabled,
+    finisherSeconds: safeDuration(
+      source.finisherSeconds,
+      DEFAULT_REST_TIMER_PREFS.finisherSeconds,
+    ),
     accessorySeconds: safeDuration(
       source.accessorySeconds,
       DEFAULT_REST_TIMER_PREFS.accessorySeconds,
@@ -35,6 +40,7 @@ export function normalizeRestTimerPrefs(value) {
 export function restDurationForEntry(preferences, entry) {
   const prefs = normalizeRestTimerPrefs(preferences);
   if (!prefs.enabled || entry?.role === "cardio" || entry?.role === "ab") return 0;
+  if (entry?.role === "finisher") return prefs.finisherSeconds;
   return entry?.heavy ? prefs.heavySeconds : prefs.accessorySeconds;
 }
 

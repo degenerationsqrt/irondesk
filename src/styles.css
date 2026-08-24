@@ -1031,9 +1031,105 @@ body {
   color: #ff8d95;
 }
 
+.readiness-control {
+  margin: 12px 0 16px;
+  padding: 13px;
+  border: 1px solid rgb(59 154 225 / 36%);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgb(59 154 225 / 10%), rgb(21 21 24 / 92%));
+}
+
+.readiness-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.readiness-heading strong,
+.readiness-heading span {
+  display: block;
+}
+
+.readiness-heading strong {
+  color: #f4f4f5;
+  font-size: 13px;
+}
+
+.readiness-heading span,
+.readiness-heading small {
+  margin-top: 3px;
+  color: #8a8a93;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.readiness-heading small {
+  max-width: 120px;
+  text-align: right;
+}
+
+.readiness-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.readiness-options button {
+  min-height: 54px;
+  padding: 8px 6px;
+  border: 1px solid #34343d;
+  border-radius: 9px;
+  color: #b6b6be;
+  background: #151518;
+  cursor: pointer;
+}
+
+.readiness-options button strong,
+.readiness-options button span {
+  display: block;
+}
+
+.readiness-options button strong {
+  font: 700 10.5px "Archivo", sans-serif;
+}
+
+.readiness-options button span {
+  margin-top: 3px;
+  color: #8a8a93;
+  font: 500 9.5px "Archivo", sans-serif;
+}
+
+.readiness-options button[aria-pressed="true"] {
+  border-color: #3b9ae1;
+  color: #f4f4f5;
+  background: rgb(59 154 225 / 17%);
+  box-shadow: inset 0 0 0 1px rgb(59 154 225 / 18%);
+}
+
+.readiness-options button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.readiness-suggestion {
+  margin: 10px 0 0;
+  color: #b6b6be;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.readiness-suggestion.is-reduced {
+  color: #d9a441;
+}
+
+.readiness-suggestion.is-recovery {
+  color: #ff8d95;
+}
+
 .rest-setting-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
