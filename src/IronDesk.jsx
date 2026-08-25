@@ -94,12 +94,12 @@ const GarminBridge = React.lazy(() =>
   import("./GarminBridge.jsx").then((module) => ({ default: module.GarminBridge })));
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCahMEkIle_yGm74AZv1271Q7uGLi6Tu6k",
-  authDomain: "irondesk-54651.firebaseapp.com",
-  projectId: "irondesk-54651",
-  storageBucket: "irondesk-54651.firebasestorage.app",
-  messagingSenderId: "719297846505",
-  appId: "1:719297846505:web:73d891e9ae812f6a886478"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 try {
