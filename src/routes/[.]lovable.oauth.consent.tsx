@@ -25,11 +25,16 @@ function oauthApi() {
 export const Route = createFileRoute("/.lovable/oauth/consent")({
   // Browser-only: the Supabase client reads its session from localStorage.
   ssr: false,
-  validateSearch: (s: Record<string, unknown>) => ({
-    authorization_id: typeof s["authorization_id"] === "string" ? s["authorization_id"] : "",
-  }),
+  // Omit the key entirely when absent: emitting an empty default makes the
+  // router rewrite the URL and redirect to itself forever.
+  validateSearch: (s: Record<string, unknown>) =>
+    typeof s["authorization_id"] === "string" && s["authorization_id"].length > 0
+      ? { authorization_id: s["authorization_id"] }
+      : {},
   beforeLoad: async ({ search, location }) => {
-    if (!search.authorization_id) throw new Error("Missing authorization_id");
+    if (!("authorization_id" in search) || !search.authorization_id) {
+      throw new Error("Missing authorization_id");
+    }
     const { data } = await supabase.auth.getSession();
     if (!data.session) {
       const next = location.pathname + location.searchStr;
@@ -56,7 +61,7 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
 
 function Consent() {
   const details = Route.useLoaderData();
-  const { authorization_id } = Route.useSearch();
+  const { authorization_id } = Route.useSearch() as { authorization_id: string };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const clientName = details?.client?.name ?? "this app";

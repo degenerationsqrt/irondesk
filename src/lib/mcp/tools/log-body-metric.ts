@@ -15,7 +15,8 @@ export default defineTool({
     recorded_at: z.string().optional().describe("ISO timestamp. Defaults to now."),
     note: z.string().optional().describe("Short note."),
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  // Each call appends a new measurement row, so it is explicitly non-idempotent.
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
     if (!ctx.isAuthenticated()) return unauthenticated();
     const userId = ctx.getUserId();
