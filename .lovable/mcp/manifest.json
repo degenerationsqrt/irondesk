@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "sdk_version": "0.28.0",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://pmjpsgqggxfgybbigtdc.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "irondesk-command",
+      "version": "0.1.0",
+      "title": "IronDesk Command"
+    },
+    "tools": [
+      {
+        "name": "list_recent_workouts",
+        "title": "List recent workouts",
+        "description": "List the signed-in athlete's most recent IronDesk workout sessions with status, focus, effort and completion time.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "description": "How many sessions to return (default 10, max 50)."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "completed",
+                "cancelled"
+              ],
+              "description": "Optional status filter."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_workout_detail",
+        "title": "Get workout detail",
+        "description": "Return one of the signed-in athlete's workout sessions with its exercises, targets and logged sets (weight, reps, RPE).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Workout session id."
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_program_status",
+        "title": "Get assigned program status",
+        "description": "Show the signed-in athlete's assigned training program enrollments (program name, status, cycle, position) and the next planned sessions.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "log_recovery",
+        "title": "Log recovery entry",
+        "description": "Create or update the signed-in athlete's recovery entry for a day: sleep, resting HR, HRV, soreness, fatigue, stress and readiness.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "day": {
+              "type": "string",
+              "description": "ISO date (YYYY-MM-DD). Defaults to today."
+            },
+            "sleep_hours": {
+              "type": "number",
+              "description": "Hours slept."
+            },
+            "resting_hr": {
+              "type": "integer",
+              "description": "Resting heart rate in bpm."
+            },
+            "hrv_ms": {
+              "type": "integer",
+              "description": "HRV in milliseconds."
+            },
+            "readiness": {
+              "type": "integer",
+              "description": "Readiness score 0-100."
+            },
+            "fatigue": {
+              "type": "integer",
+              "description": "Fatigue rating 1-10."
+            },
+            "stress": {
+              "type": "integer",
+              "description": "Stress rating 1-10."
+            },
+            "note": {
+              "type": "string",
+              "description": "Short free-text note."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "log_body_metric",
+        "title": "Log body metric",
+        "description": "Record a body measurement (weight in kg, body-fat percent, waist in cm) for the signed-in athlete.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "weight_kg": {
+              "type": "number",
+              "description": "Body weight in kilograms."
+            },
+            "body_fat_percent": {
+              "type": "number",
+              "description": "Body fat percentage."
+            },
+            "waist_cm": {
+              "type": "number",
+              "description": "Waist measurement in centimeters."
+            },
+            "recorded_at": {
+              "type": "string",
+              "description": "ISO timestamp. Defaults to now."
+            },
+            "note": {
+              "type": "string",
+              "description": "Short note."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,230 @@
+{
+  "schemaVersion": "1.0.0-preview.1",
+  "programs": [
+    {
+      "programId": "legacy-foundation-v1",
+      "sourceKey": "legacy-foundation",
+      "name": "Legacy Foundation",
+      "releaseGate": "coach_review",
+      "schedule": {
+        "mode": "named_weekdays",
+        "repeatAfterCompletion": true,
+        "sourceSpecifiedTrainingDays": [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "saturday"
+        ],
+        "explicitRestDays": [],
+        "cycleLengthWeeks": 1
+      },
+      "slots": [
+        {
+          "position": 1,
+          "workoutId": "legacy-foundation-v1-chest-biceps",
+          "templateSourceKey": "legacy-foundation-chest-biceps-v1",
+          "dayOfWeek": "monday"
+        },
+        {
+          "position": 2,
+          "workoutId": "legacy-foundation-v1-legs-calves",
+          "templateSourceKey": "legacy-foundation-legs-calves-v1",
+          "dayOfWeek": "tuesday"
+        },
+        {
+          "position": 3,
+          "workoutId": "legacy-foundation-v1-back",
+          "templateSourceKey": "legacy-foundation-back-v1",
+          "dayOfWeek": "wednesday"
+        },
+        {
+          "position": 4,
+          "workoutId": "legacy-foundation-v1-shoulders-triceps",
+          "templateSourceKey": "legacy-foundation-shoulders-triceps-v1",
+          "dayOfWeek": "thursday"
+        },
+        {
+          "position": 5,
+          "workoutId": "legacy-foundation-v1-full-body",
+          "templateSourceKey": "legacy-foundation-full-body-v1",
+          "dayOfWeek": "saturday"
+        }
+      ]
+    },
+    {
+      "programId": "team-fawaz-volume-v1",
+      "sourceKey": "team-fawaz-volume",
+      "name": "Team Fawaz Volume",
+      "releaseGate": "blocked_pending_source_review",
+      "schedule": {
+        "mode": "named_weekdays",
+        "repeatAfterCompletion": true,
+        "sourceSpecifiedTrainingDays": [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday"
+        ],
+        "explicitRestDays": [
+          "sunday"
+        ],
+        "cycleLengthWeeks": 1
+      },
+      "slots": [
+        {
+          "position": 1,
+          "workoutId": "team-fawaz-volume-v1-chest",
+          "templateSourceKey": "team-fawaz-volume-chest-v1",
+          "dayOfWeek": "monday"
+        },
+        {
+          "position": 2,
+          "workoutId": "team-fawaz-volume-v1-quads",
+          "templateSourceKey": "team-fawaz-volume-quads-v1",
+          "dayOfWeek": "tuesday"
+        },
+        {
+          "position": 3,
+          "workoutId": "team-fawaz-volume-v1-shoulders",
+          "templateSourceKey": "team-fawaz-volume-shoulders-v1",
+          "dayOfWeek": "wednesday"
+        },
+        {
+          "position": 4,
+          "workoutId": "team-fawaz-volume-v1-arms",
+          "templateSourceKey": "team-fawaz-volume-arms-v1",
+          "dayOfWeek": "thursday"
+        },
+        {
+          "position": 5,
+          "workoutId": "team-fawaz-volume-v1-back",
+          "templateSourceKey": "team-fawaz-volume-back-v1",
+          "dayOfWeek": "friday"
+        },
+        {
+          "position": 6,
+          "workoutId": "team-fawaz-volume-v1-hamstrings-triceps",
+          "templateSourceKey": "team-fawaz-volume-hamstrings-triceps-v1",
+          "dayOfWeek": "saturday"
+        }
+      ]
+    },
+    {
+      "programId": "legacy-split-rev2-v1",
+      "sourceKey": "legacy-split-rev2",
+      "name": "Legacy Split Rev 2",
+      "releaseGate": "blocked_pending_source_review",
+      "schedule": {
+        "mode": "ordered_rotation",
+        "repeatAfterCompletion": true,
+        "sourceSpecifiedTrainingDays": [],
+        "explicitRestDays": [],
+        "cycleLengthWeeks": null
+      },
+      "slots": [
+        {
+          "position": 1,
+          "workoutId": "legacy-split-rev2-v1-day-1",
+          "templateSourceKey": "legacy-split-rev2-chest-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 2,
+          "workoutId": "legacy-split-rev2-v1-day-2",
+          "templateSourceKey": "legacy-split-rev2-shoulders-traps-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 3,
+          "workoutId": "legacy-split-rev2-v1-day-3",
+          "templateSourceKey": "legacy-split-rev2-quads-calves-forearms-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 4,
+          "workoutId": "legacy-split-rev2-v1-day-4",
+          "templateSourceKey": "legacy-split-rev2-triceps-biceps-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 5,
+          "workoutId": "legacy-split-rev2-v1-day-5",
+          "templateSourceKey": "legacy-split-rev2-back-rear-delts-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 6,
+          "workoutId": "legacy-split-rev2-v1-day-6",
+          "templateSourceKey": "legacy-split-rev2-hamstrings-triceps-calves-forearms-v1",
+          "dayOfWeek": null
+        }
+      ]
+    },
+    {
+      "programId": "darkside-v1",
+      "sourceKey": "darkside",
+      "name": "Darkside",
+      "releaseGate": "blocked_by_pyramid_engine_and_source_review",
+      "schedule": {
+        "mode": "ordered_rotation",
+        "repeatAfterCompletion": true,
+        "sourceSpecifiedTrainingDays": [],
+        "explicitRestDays": [],
+        "cycleLengthWeeks": null,
+        "alternationRules": [
+          {
+            "id": "darkside-chest-primary-press-alternation",
+            "status": "proposed_pending_confirmation",
+            "periodWeeks": 2,
+            "weekA": {
+              "pyramidExercise": "Flat Bench",
+              "fixedExercise": "Incline Bench",
+              "fixedPrescription": "4×8"
+            },
+            "weekB": {
+              "pyramidExercise": "Incline Bench",
+              "fixedExercise": "Flat Bench",
+              "fixedPrescription": "4×8"
+            },
+            "basis": "Interprets the two source lines that say to alternate Flat and Incline pyramid weeks."
+          }
+        ]
+      },
+      "slots": [
+        {
+          "position": 1,
+          "workoutId": "darkside-v1-delts-abs",
+          "templateSourceKey": "darkside-delts-abs-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 2,
+          "workoutId": "darkside-v1-chest-cardio",
+          "templateSourceKey": "darkside-chest-cardio-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 3,
+          "workoutId": "darkside-v1-legs-abs",
+          "templateSourceKey": "darkside-legs-abs-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 4,
+          "workoutId": "darkside-v1-back-traps-cardio",
+          "templateSourceKey": "darkside-back-traps-cardio-v1",
+          "dayOfWeek": null
+        },
+        {
+          "position": 5,
+          "workoutId": "darkside-v1-arms-abs",
+          "templateSourceKey": "darkside-triceps-biceps-abs-v1",
+          "dayOfWeek": null
+        }
+      ]
+    }
+  ]
+}
