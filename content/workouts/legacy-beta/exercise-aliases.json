@@ -1,0 +1,1874 @@
+{
+  "schemaVersion": "1.0.0-preview.1",
+  "status": "preview",
+  "aliases": [
+    {
+      "sourceName": "Air bike",
+      "canonicalKey": "bicycle-crunch",
+      "canonicalName": "Bicycle Crunch",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 31
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 52
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Barbell Curls",
+      "canonicalKey": "barbell-curl",
+      "canonicalName": "Barbell Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 5
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Barbell Twists",
+      "canonicalKey": "barbell-twist",
+      "canonicalName": "Barbell Twist",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 33
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 54
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "BB shrugs",
+      "canonicalKey": "barbell-shrug",
+      "canonicalName": "Barbell Shrug",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 16
+        }
+      ],
+      "notes": [
+        "Long squeeze on each repetition."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bench Press",
+      "canonicalKey": "barbell-bench-press",
+      "canonicalName": "Barbell Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 2
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bent over barbell row",
+      "canonicalKey": "barbell-row",
+      "canonicalName": "Barbell Row",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 31
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bent over DB glass row",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 42
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Bent Over Row",
+      "canonicalKey": "barbell-row",
+      "canonicalName": "Barbell Row",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 35
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bent Over Rows",
+      "canonicalKey": "barbell-row",
+      "canonicalName": "Barbell Row",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 17
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bicep cable curl",
+      "canonicalKey": "cable-curl",
+      "canonicalName": "Cable Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 23
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Bulgarian Squat",
+      "canonicalKey": "bulgarian-split-squat",
+      "canonicalName": "Bulgarian Split Squat",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 23
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Cable flys High/Low",
+      "canonicalKey": "cable-fly",
+      "canonicalName": "Cable Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 5
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Cable Kickback",
+      "canonicalKey": "cable-triceps-kickback",
+      "canonicalName": "Cable Triceps Kickback",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 46
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Cable or DB row",
+      "canonicalKey": "row",
+      "canonicalName": "Row",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 30
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Cable or Pec-Deck Fly",
+      "canonicalKey": "chest-fly",
+      "canonicalName": "Chest Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 5
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Cable Row",
+      "canonicalKey": "seated-cable-row",
+      "canonicalName": "Seated Cable Row",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 39
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Calf Machine Raises",
+      "canonicalKey": "standing-calf-raise",
+      "canonicalName": "Standing Calf Raise",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 27
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Chest Dips",
+      "canonicalKey": "dip",
+      "canonicalName": "Dip",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 4
+        }
+      ],
+      "notes": [
+        "Chest emphasis."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Clean and Jerk",
+      "canonicalKey": "clean-and-jerk",
+      "canonicalName": "Clean and Jerk",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 31
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Close Grip Bench Press",
+      "canonicalKey": "close-grip-bench-press",
+      "canonicalName": "Close-Grip Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 43
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Close Grip Machine Military Press",
+      "canonicalKey": "machine-shoulder-press",
+      "canonicalName": "Machine Shoulder Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 2
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Close-Grip Bench Press",
+      "canonicalKey": "close-grip-bench-press",
+      "canonicalName": "Close-Grip Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 25
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 39
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Concentration Curl",
+      "canonicalKey": "concentration-curl",
+      "canonicalName": "Concentration Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 50
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "DB Bicep curls",
+      "canonicalKey": "dumbbell-curl",
+      "canonicalName": "Dumbbell Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 24
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "DB Press",
+      "canonicalKey": "dumbbell-shoulder-press",
+      "canonicalName": "Dumbbell Shoulder Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 11
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Deadlifts",
+      "canonicalKey": "conventional-deadlift",
+      "canonicalName": "Conventional Deadlift",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 16
+        },
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 29
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Decline Bench",
+      "canonicalKey": "decline-barbell-bench-press",
+      "canonicalName": "Decline Barbell Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 15
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Decline DB/Bench Press",
+      "canonicalKey": "decline-press",
+      "canonicalName": "Decline Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 4
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Decline Press",
+      "canonicalKey": "decline-press",
+      "canonicalName": "Decline Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 4
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Dip machine",
+      "canonicalKey": "machine-dip",
+      "canonicalName": "Machine Dip",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 29
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 52
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Dips",
+      "canonicalKey": "dip",
+      "canonicalName": "Dip",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 18
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Dumbell Rows",
+      "canonicalKey": "dumbbell-row",
+      "canonicalName": "Dumbbell Row",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 18
+        }
+      ],
+      "notes": [
+        "Source spelling retained in source text; normalized spelling used for canonical mapping."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "EZ Bar Curl",
+      "canonicalKey": "ez-bar-curl",
+      "canonicalName": "EZ-Bar Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 47
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "EZ Bar Skullcrusher",
+      "canonicalKey": "ez-bar-skullcrusher",
+      "canonicalName": "EZ-Bar Skullcrusher",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 45
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Flat 21′s",
+      "canonicalKey": "flat-press",
+      "canonicalName": "Flat Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 6
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Flat Bench",
+      "canonicalKey": "barbell-bench-press",
+      "canonicalName": "Barbell Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 13
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Flat DB/ Bench Press",
+      "canonicalKey": "flat-press",
+      "canonicalName": "Flat Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 3
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Front Raise",
+      "canonicalKey": "front-raise",
+      "canonicalName": "Front Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 18
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 5
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "front raises",
+      "canonicalKey": "front-raise",
+      "canonicalName": "Front Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 23
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Hack or Machine Squats",
+      "canonicalKey": "machine-squat",
+      "canonicalName": "Machine Squat",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 10
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Half Deads",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 38
+        }
+      ],
+      "notes": [
+        "Could mean rack pull, partial deadlift, Romanian deadlift, or another partial-range deadlift."
+      ],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Hammer Curl",
+      "canonicalKey": "hammer-curl",
+      "canonicalName": "Hammer Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 49
+        }
+      ],
+      "notes": [
+        "Eight reps per hand."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Hammer Press",
+      "canonicalKey": "hammer-strength-chest-press",
+      "canonicalName": "Hammer Strength Chest Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 17
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Hanging EZ curl bar",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 34
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Hanging Leg Raise",
+      "canonicalKey": "hanging-leg-raise",
+      "canonicalName": "Hanging Leg Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 9
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Hyperextensions",
+      "canonicalKey": "back-extension",
+      "canonicalName": "Back Extension",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 19
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline 21′s",
+      "canonicalKey": "incline-press",
+      "canonicalName": "Incline Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 3
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline Bench",
+      "canonicalKey": "incline-barbell-bench-press",
+      "canonicalName": "Incline Barbell Bench Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 14
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline bench reverse flys",
+      "canonicalKey": "incline-rear-delt-fly",
+      "canonicalName": "Incline Rear Delt Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 44
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline DB/Bench Press",
+      "canonicalKey": "incline-press",
+      "canonicalName": "Incline Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 2
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline DBs",
+      "canonicalKey": "incline-dumbbell-press",
+      "canonicalName": "Incline Dumbbell Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 2
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline Dumbbell Press",
+      "canonicalKey": "incline-dumbbell-press",
+      "canonicalName": "Incline Dumbbell Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 1
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Incline Flies",
+      "canonicalKey": "incline-fly",
+      "canonicalName": "Incline Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 3
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lat Pulldowns",
+      "canonicalKey": "lat-pulldown",
+      "canonicalName": "Lat Pulldown",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 15
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lateral pull down",
+      "canonicalKey": "lat-pulldown",
+      "canonicalName": "Lat Pulldown",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 29
+        }
+      ],
+      "notes": [
+        "“Lateral pull down” interpreted as Lat Pulldown."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lateral Raise",
+      "canonicalKey": "lateral-raise",
+      "canonicalName": "Lateral Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 16
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lateral Raises",
+      "canonicalKey": "lateral-raise",
+      "canonicalName": "Lateral Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 3
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Laying Curl",
+      "canonicalKey": "lying-leg-curl",
+      "canonicalName": "Lying Leg Curl",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 48
+        }
+      ],
+      "notes": [
+        "Source spelling retained; canonical mapping proposes Lying Leg Curl."
+      ],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Leg Curls",
+      "canonicalKey": "leg-curl",
+      "canonicalName": "Leg Curl",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 12
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 23
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 26
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Leg Extensions",
+      "canonicalKey": "leg-extension",
+      "canonicalName": "Leg Extension",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 11
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 6
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 9
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 20
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 32
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 22
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Leg Press",
+      "canonicalKey": "leg-press",
+      "canonicalName": "Leg Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 10
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 11
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 21
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Leg Press Calf Raises",
+      "canonicalKey": "leg-press-calf-raise",
+      "canonicalName": "Leg Press Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 29
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Low seated Row",
+      "canonicalKey": "low-seated-cable-row",
+      "canonicalName": "Low Seated Cable Row",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 40
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lunges",
+      "canonicalKey": "lunge",
+      "canonicalName": "Lunge",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 9
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lying Hamstring Curls",
+      "canonicalKey": "lying-leg-curl",
+      "canonicalName": "Lying Leg Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 35
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Lying Rear Delt Raises",
+      "canonicalKey": "rear-delt-fly",
+      "canonicalName": "Rear Delt Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 24
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Machine Dips or Weighted Dips",
+      "canonicalKey": "dip",
+      "canonicalName": "Dip",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 40
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Machine Incline Chest",
+      "canonicalKey": "machine-incline-press",
+      "canonicalName": "Machine Incline Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 13
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Military press",
+      "canonicalKey": "overhead-press",
+      "canonicalName": "Overhead Press",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 12
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Military Press Barbell or Dumbbell",
+      "canonicalKey": "overhead-press",
+      "canonicalName": "Overhead Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 1
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Neutral zone Wide pull downs",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 39
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Overhead cable Extensions",
+      "canonicalKey": "overhead-cable-triceps-extension",
+      "canonicalName": "Overhead Cable Triceps Extension",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 41
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Preacher curl",
+      "canonicalKey": "preacher-curl",
+      "canonicalName": "Preacher Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 25
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Preacher Curls",
+      "canonicalKey": "preacher-curl",
+      "canonicalName": "Preacher Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 6
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Pull ups",
+      "canonicalKey": "pull-up",
+      "canonicalName": "Pull-Up",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 26
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 38
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Pulldowns",
+      "canonicalKey": "lat-pulldown",
+      "canonicalName": "Lat Pulldown",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 37
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Pulldowns",
+      "canonicalKey": "triceps-pushdown",
+      "canonicalName": "Triceps Pushdown",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 26
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Pulldown’s",
+      "canonicalKey": "lat-pulldown",
+      "canonicalName": "Lat Pulldown",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 38
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Pullovers",
+      "canonicalKey": "dumbbell-pullover",
+      "canonicalName": "Dumbbell Pullover",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 16
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Quad Extensions",
+      "canonicalKey": "leg-extension",
+      "canonicalName": "Leg Extension",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 24
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse DB fly",
+      "canonicalKey": "rear-delt-fly",
+      "canonicalName": "Rear Delt Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 19
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse EZ pulldowns",
+      "canonicalKey": "reverse-grip-triceps-pushdown",
+      "canonicalName": "Reverse-Grip Triceps Pushdown",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 32
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse Fly’s (on incline bench)",
+      "canonicalKey": "incline-rear-delt-fly",
+      "canonicalName": "Incline Rear Delt Fly",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 7
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse grip EZ bar",
+      "canonicalKey": "reverse-curl",
+      "canonicalName": "Reverse Curl",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 35
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse grip pull downs",
+      "canonicalKey": "reverse-grip-lat-pulldown",
+      "canonicalName": "Reverse-Grip Lat Pulldown",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 41
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse Pec Deck",
+      "canonicalKey": "reverse-pec-deck",
+      "canonicalName": "Reverse Pec Deck",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 6
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Reverse Peck deck",
+      "canonicalKey": "reverse-pec-deck",
+      "canonicalName": "Reverse Pec Deck",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 43
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Rope Pulldowns",
+      "canonicalKey": "rope-triceps-pushdown",
+      "canonicalName": "Rope Triceps Pushdown",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 31
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Rope pulls",
+      "canonicalKey": "rope-triceps-pushdown",
+      "canonicalName": "Rope Triceps Pushdown",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 51
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Seated Calf Raise",
+      "canonicalKey": "seated-calf-raise",
+      "canonicalName": "Seated Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 8
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Seated Calf Raises",
+      "canonicalKey": "seated-calf-raise",
+      "canonicalName": "Seated Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 28
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Seated Curl",
+      "canonicalKey": "seated-leg-curl",
+      "canonicalName": "Seated Leg Curl",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 49
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Seated Hammer Rockers",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 56
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Seated leg curls",
+      "canonicalKey": "seated-leg-curl",
+      "canonicalName": "Seated Leg Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 36
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Seated Wrist curls",
+      "canonicalKey": "seated-wrist-curl",
+      "canonicalName": "Seated Wrist Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 54
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Shoulder Press",
+      "canonicalKey": "overhead-press",
+      "canonicalName": "Overhead Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 21
+        },
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 17
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Shrugs",
+      "canonicalKey": "shrug",
+      "canonicalName": "Shrug",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 40
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Side Bends",
+      "canonicalKey": "side-bend",
+      "canonicalName": "Side Bend",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 10
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 32
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 53
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Side Crunches",
+      "canonicalKey": "side-crunch",
+      "canonicalName": "Side Crunch",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 11
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Single arm cross overs",
+      "canonicalKey": "single-arm-cable-crossover",
+      "canonicalName": "Single-Arm Cable Crossover",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 8
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Single leg curl",
+      "canonicalKey": "single-leg-curl",
+      "canonicalName": "Single-Leg Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 47
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Single leg curls",
+      "canonicalKey": "single-leg-curl",
+      "canonicalName": "Single-Leg Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 37
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Single-Leg Calf Raise",
+      "canonicalKey": "single-leg-calf-raise",
+      "canonicalName": "Single-Leg Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 8
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Skull Crushers",
+      "canonicalKey": "skullcrusher",
+      "canonicalName": "Skullcrusher",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 42
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 30
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 50
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Skullcrushers",
+      "canonicalKey": "skullcrusher",
+      "canonicalName": "Skullcrusher",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 27
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Smith press",
+      "canonicalKey": "smith-machine-bench-press",
+      "canonicalName": "Smith Machine Bench Press",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 7
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Squat (to bench)",
+      "canonicalKey": "box-squat",
+      "canonicalName": "Box Squat",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 22
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Squats",
+      "canonicalKey": "back-squat",
+      "canonicalName": "Back Squat",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 8
+        },
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 30
+        },
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 20
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 21
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Standing BB Roll outs",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 55
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Standing bent knee calve raises",
+      "canonicalKey": "bent-knee-calf-raise",
+      "canonicalName": "Bent-Knee Calf Raise",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 53
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Standing Calf Raise",
+      "canonicalKey": "standing-calf-raise",
+      "canonicalName": "Standing Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "team-fawaz-volume",
+          "paragraph": 8
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Standing calve raise machine",
+      "canonicalKey": "standing-calf-raise",
+      "canonicalName": "Standing Calf Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 25
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Standing EZ curl bar",
+      "canonicalKey": "ez-bar-curl",
+      "canonicalName": "EZ-Bar Curl",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 33
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Standing Glass Front raises",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 14
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Standing glass laterals",
+      "canonicalKey": null,
+      "canonicalName": null,
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 13
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Standing high rows",
+      "canonicalKey": "high-row",
+      "canonicalName": "High Row",
+      "confidence": "low",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 15
+        }
+      ],
+      "notes": [],
+      "reviewRequired": true
+    },
+    {
+      "sourceName": "Stiff Leg Deadlift",
+      "canonicalKey": "stiff-leg-deadlift",
+      "canonicalName": "Stiff-Leg Deadlift",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 25
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Straight Leg Deadlift",
+      "canonicalKey": "stiff-leg-deadlift",
+      "canonicalName": "Stiff-Leg Deadlift",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 36
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Triceps Pushdowns",
+      "canonicalKey": "triceps-pushdown",
+      "canonicalName": "Triceps Pushdown",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 44
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Upright Rows",
+      "canonicalKey": "upright-row",
+      "canonicalName": "Upright Row",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 22
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "V-Squat",
+      "canonicalKey": "v-squat",
+      "canonicalName": "V-Squat",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-split-rev2",
+          "paragraph": 24
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Weight Plate Front Raises",
+      "canonicalKey": "plate-front-raise",
+      "canonicalName": "Plate Front Raise",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 4
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Weighted Pull ups",
+      "canonicalKey": "weighted-pull-up",
+      "canonicalName": "Weighted Pull-Up",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "legacy-foundation",
+          "paragraph": 32
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Weighted Sit Ups",
+      "canonicalKey": "weighted-sit-up",
+      "canonicalName": "Weighted Sit-Up",
+      "confidence": "high",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 8
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 30
+        },
+        {
+          "programKey": "darkside",
+          "paragraph": 51
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    },
+    {
+      "sourceName": "Wide Grip Curl",
+      "canonicalKey": "wide-grip-barbell-curl",
+      "canonicalName": "Wide-Grip Barbell Curl",
+      "confidence": "medium",
+      "occurrences": [
+        {
+          "programKey": "darkside",
+          "paragraph": 48
+        }
+      ],
+      "notes": [],
+      "reviewRequired": false
+    }
+  ]
+}
