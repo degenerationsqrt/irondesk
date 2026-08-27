@@ -22,6 +22,14 @@ import { METRIC_TYPES } from "./types";
 
 const NORMALIZED_VERSION = 1;
 
+/**
+ * Initial `import_jobs.status` for a device sync. Must be one of the statuses
+ * the `import_jobs` check constraint permits; a device sync writes records
+ * immediately, so it starts as `committing`.
+ */
+export const DEVICE_SYNC_INITIAL_JOB_STATUS = "committing" as const;
+
+
 /** Hard caps applied before any database work. */
 export const SYNC_LIMITS = {
   maxBodyBytes: 4 * 1024 * 1024,
@@ -274,7 +282,7 @@ export async function ingestForDevice(admin: AdminClient, device: DeviceIdentity
       source_type: "health_connect",
       file_name: `Device sync · ${device.label}`,
       file_format: "json",
-      status: "running",
+      status: DEVICE_SYNC_INITIAL_JOB_STATUS,
       total_records: hashed.length,
       warning_count: warnings.length,
       failed_count: errors.length,
@@ -283,7 +291,16 @@ export async function ingestForDevice(admin: AdminClient, device: DeviceIdentity
     })
     .select("id")
     .single();
-  if (jobError || !jobRow) throw new Error("The sync could not be started.");
+  if (jobError || !jobRow) {
+    console.error("[health-connect] import job insert failed", {
+      userId: device.userId,
+      code: jobError?.code,
+      message: jobError?.message,
+      details: jobError?.details,
+    });
+    throw new Error("The sync could not be started.");
+  }
+
   const jobId = jobRow.id;
 
   try {

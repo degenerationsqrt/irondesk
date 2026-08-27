@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateByDay, normalizePayload, syncPayloadSchema } from "@/lib/imports/device-sync.server";
+import { DEVICE_SYNC_INITIAL_JOB_STATUS, aggregateByDay, normalizePayload, syncPayloadSchema } from "@/lib/imports/device-sync.server";
 import { rateLimited } from "@/routes/api/public/health-connect/unpair";
 
 const envelope = {
@@ -85,5 +85,14 @@ describe("unpair throttle", () => {
     const b = `token-b-${Math.random()}`;
     for (let i = 0; i < 6; i += 1) rateLimited(a);
     expect(rateLimited(b)).toBe(false);
+  });
+});
+
+describe("device sync import job status", () => {
+  const VALID_IMPORT_JOB_STATUSES = ["pending", "committing", "completed", "partial", "failed", "rolled_back"];
+
+  it("starts the job in a status the database constraint permits", () => {
+    expect(VALID_IMPORT_JOB_STATUSES).toContain(DEVICE_SYNC_INITIAL_JOB_STATUS);
+    expect(DEVICE_SYNC_INITIAL_JOB_STATUS).toBe("committing");
   });
 });
