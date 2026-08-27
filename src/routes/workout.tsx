@@ -24,7 +24,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth/auth-provider";
-import { exercisesQuery, historyQuery, workoutQuery } from "@/lib/irondesk/queries";
+import { exercisesQuery, historyQuery, progressionQuery, workoutQuery } from "@/lib/irondesk/queries";
+import { startLibraryWorkout } from "@/lib/irondesk/programs";
+import { lookupPoints, suggestWorkingWeight, type WorkingWeightSuggestion } from "@/lib/irondesk/progression";
 import * as repo from "@/lib/irondesk/repo";
 import type { ActiveWorkout, SetEntry, WorkoutExercise, WorkoutTemplate } from "@/lib/irondesk/types";
 import { formatLoadGuidance, fromKg, toKg, weightUnit } from "@/lib/irondesk/units";
@@ -111,6 +113,20 @@ function WorkoutStart({
     }
   };
 
+  /** Assignment-only content, started as free training after acknowledgment. */
+  const unlockTemplate = async (template: WorkoutTemplate) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await startLibraryWorkout(template.id, true);
+      invalidate();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not unlock that workout.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const begin = async (input: Parameters<typeof repo.startWorkout>[0]) => {
     setBusy(true);
     setError(null);
@@ -140,6 +156,7 @@ function WorkoutStart({
 
       <TemplateLibrary
         onStart={(t) => void startTemplate(t)}
+        {...(live ? { onUnlockStart: (t: WorkoutTemplate) => void unlockTemplate(t) } : {})}
         busy={busy}
         canStart={live}
         note="Demo mode is read-only — sign in to start a template and save your sets."
@@ -222,6 +239,8 @@ function WorkoutConsole({
   const invalidate = useIronDeskInvalidate();
   const units = useUnits();
   const unit = weightUnit(units);
+  const mode = useServiceMode();
+  const progression = useQuery(progressionQuery(mode)).data;
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>(initial.exercises);
   const [notes, setNotes] = useState(initial.notes);
@@ -293,6 +312,43 @@ function WorkoutConsole({
     };
   }, [exercises]);
 
+  /**
+   * Deterministic working-weight suggestions from the athlete's own completed
+   * sets. Suggestions are advisory only — every field stays editable and
+   * nothing is written until the athlete accepts or logs a set.
+   */
+  const suggestions = useMemo(() => {
+    const map: Record<string, WorkingWeightSuggestion> = {};
+    for (const ex of exercises) {
+      const points = lookupPoints(progression?.performance, {
+        exerciseId: ex.exerciseId ?? null,
+        name: ex.name,
+      });
+      const suggestion = suggestWorkingWeight({
+        name: ex.name,
+        equipment: ex.equipment,
+        targetReps: ex.targetReps,
+        targetRpe: ex.targetRpe ?? null,
+        points,
+        readiness: progression?.readiness ?? null,
+      });
+      if (suggestion) map[ex.id] = suggestion;
+    }
+    return map;
+  }, [exercises, progression]);
+
+  /** Applies a suggestion to every set the athlete has not completed yet. */
+  const applySuggestion = (exId: string) => {
+    const suggestion = suggestions[exId];
+    if (!suggestion) return;
+    const ex = exercises.find((e) => e.id === exId);
+    if (!ex) return;
+    for (const set of ex.sets) {
+      if (set.done) continue;
+      editSet(exId, set.id, { weightKg: suggestion.weightKg, reps: suggestion.reps });
+    }
+  };
+
   const patchLocal = (exId: string, setId: string, patch: Partial<SetEntry>) =>
     setExercises((prev) =>
       prev.map((e) =>
@@ -340,10 +396,11 @@ function WorkoutConsole({
     busySets.current.add(exId);
     const ex = exercises.find((e) => e.id === exId);
     const last = ex?.sets[ex.sets.length - 1];
+    const suggestion = suggestions[exId];
     const draft: SetEntry = {
       id: uid(),
-      weightKg: last?.weightKg ?? 20,
-      reps: last?.reps ?? 8,
+      weightKg: last?.weightKg ?? suggestion?.weightKg ?? 20,
+      reps: last?.reps ?? suggestion?.reps ?? 8,
       rpe: last?.rpe ?? 7,
       done: false,
     };
@@ -647,6 +704,31 @@ function WorkoutConsole({
                 {ex.isHeavy && <Pill tone="warning">Heavy</Pill>}
                 {ex.isDropSet && <Pill tone="primary">Drop set</Pill>}
               </div>
+
+              {suggestions[ex.id] && (
+                <div className="mb-3 rounded-lg border border-primary/30 bg-primary/8 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="label-eyebrow text-primary">Suggested working set</p>
+                      <p className="numeric mt-0.5 text-lg font-bold text-foreground">
+                        {fromKg(suggestions[ex.id]!.weightKg, units)} {unit} × {suggestions[ex.id]!.reps}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {suggestions[ex.id]!.deload && <Pill tone="warning">Deload</Pill>}
+                      {suggestions[ex.id]!.notes.map((note) => (
+                        <Pill key={note} tone="default">
+                          {note}
+                        </Pill>
+                      ))}
+                      <Button size="sm" variant="secondary" onClick={() => applySuggestion(ex.id)}>
+                        Use
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-1.5 text-xs text-muted-foreground">{suggestions[ex.id]!.reason}</p>
+                </div>
+              )}
 
               {subFor === ex.id && (
                 <div className="mb-3 rounded-lg border border-primary/30 bg-primary/8 p-3">

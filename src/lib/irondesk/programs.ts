@@ -245,6 +245,20 @@ export async function startAssignedWorkout(enrollmentId: string): Promise<string
   return res.data as string;
 }
 
+/**
+ * Starts any active template as free training. Assignment-only Legacy Beta
+ * content requires an explicit acknowledgment, which the database function
+ * verifies; prescriptions are snapshotted exactly as assigned delivery does.
+ */
+export async function startLibraryWorkout(templateId: string, acknowledged = false): Promise<string> {
+  const res = await supabase.rpc("start_library_workout", {
+    _template_id: templateId,
+    _acknowledged: acknowledged,
+  });
+  if (res.error) throw rpcError(res.error.message);
+  return res.data as string;
+}
+
 export interface AssignedSessionContext {
   sessionId: string;
   programName: string;

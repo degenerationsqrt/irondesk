@@ -8,6 +8,7 @@ import {
   recoveryData,
 } from "./data";
 import { LEGACY_TEMPLATES } from "./legacy-templates";
+import { demoProgressionContext, type ProgressionContext } from "./progression-source";
 import * as repo from "./repo";
 import type {
   ActiveWorkout,
@@ -46,6 +47,8 @@ export interface IronDeskService {
   /** Read-only IronDesk Originals plus (live only) the athlete's own templates. */
   getWorkoutTemplates(): Promise<WorkoutTemplate[]>;
   getWorkoutTemplate(id: string): Promise<WorkoutTemplate | null>;
+  /** Completed working sets + readiness feeding working-weight suggestions. */
+  getProgression(): Promise<ProgressionContext>;
 }
 
 const ok = <T>(value: T): Promise<T> => Promise.resolve(value);
@@ -64,6 +67,7 @@ export const demoService: IronDeskService = {
   getCoach: () => ok(coachData),
   getWorkoutTemplates: () => ok(LEGACY_TEMPLATES),
   getWorkoutTemplate: (id) => ok(LEGACY_TEMPLATES.find((t) => t.id === id) ?? null),
+  getProgression: () => ok(demoProgressionContext(exercises, recoveryData.readiness)),
 };
 
 export const liveService: IronDeskService = {
@@ -80,6 +84,7 @@ export const liveService: IronDeskService = {
   getCoach: () => repo.getCoach(),
   getWorkoutTemplates: () => repo.getWorkoutTemplates(),
   getWorkoutTemplate: (id) => repo.getWorkoutTemplate(id),
+  getProgression: () => repo.getProgressionContext(),
 };
 
 export function serviceFor(mode: ServiceMode): IronDeskService {
@@ -101,4 +106,5 @@ export const queryKeys = {
   coach: (mode: string) => ["irondesk", mode, "coach"] as const,
   templates: (mode: string) => ["irondesk", mode, "templates"] as const,
   template: (mode: string, id: string) => ["irondesk", mode, "template", id] as const,
+  progression: (mode: string) => ["irondesk", mode, "progression"] as const,
 };

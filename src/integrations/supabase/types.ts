@@ -160,6 +160,80 @@ export type Database = {
         }
         Relationships: []
       }
+      device_links: {
+        Row: {
+          created_at: string
+          data_source_id: string | null
+          id: string
+          label: string
+          last_sync_at: string | null
+          last_sync_summary: Json
+          platform: string
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data_source_id?: string | null
+          id?: string
+          label: string
+          last_sync_at?: string | null
+          last_sync_summary?: Json
+          platform?: string
+          token_hash: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data_source_id?: string | null
+          id?: string
+          label?: string
+          last_sync_at?: string | null
+          last_sync_summary?: Json
+          platform?: string
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "device_links_data_source_id_fkey"
+            columns: ["data_source_id"]
+            isOneToOne: false
+            referencedRelation: "data_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      device_pairings: {
+        Row: {
+          code_hash: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          label: string
+          user_id: string
+        }
+        Insert: {
+          code_hash: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          label?: string
+          user_id: string
+        }
+        Update: {
+          code_hash?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          label?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       equipment_catalog: {
         Row: {
           category: string
@@ -1515,6 +1589,10 @@ export type Database = {
       }
       start_assigned_workout: {
         Args: { _enrollment_id?: string }
+        Returns: string
+      }
+      start_library_workout: {
+        Args: { _acknowledged?: boolean; _template_id: string }
         Returns: string
       }
     }

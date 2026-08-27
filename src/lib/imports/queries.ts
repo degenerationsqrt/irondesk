@@ -9,6 +9,7 @@ export const importKeys = {
   mappings: ["irondesk", "live", "import-mappings"] as const,
   activities: ["irondesk", "live", "imported-activities"] as const,
   metrics: ["irondesk", "live", "imported-metrics"] as const,
+  devices: ["irondesk", "live", "linked-devices"] as const,
 };
 
 export const importJobsQuery = queryOptions({
@@ -34,4 +35,9 @@ export const importedActivitiesQuery = queryOptions({
 export const importedMetricsQuery = queryOptions({
   queryKey: importKeys.metrics,
   queryFn: () => importRepo.listHealthMetrics(),
+});
+
+export const linkedDevicesQuery = queryOptions({
+  queryKey: ["irondesk", "live", "linked-devices"] as const,
+  queryFn: () => importRepo.listLinkedDevices(),
 });

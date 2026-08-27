@@ -39,6 +39,8 @@ import {
   type TemplateRow,
 } from "./rows";
 import { isFreeStartable } from "./program-logic";
+import { performanceKey, type PerformanceMap, type PerformancePoint } from "./progression";
+import type { ProgressionContext } from "./progression-source";
 import { toWarnings } from "./programs";
 import type {
   ActiveWorkout,
@@ -1179,4 +1181,75 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
   }
 
   return sessionId;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Progression context (working-weight suggestions)                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Loads the signed-in athlete's completed working sets per movement, plus
+ * today's readiness score, for the pure progression engine.
+ *
+ * Keyed by canonical exercise id AND normalized exercise name so sessions
+ * logged against ad-hoc movements (no library link) still resolve.
+ */
+export async function getProgressionContext(): Promise<ProgressionContext> {
+  const [setsRes, recoveryRes] = await Promise.all([
+    supabase
+      .from("session_exercises")
+      .select(
+        "exercise_id, exercise_name, workout_sets(weight_kg, reps, rpe, completed, is_warmup), workout_sessions!inner(started_at, status)",
+      )
+      .returns<
+        {
+          exercise_id: string | null;
+          exercise_name: string;
+          workout_sets: {
+            weight_kg: number | null;
+            reps: number | null;
+            rpe: number | null;
+            completed: boolean;
+            is_warmup: boolean;
+          }[];
+          workout_sessions: { started_at: string; status: string };
+        }[]
+      >(),
+    supabase
+      .from("recovery_entries")
+      .select("readiness, day")
+      .order("day", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (setsRes.error) throw asIronDeskError(new Error(setsRes.error.message));
+
+  const performance: PerformanceMap = {};
+  const push = (key: string, point: PerformancePoint) => {
+    const list = performance[key] ?? [];
+    list.push(point);
+    performance[key] = list;
+  };
+
+  for (const row of setsRes.data ?? []) {
+    if (row.workout_sessions?.status !== "completed") continue;
+    const working = (row.workout_sets ?? []).filter(
+      (s) => s.completed && !s.is_warmup && (s.weight_kg ?? 0) > 0 && (s.reps ?? 0) > 0,
+    );
+    if (!working.length) continue;
+    const top = working.reduce((a, b) => ((b.weight_kg ?? 0) > (a.weight_kg ?? 0) ? b : a));
+    const point: PerformancePoint = {
+      date: row.workout_sessions.started_at,
+      weightKg: Number(top.weight_kg ?? 0),
+      reps: top.reps ?? 0,
+      rpe: top.rpe == null ? null : Number(top.rpe),
+      sets: working.length,
+    };
+    if (row.exercise_id) push(row.exercise_id, point);
+    if (row.exercise_name) push(performanceKey(row.exercise_name), point);
+  }
+  for (const list of Object.values(performance)) list.sort((a, b) => a.date.localeCompare(b.date));
+
+  const readinessRow = recoveryRes.data as { readiness: number | null } | null;
+  return { performance, readiness: readinessRow?.readiness ?? null };
 }

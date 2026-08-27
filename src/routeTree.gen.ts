@@ -28,6 +28,9 @@ import { Route as ExercisesIndexRouteImport } from './routes/exercises/index'
 import { Route as ExercisesExerciseIdRouteImport } from './routes/exercises/$exerciseId'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
+import { Route as ApiPublicHealthConnectIngestRouteImport } from './routes/api/public/health-connect/ingest'
+import { Route as ApiPublicHealthConnectPairRouteImport } from './routes/api/public/health-connect/pair'
+import { Route as ApiPublicHealthConnectUnpairRouteImport } from './routes/api/public/health-connect/unpair'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -127,6 +130,24 @@ const Char91DotmcpChar93InvokeToolToolRoute =
     path: '/.mcp/invoke-tool/$tool',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHealthConnectIngestRoute =
+  ApiPublicHealthConnectIngestRouteImport.update({
+    id: '/api/public/health-connect/ingest',
+    path: '/api/public/health-connect/ingest',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHealthConnectPairRoute =
+  ApiPublicHealthConnectPairRouteImport.update({
+    id: '/api/public/health-connect/pair',
+    path: '/api/public/health-connect/pair',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicHealthConnectUnpairRoute =
+  ApiPublicHealthConnectUnpairRouteImport.update({
+    id: '/api/public/health-connect/unpair',
+    path: '/api/public/health-connect/unpair',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -148,6 +169,9 @@ export interface FileRoutesByFullPath {
   '/exercises/': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
+  '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
+  '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -169,6 +193,9 @@ export interface FileRoutesByTo {
   '/exercises': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
+  '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
+  '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -191,6 +218,9 @@ export interface FileRoutesById {
   '/exercises/': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
+  '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
+  '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -214,6 +244,9 @@ export interface FileRouteTypes {
     | '/exercises/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/public/health-connect/ingest'
+    | '/api/public/health-connect/pair'
+    | '/api/public/health-connect/unpair'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -235,6 +268,9 @@ export interface FileRouteTypes {
     | '/exercises'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/public/health-connect/ingest'
+    | '/api/public/health-connect/pair'
+    | '/api/public/health-connect/unpair'
   id:
     | '__root__'
     | '/'
@@ -256,6 +292,9 @@ export interface FileRouteTypes {
     | '/exercises/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/public/health-connect/ingest'
+    | '/api/public/health-connect/pair'
+    | '/api/public/health-connect/unpair'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -278,6 +317,9 @@ export interface RootRouteChildren {
   ExercisesIndexRoute: typeof ExercisesIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
+  ApiPublicHealthConnectIngestRoute: typeof ApiPublicHealthConnectIngestRoute
+  ApiPublicHealthConnectPairRoute: typeof ApiPublicHealthConnectPairRoute
+  ApiPublicHealthConnectUnpairRoute: typeof ApiPublicHealthConnectUnpairRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -415,6 +457,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char91DotmcpChar93InvokeToolToolRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/health-connect/ingest': {
+      id: '/api/public/health-connect/ingest'
+      path: '/api/public/health-connect/ingest'
+      fullPath: '/api/public/health-connect/ingest'
+      preLoaderRoute: typeof ApiPublicHealthConnectIngestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/health-connect/pair': {
+      id: '/api/public/health-connect/pair'
+      path: '/api/public/health-connect/pair'
+      fullPath: '/api/public/health-connect/pair'
+      preLoaderRoute: typeof ApiPublicHealthConnectPairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/health-connect/unpair': {
+      id: '/api/public/health-connect/unpair'
+      path: '/api/public/health-connect/unpair'
+      fullPath: '/api/public/health-connect/unpair'
+      preLoaderRoute: typeof ApiPublicHealthConnectUnpairRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -439,6 +502,9 @@ const rootRouteChildren: RootRouteChildren = {
   ExercisesIndexRoute: ExercisesIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
+  ApiPublicHealthConnectIngestRoute: ApiPublicHealthConnectIngestRoute,
+  ApiPublicHealthConnectPairRoute: ApiPublicHealthConnectPairRoute,
+  ApiPublicHealthConnectUnpairRoute: ApiPublicHealthConnectUnpairRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

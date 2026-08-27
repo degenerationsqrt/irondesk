@@ -11,10 +11,19 @@
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
 
+    <!-- Only requested when the installed provider reports the feature as available. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+
+    <!-- Needed only for the user-initiated "Sync Now" push to their own IronDesk account. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:allowBackup="false"
-        android:label="IronDesk Health Export"
-        android:theme="@style/Theme.Material3.DynamicColors.DayNight">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.IronDeskHealth">
 
         <activity
             android:name=".MainActivity"
@@ -23,21 +32,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Health Connect requires a reachable privacy rationale. -->
+        </activity>
+
+        <!-- Health Connect requires a reachable rationale screen; it must not be the export UI. -->
+        <activity
+            android:name=".PrivacyActivity"
+            android:exported="true"
+            android:label="@string/privacy_title">
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
-        </activity>
-
-        <activity-alias
-            android:name="ViewPermissionUsageActivity"
-            android:exported="true"
-            android:targetActivity=".MainActivity"
-            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
-        </activity-alias>
+        </activity>
     </application>
 </manifest>

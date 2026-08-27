@@ -335,3 +335,78 @@ export async function listHealthMetrics(limit = 20): Promise<ImportedMetricSumma
     sourceType: row.source_type,
   }));
 }
+
+/* ---------------------------- device pairing ------------------------------ */
+
+/**
+ * Android companion pairing.
+ *
+ * The browser generates a one-time code, stores only its SHA-256 hash, and
+ * shows the plain code once. The companion app exchanges it at
+ * `/api/public/health-connect/pair` for a device token; the code itself is
+ * never recoverable from the database.
+ */
+const PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
+const PAIRING_TTL_MINUTES = 15;
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export interface PairingCode {
+  /** Shown once, never stored in plain text. */
+  code: string;
+  expiresAt: string;
+}
+
+export async function createPairingCode(label = "Android phone"): Promise<PairingCode> {
+  const userId = await requireUser();
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  const code = Array.from(bytes, (byte) => PAIRING_ALPHABET[byte % PAIRING_ALPHABET.length]).join("");
+  const expiresAt = new Date(Date.now() + PAIRING_TTL_MINUTES * 60_000).toISOString();
+
+  const { error } = await supabase.from("device_pairings").insert({
+    user_id: userId,
+    code_hash: await sha256Hex(code),
+    label,
+    expires_at: expiresAt,
+  });
+  if (error) throw asIronDeskError(error, "The pairing code could not be created.");
+  return { code, expiresAt };
+}
+
+export interface LinkedDevice {
+  id: string;
+  label: string;
+  platform: string;
+  createdAt: string;
+  lastSyncAt: string | null;
+  lastSyncSummary: { imported?: number; duplicates?: number; recoveryDays?: number; bodyweightDays?: number } | null;
+}
+
+export async function listLinkedDevices(): Promise<LinkedDevice[]> {
+  const { data, error } = await supabase
+    .from("device_links")
+    .select("id, label, platform, created_at, last_sync_at, last_sync_summary")
+    .order("created_at", { ascending: false });
+  if (error) throw asIronDeskError(error, "Linked devices could not be loaded.");
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    label: row.label,
+    platform: row.platform,
+    createdAt: row.created_at,
+    lastSyncAt: row.last_sync_at,
+    lastSyncSummary: (row.last_sync_summary as LinkedDevice["lastSyncSummary"]) ?? null,
+  }));
+}
+
+/** Revokes the device token; the phone can no longer sync until re-paired. */
+export async function unlinkDevice(id: string): Promise<void> {
+  await requireUser();
+  const { error } = await supabase.from("device_links").delete().eq("id", id);
+  if (error) throw asIronDeskError(error, "The device could not be unlinked.");
+}

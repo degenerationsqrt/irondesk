@@ -14,7 +14,10 @@ const migrations = readdirSync(migrationsDir)
   .sort()
   .map((f) => readFileSync(join(migrationsDir, f), "utf8"));
 const sql = migrations.join("\n");
-const hardening = migrations[migrations.length - 1]!;
+// Pinned by content, not position: later migrations are appended over time.
+const hardening = migrations.find((m) =>
+  m.includes("DROP POLICY IF EXISTS program_enrollments_insert_own"),
+)!;
 
 const LIFECYCLE = [
   "enroll_in_program",

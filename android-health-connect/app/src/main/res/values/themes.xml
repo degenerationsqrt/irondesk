@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.IronDeskHealth" parent="android:Theme.Material.NoActionBar" />
+</resources>

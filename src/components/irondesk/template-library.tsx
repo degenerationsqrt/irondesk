@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 
 import { EmptyState, Pill, SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { isFreeStartable, RELEASE_GATE_LABEL } from "@/lib/irondesk/program-logic";
@@ -149,7 +150,7 @@ function TemplateCard({
       <div className="mt-auto flex gap-2">
         {locked ? (
           <Button size="sm" variant="secondary" className="flex-1" onClick={onPreview}>
-            Preview prescription
+            <Lock className="size-4" /> Review &amp; unlock
           </Button>
         ) : (
           <>
@@ -169,11 +170,18 @@ function TemplateCard({
 
 export function TemplateLibrary({
   onStart,
+  onUnlockStart,
   busy,
   canStart,
   note,
 }: {
   onStart: (template: WorkoutTemplate) => void;
+  /**
+   * Starts an assignment-only template as free training after the athlete
+   * acknowledges its source-review warnings. Omitted when unlocking is not
+   * available (demo mode, or a session already in progress).
+   */
+  onUnlockStart?: (template: WorkoutTemplate) => void;
   busy: boolean;
   /** False in demo mode or while another session is in progress. */
   canStart: boolean;
@@ -187,6 +195,8 @@ export function TemplateLibrary({
   const [type, setType] = useState<TypeFilter>("all");
   const [area, setArea] = useState<string | "all">("all");
   const [preview, setPreview] = useState<WorkoutTemplate | null>(null);
+  /** Explicit per-preview consent required before unlocking gated content. */
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const areas = useMemo(() => {
     const found = new Set<string>();
@@ -307,8 +317,9 @@ export function TemplateLibrary({
       {assignedOnly.length > 0 && (
         <SectionCard title="Assigned Program Library" eyebrow="Legacy Beta">
           <p className="mb-3 text-xs text-muted-foreground">
-            These prescriptions are delivered through assigned programs only. Enroll in the matching program in My
-            Program to train them — they carry source review notes and cannot be launched as free training.
+            These prescriptions ship through assigned programs because they carry source review notes. Enroll in the
+            matching program in My Program for guided delivery and progression, or review the notes and unlock any
+            one of them as free training.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {assignedOnly.map((t) => (
@@ -341,7 +352,15 @@ export function TemplateLibrary({
         </SectionCard>
       )}
 
-      <Dialog open={Boolean(preview)} onOpenChange={(open) => !open && setPreview(null)}>
+      <Dialog
+        open={Boolean(preview)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreview(null);
+            setAcknowledged(false);
+          }
+        }}
+      >
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           {preview && (
             <>
@@ -370,6 +389,27 @@ export function TemplateLibrary({
                 <Button className="w-full" disabled={busy || !canStart} onClick={() => onStart(preview)}>
                   <Play className="size-4" /> Start this workout
                 </Button>
+              ) : onUnlockStart && canStart ? (
+                <div className="space-y-3">
+                  <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <Checkbox
+                      checked={acknowledged}
+                      onCheckedChange={(value) => setAcknowledged(value === true)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      I have reviewed the source notes above and accept responsibility for training this
+                      prescription outside an assigned program. Load and volume stay my judgement call.
+                    </span>
+                  </label>
+                  <Button
+                    className="w-full"
+                    disabled={busy || !acknowledged}
+                    onClick={() => onUnlockStart(preview)}
+                  >
+                    <Play className="size-4" /> Unlock &amp; start as free training
+                  </Button>
+                </div>
               ) : (
                 <Button className="w-full" variant="secondary" disabled>
                   <Lock className="size-4" /> Delivered through an assigned program

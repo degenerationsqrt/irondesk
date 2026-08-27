@@ -44,6 +44,9 @@ export const templatesQuery = (mode: ServiceMode) =>
 export const templateQuery = (mode: ServiceMode, id: string) =>
   queryOptions({ queryKey: queryKeys.template(mode, id), queryFn: () => serviceFor(mode).getWorkoutTemplate(id) });
 
+export const progressionQuery = (mode: ServiceMode) =>
+  queryOptions({ queryKey: queryKeys.progression(mode), queryFn: () => serviceFor(mode).getProgression() });
+
 /** Signed-in account context (profile + preferences + equipment). */
 export const accountQuery = queryOptions({
   queryKey: queryKeys.account,

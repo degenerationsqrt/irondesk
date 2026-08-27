@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, Smartphone } from "lucide-react";
+import { Download } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/irondesk/app-shell";
+import { DeviceSyncCard } from "@/components/irondesk/device-sync-card";
 import { ImportCard, RollbackButton } from "@/components/irondesk/import-panel";
 import { DataRow, SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
@@ -218,16 +219,7 @@ function ConnectionsPage() {
                 {exportState && <p className="mt-2 text-xs text-muted-foreground">{exportState}</p>}
               </SectionCard>
 
-              <SectionCard title="Android companion" eyebrow="Health Connect">
-                <p className="text-sm text-muted-foreground">
-                  Health Connect has no web API, so Android data arrives as a file. The companion app source lives in{" "}
-                  <code className="text-foreground">android-health-connect/</code> of this project: it reads the records you
-                  approve and writes a JSON export this page understands.
-                </p>
-                <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Smartphone className="size-3.5" /> Source only — no signed APK is distributed from here.
-                </p>
-              </SectionCard>
+              <DeviceSyncCard />
 
               {mappings.data?.length ? (
                 <SectionCard title="Saved field mappings" eyebrow="Reusable">
