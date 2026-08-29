@@ -1,4 +1,5 @@
 import type { Exercise } from "./types";
+import { formatWeight, formatWeightedSet, type Units } from "./units";
 
 export interface ExerciseEvidenceSummary {
   bestSet:
@@ -8,6 +9,11 @@ export interface ExerciseEvidenceSummary {
   volumeHistory: Exercise["history"];
   hasPerformanceHistory: boolean;
   hasCues: boolean;
+}
+
+export interface ExerciseCardEvidence {
+  bestSet: string;
+  estimatedOneRepMax: string;
 }
 
 /**
@@ -43,5 +49,28 @@ export function summarizeExerciseEvidence(
     ),
     hasPerformanceHistory: exercise.history.length > 0,
     hasCues: exercise.cues.length > 0,
+  };
+}
+
+/**
+ * Formats the evidence tiles used by the exercise library. Unavailable
+ * performance remains an em dash with no dangling unit, while reps-only
+ * movements retain their recorded rep evidence.
+ */
+export function formatExerciseCardEvidence(
+  exercise: Pick<Exercise, "best" | "e1rmTrend" | "history" | "cues">,
+  units: Units,
+): ExerciseCardEvidence {
+  const evidence = summarizeExerciseEvidence(exercise);
+  const latestE1rmKg = evidence.e1rmTrend.at(-1)?.e1rm;
+
+  return {
+    bestSet:
+      evidence.bestSet?.kind === "weighted"
+        ? formatWeightedSet(evidence.bestSet.weightKg, evidence.bestSet.reps, units)
+        : evidence.bestSet?.kind === "reps"
+          ? `${evidence.bestSet.reps} reps`
+          : "—",
+    estimatedOneRepMax: latestE1rmKg ? formatWeight(latestE1rmKg, units) : "—",
   };
 }

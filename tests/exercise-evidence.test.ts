@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { exercises } from "@/lib/irondesk/data";
-import { summarizeExerciseEvidence } from "@/lib/irondesk/exercise-evidence";
+import {
+  formatExerciseCardEvidence,
+  summarizeExerciseEvidence,
+} from "@/lib/irondesk/exercise-evidence";
 
 function exerciseNamed(name: string) {
   const exercise = exercises.find((candidate) => candidate.name === name);
@@ -46,5 +49,26 @@ describe("exercise detail evidence", () => {
     expect(conditioning.volumeHistory).toEqual([]);
     expect(conditioning.hasPerformanceHistory).toBe(true);
     expect(conditioning.hasCues).toBe(true);
+  });
+
+  it("renders unavailable card evidence without false zeroes or dangling units", () => {
+    expect(formatExerciseCardEvidence(exerciseNamed("Goblet Squat"), "imperial")).toEqual({
+      bestSet: "—",
+      estimatedOneRepMax: "—",
+    });
+    expect(
+      formatExerciseCardEvidence(exerciseNamed("Rowing Machine Intervals"), "imperial"),
+    ).toEqual({
+      bestSet: "—",
+      estimatedOneRepMax: "—",
+    });
+    expect(formatExerciseCardEvidence(exerciseNamed("Hanging Leg Raise"), "imperial")).toEqual({
+      bestSet: "14 reps",
+      estimatedOneRepMax: "—",
+    });
+    expect(formatExerciseCardEvidence(exerciseNamed("Back Squat"), "imperial")).toEqual({
+      bestSet: "330.7 lb × 3",
+      estimatedOneRepMax: "363.8 lb",
+    });
   });
 });
