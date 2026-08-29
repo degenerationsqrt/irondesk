@@ -5,7 +5,9 @@ import { useState } from "react";
 import { PageHeader } from "@/components/irondesk/app-shell";
 import { InsightCard, Pill, SectionCard } from "@/components/irondesk/primitives";
 import { coachQuery } from "@/lib/irondesk/queries";
+import { formatWeightText } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
+import { useUnits } from "@/lib/irondesk/use-units";
 
 export const Route = createFileRoute("/coach")({
   head: () => ({
@@ -17,7 +19,10 @@ export const Route = createFileRoute("/coach")({
           "Today's training recommendation, tomorrow's plan, load and risk notes, and suggested programming adjustments.",
       },
       { property: "og:title", content: "AI Coach — IronDesk" },
-      { property: "og:description", content: "Deterministic coaching insights from your training data." },
+      {
+        property: "og:description",
+        content: "Deterministic coaching insights from your training data.",
+      },
     ],
   }),
   component: CoachPage,
@@ -25,6 +30,7 @@ export const Route = createFileRoute("/coach")({
 
 function CoachPage() {
   const c = useModeData(coachQuery);
+  const units = useUnits();
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState<string[]>([]);
 
@@ -50,23 +56,27 @@ function CoachPage() {
               <Sparkles className="size-4.5 text-primary" />
             </span>
             <div>
-              <p className="text-base font-semibold">{c.today.headline}</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{c.today.body}</p>
+              <p className="text-base font-semibold">{formatWeightText(c.today.headline, units)}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                {formatWeightText(c.today.body, units)}
+              </p>
             </div>
           </div>
           <ul className="mt-4 space-y-2 border-t border-border pt-3">
             {c.today.bullets.map((b) => (
               <li key={b} className="flex gap-2 text-sm text-muted-foreground">
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
-                {b}
+                {formatWeightText(b, units)}
               </li>
             ))}
           </ul>
         </SectionCard>
 
         <SectionCard title="Tomorrow's Plan" eyebrow="Projected session">
-          <p className="text-base font-semibold">{c.tomorrow.headline}</p>
-          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{c.tomorrow.body}</p>
+          <p className="text-base font-semibold">{formatWeightText(c.tomorrow.headline, units)}</p>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {formatWeightText(c.tomorrow.body, units)}
+          </p>
           <div className="mt-3 space-y-2">
             {c.tomorrow.blocks.map((b) => (
               <div
@@ -74,7 +84,9 @@ function CoachPage() {
                 className="rounded-lg border border-border bg-surface-2/60 px-3 py-2.5"
               >
                 <p className="text-sm font-semibold">{b.name}</p>
-                <p className="numeric mt-0.5 text-xs text-muted-foreground">{b.detail}</p>
+                <p className="numeric mt-0.5 text-xs text-muted-foreground">
+                  {formatWeightText(b.detail, units)}
+                </p>
               </div>
             ))}
           </div>
@@ -89,7 +101,13 @@ function CoachPage() {
           bodyClassName="space-y-2"
         >
           {c.observations.map((o, i) => (
-            <InsightCard key={o.id} title={o.title} detail={o.detail} severity={o.severity} index={i + 1} />
+            <InsightCard
+              key={o.id}
+              title={formatWeightText(o.title, units)}
+              detail={formatWeightText(o.detail, units)}
+              severity={o.severity}
+              index={i + 1}
+            />
           ))}
         </SectionCard>
 
@@ -100,7 +118,13 @@ function CoachPage() {
           bodyClassName="space-y-2"
         >
           {c.riskNotes.map((o, i) => (
-            <InsightCard key={o.id} title={o.title} detail={o.detail} severity={o.severity} index={i + 1} />
+            <InsightCard
+              key={o.id}
+              title={formatWeightText(o.title, units)}
+              detail={formatWeightText(o.detail, units)}
+              severity={o.severity}
+              index={i + 1}
+            />
           ))}
         </SectionCard>
 
@@ -111,7 +135,13 @@ function CoachPage() {
           bodyClassName="space-y-2"
         >
           {c.adjustments.map((o, i) => (
-            <InsightCard key={o.id} title={o.title} detail={o.detail} severity={o.severity} index={i + 1} />
+            <InsightCard
+              key={o.id}
+              title={formatWeightText(o.title, units)}
+              detail={formatWeightText(o.detail, units)}
+              severity={o.severity}
+              index={i + 1}
+            />
           ))}
         </SectionCard>
       </div>
@@ -124,7 +154,7 @@ function CoachPage() {
               onClick={() => setQuestion(q)}
               className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
             >
-              {q}
+              {formatWeightText(q, units)}
             </button>
           ))}
         </div>
@@ -132,11 +162,14 @@ function CoachPage() {
         {asked.length > 0 && (
           <div className="mt-4 space-y-2">
             {asked.map((q, i) => (
-              <div key={`${q}-${i}`} className="rounded-lg border border-border bg-surface-2/60 p-3">
+              <div
+                key={`${q}-${i}`}
+                className="rounded-lg border border-border bg-surface-2/60 p-3"
+              >
                 <p className="text-sm font-semibold">{q}</p>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Queued. Conversational coaching responses arrive when the AI backend is connected —
-                  today's guidance above is generated from your logged sessions.
+                  Queued. Conversational coaching responses arrive when the AI backend is connected
+                  — today's guidance above is generated from your logged sessions.
                 </p>
               </div>
             ))}

@@ -94,7 +94,7 @@ export const dashboardDay: DashboardDay = {
     topLift: { exercise: "Back Squat", weightKg: 150, reps: 3 },
     e1rmDeltaKg: 3.5,
     prs: [
-      { exercise: "Back Squat", detail: "Est. 1RM 165 kg (+3.5)" },
+      { exercise: "Back Squat", detail: "Est. 1RM 165 kg (+3.5 kg)" },
       { exercise: "Romanian Deadlift", detail: "8 reps @ 130 kg — rep PR" },
     ],
   },
@@ -166,7 +166,8 @@ export const dashboardDay: DashboardDay = {
     {
       id: "g1",
       title: "Close the protein gap tonight",
-      detail: "Add 25 g casein or Greek yoghurt before bed to hit 190 g and support squat recovery.",
+      detail:
+        "Add 25 g casein or Greek yoghurt before bed to hit 190 g and support squat recovery.",
       severity: "warn",
     },
     {
@@ -207,7 +208,7 @@ export const dashboardDay: DashboardDay = {
   ],
   recentProgress: [
     { label: "Squat e1RM", value: "165 kg", delta: "+3.5 kg", positive: true },
-    { label: "Weekly tonnage", value: "58.4 t", delta: "+6%", positive: true },
+    { label: "Weekly tonnage", value: "58,400 kg", delta: "+6%", positive: true },
     { label: "Resting HR", value: "48 bpm", delta: "-2 bpm", positive: true },
     { label: "Sleep avg", value: "6h 58m", delta: "-18 min", positive: false },
   ],
@@ -418,6 +419,70 @@ const trend = (base: number, steps: number[]) =>
     e1rm: base + s,
   }));
 
+/**
+ * The signed-in database ships a broad system library. Demo mode should expose
+ * the same kind of choice instead of making the builder look like a ten-item
+ * prototype, so these lightweight rows fill out the searchable preview catalog.
+ */
+const demoExerciseLibraryExtras: Exercise[] = (
+  [
+    ["Goblet Squat", "Quads", ["Glutes", "Core"], "Kettlebell", "Squat"],
+    ["Bulgarian Split Squat", "Quads", ["Glutes", "Adductors"], "Dumbbell", "Lunge"],
+    ["Walking Lunge", "Quads", ["Glutes", "Hamstrings"], "Dumbbell", "Lunge"],
+    ["Step-Up", "Quads", ["Glutes"], "Dumbbell", "Lunge"],
+    ["Conventional Deadlift", "Hamstrings", ["Glutes", "Upper Back", "Core"], "Barbell", "Hinge"],
+    ["Trap Bar Deadlift", "Hamstrings", ["Glutes", "Quads"], "Trap Bar", "Hinge"],
+    ["Hip Thrust", "Glutes", ["Hamstrings"], "Barbell", "Hinge"],
+    ["Kettlebell Swing", "Glutes", ["Hamstrings", "Core"], "Kettlebell", "Hinge"],
+    ["Back Extension", "Lower Back", ["Glutes", "Hamstrings"], "Bodyweight", "Hinge"],
+    ["Leg Curl", "Hamstrings", ["Calves"], "Machine", "Isolation"],
+    ["Leg Extension", "Quads", [], "Machine", "Isolation"],
+    ["Standing Calf Raise", "Calves", [], "Machine", "Isolation"],
+    ["Incline Bench Press", "Chest", ["Front Delts", "Triceps"], "Barbell", "Horizontal Push"],
+    ["Dumbbell Bench Press", "Chest", ["Triceps"], "Dumbbell", "Horizontal Push"],
+    ["Machine Chest Press", "Chest", ["Triceps"], "Machine", "Horizontal Push"],
+    ["Push-Up", "Chest", ["Triceps", "Core"], "Bodyweight", "Horizontal Push"],
+    ["Cable Fly", "Chest", [], "Cable", "Isolation"],
+    ["Seated Dumbbell Press", "Shoulders", ["Triceps"], "Dumbbell", "Vertical Push"],
+    ["Lateral Raise", "Shoulders", [], "Dumbbell", "Isolation"],
+    ["Rear Delt Fly", "Shoulders", ["Upper Back"], "Dumbbell", "Isolation"],
+    ["Dip", "Triceps", ["Chest", "Shoulders"], "Dip Station", "Vertical Push"],
+    ["Pull-Up", "Lats", ["Biceps", "Upper Back"], "Pull-Up Bar", "Vertical Pull"],
+    ["Chin-Up", "Lats", ["Biceps"], "Pull-Up Bar", "Vertical Pull"],
+    ["Lat Pulldown", "Lats", ["Biceps"], "Cable", "Vertical Pull"],
+    ["Dumbbell Row", "Upper Back", ["Lats", "Biceps"], "Dumbbell", "Horizontal Pull"],
+    ["Seated Cable Row", "Upper Back", ["Lats", "Biceps"], "Cable", "Horizontal Pull"],
+    ["Face Pull", "Upper Back", ["Shoulders"], "Cable", "Horizontal Pull"],
+    ["Barbell Curl", "Biceps", ["Forearms"], "Barbell", "Isolation"],
+    ["Incline Dumbbell Curl", "Biceps", [], "Dumbbell", "Isolation"],
+    ["Triceps Pushdown", "Triceps", [], "Cable", "Isolation"],
+    ["Skullcrusher", "Triceps", [], "EZ Bar", "Isolation"],
+    ["Plank", "Core", ["Shoulders"], "Bodyweight", "Core"],
+    ["Cable Crunch", "Core", [], "Cable", "Core"],
+    ["Pallof Press", "Core", ["Obliques"], "Cable", "Core"],
+    ["Farmer Carry", "Core", ["Traps", "Forearms"], "Dumbbell", "Carry"],
+    ["Sled Push", "Quads", ["Glutes", "Calves"], "Sled", "Conditioning"],
+    ["Air Bike Intervals", "Full Body", ["Legs"], "Air Bike", "Conditioning"],
+    ["Treadmill Zone 2", "Full Body", ["Legs"], "Treadmill", "Conditioning"],
+    ["Jump Rope", "Calves", ["Shoulders"], "Jump Rope", "Conditioning"],
+  ] as const
+).map(([name, muscle, secondary, equipment, pattern]) => ({
+  id: `demo-${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")}`,
+  name,
+  muscle,
+  secondary: [...secondary],
+  equipment,
+  pattern,
+  favorite: false,
+  best: { weightKg: 0, reps: 0 },
+  e1rmTrend: [],
+  history: [],
+  cues: [],
+}));
+
 export const exercises: Exercise[] = [
   {
     id: "back-squat",
@@ -597,6 +662,7 @@ export const exercises: Exercise[] = [
     history: [{ date: "2026-08-22", detail: "4×6 @ 110 kg · RPE 8", tonnageKg: 2640 }],
     cues: ["Elbows high", "Vertical torso"],
   },
+  ...demoExerciseLibraryExtras,
 ];
 
 export const progressData: ProgressData = {
@@ -623,14 +689,14 @@ export const progressData: ProgressData = {
     { date: "Aug 26", squat: 165, bench: 119, deadlift: 202 },
   ],
   volume: [
-    { week: "W-8", tonnage: 44.2 },
-    { week: "W-7", tonnage: 47.8 },
-    { week: "W-6", tonnage: 51.1 },
-    { week: "W-5", tonnage: 38.4 },
-    { week: "W-4", tonnage: 52.6 },
-    { week: "W-3", tonnage: 54.9 },
-    { week: "W-2", tonnage: 55.1 },
-    { week: "W-1", tonnage: 58.4 },
+    { week: "W-8", tonnage: 44_200 },
+    { week: "W-7", tonnage: 47_800 },
+    { week: "W-6", tonnage: 51_100 },
+    { week: "W-5", tonnage: 38_400 },
+    { week: "W-4", tonnage: 52_600 },
+    { week: "W-3", tonnage: 54_900 },
+    { week: "W-2", tonnage: 55_100 },
+    { week: "W-1", tonnage: 58_400 },
   ],
   load: [
     { week: "W-8", acute: 380, chronic: 402 },
@@ -649,7 +715,7 @@ export const progressData: ProgressData = {
     { date: "Aug 12", vo2: 50.4 },
     { date: "Aug 26", vo2: 51.2 },
   ],
-  streak: { current: 23, best: 41, weeksHitTarget: 7 },
+  streak: { currentWeeks: 23, bestWeeks: 41, weeksTracked: 7 },
   prs: [
     { date: "2026-08-26", exercise: "Back Squat", detail: "Est. 1RM 165 kg (+3.5 kg)" },
     { date: "2026-08-26", exercise: "Romanian Deadlift", detail: "8 reps @ 130 kg" },
@@ -665,7 +731,11 @@ export const recoveryData: RecoveryData = {
   status: "Moderate — train, but cap intensity",
   recommendation:
     "Green-light for a moderate session. Keep top sets at RPE 7 and skip failure work. Prioritise a 40-minute zone 2 block instead of intervals.",
-  sleep: { hours: 6.7, efficiencyPercent: 88, note: "Self-reported — 48 min below your 7h 30m floor" },
+  sleep: {
+    hours: 6.7,
+    efficiencyPercent: 88,
+    note: "Self-reported — 48 min below your 7h 30m floor",
+  },
   restingHr: 48,
   hrvMs: null,
   soreness: [
@@ -717,7 +787,8 @@ export const coachData: CoachData = {
     {
       id: "o1",
       title: "Squat velocity is holding at higher load",
-      detail: "Three consecutive weeks of load increases with RPE stable at 8 — you are not yet near your ceiling.",
+      detail:
+        "Three consecutive weeks of load increases with RPE stable at 8 — you are not yet near your ceiling.",
       severity: "good",
     },
     {
@@ -737,13 +808,15 @@ export const coachData: CoachData = {
     {
       id: "r1",
       title: "Acute load 18% above chronic",
-      detail: "Still inside the sweet spot (0.8-1.3) but trending up for a third week. Plan a deload in 10-14 days.",
+      detail:
+        "Still inside the sweet spot (0.8-1.3) but trending up for a third week. Plan a deload in 10-14 days.",
       severity: "warn",
     },
     {
       id: "r2",
       title: "Sleep debt accumulating",
-      detail: "-2h 14m across the last four nights. This is the single strongest predictor of a missed session for you.",
+      detail:
+        "-2h 14m across the last four nights. This is the single strongest predictor of a missed session for you.",
       severity: "risk",
     },
     {
@@ -763,13 +836,15 @@ export const coachData: CoachData = {
     {
       id: "a2",
       title: "Convert one interval session to zone 2",
-      detail: "Swap Monday's rower intervals for 45 minutes steady to pull vigorous minutes back to target.",
+      detail:
+        "Swap Monday's rower intervals for 45 minutes steady to pull vigorous minutes back to target.",
       severity: "info",
     },
     {
       id: "a3",
       title: "Add 2 sets of horizontal pull weekly",
-      detail: "Chest-supported row, 12-15 reps, RPE 8. Rebalances push:pull ratio inside three weeks.",
+      detail:
+        "Chest-supported row, 12-15 reps, RPE 8. Rebalances push:pull ratio inside three weeks.",
       severity: "info",
     },
   ],

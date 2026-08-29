@@ -20,9 +20,23 @@ import {
   buildProgress,
   buildRecovery,
   sessionTotals,
+  toCardioHistorySession,
   toHistorySession,
+  toImportedHistorySession,
 } from "./derive";
+import type { ManualCardioInput } from "./cardio-log";
+import { dayKeyForInstant, safeTimeZone } from "./dates";
 import { IronDeskError, asIronDeskError } from "./errors";
+import {
+  excludeLikelyMirroredActivities,
+  importedActivitiesForLocalDay,
+  importedActivitiesToDashboard,
+  summarizeHealthMetricsByDay,
+  type HealthMetricRow,
+  type ImportedActivityRow,
+  type ImportedDashboardActivity,
+  type LoggedActivityIdentity,
+} from "./imported-data-adapter";
 import {
   FULL_SESSION_SELECT,
   FULL_TEMPLATE_SELECT,
@@ -38,6 +52,12 @@ import {
   type RecoveryRow,
   type TemplateRow,
 } from "./rows";
+import {
+  isExactSampleNutritionDay,
+  isExactSampleRecovery,
+  partitionSampleMeals,
+  sumNutritionMeals,
+} from "./sample-data";
 import { isFreeStartable } from "./program-logic";
 import { performanceKey, type PerformanceMap, type PerformancePoint } from "./progression";
 import type { ProgressionContext } from "./progression-source";
@@ -49,6 +69,7 @@ import type {
   Exercise,
   HistorySession,
   NutritionDay,
+  PersonalTemplateDraft,
   ProgressData,
   RecoveryData,
   ReleaseGate,
@@ -66,7 +87,8 @@ export interface AccountContext {
 
 async function requireUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) throw new IronDeskError("Your session expired. Sign in again.", "unauthenticated");
+  if (error || !data.user)
+    throw new IronDeskError("Your session expired. Sign in again.", "unauthenticated");
   return data.user.id;
 }
 
@@ -75,17 +97,6 @@ function unwrap<T>(res: { data: T | null; error: { message: string } | null }): 
   if (res.data == null) throw new IronDeskError("No data returned.", "not_found");
   return res.data;
 }
-
-const startOfToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const localDayKey = (d: Date = new Date()) => {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
 
 // ------------------------------------------------------------------- account
 export async function getAccount(retry = true): Promise<AccountContext> {
@@ -146,8 +157,49 @@ export async function setUserEquipment(equipmentIds: string[]): Promise<void> {
 }
 
 // ------------------------------------------------------------------ sessions
+/**
+ * Saves one completed manual cardio activity without creating a strength-style
+ * workout session. Optional evidence stays null; no load or zones are inferred.
+ */
+export async function logCardioSession(input: ManualCardioInput): Promise<string> {
+  const userId = await requireUserId();
+  const startedAt = new Date(input.startedAt);
+  if (!input.name.trim() || input.name.trim().length > 80)
+    throw new IronDeskError("Enter a valid cardio activity name.", "validation");
+  if (Number.isNaN(startedAt.getTime()))
+    throw new IronDeskError("Choose a valid cardio date and time.", "validation");
+  if (!Number.isInteger(input.durationMin) || input.durationMin < 1 || input.durationMin > 1_440)
+    throw new IronDeskError("Cardio duration must be between 1 and 1,440 minutes.", "validation");
+
+  const result = await supabase
+    .from("cardio_sessions")
+    .insert({
+      user_id: userId,
+      session_id: null,
+      name: input.name.trim(),
+      started_at: startedAt.toISOString(),
+      duration_min: input.durationMin,
+      distance_km: input.distanceKm,
+      calories: input.calories,
+      avg_hr: input.avgHr,
+      max_hr: input.maxHr,
+      cardio_load: input.cardioLoad,
+      active_zone_minutes: input.activeZoneMinutes,
+      zones: [],
+      notes: input.notes?.trim() || null,
+      is_sample: false,
+    })
+    .select("id")
+    .single();
+  return unwrap(result).id;
+}
+
 async function fetchSessions(options: { since?: Date; statuses?: string[]; limit?: number } = {}) {
-  let query = supabase.from("workout_sessions").select(FULL_SESSION_SELECT).order("started_at", { ascending: false });
+  let query = supabase
+    .from("workout_sessions")
+    .select(FULL_SESSION_SELECT)
+    .eq("is_sample", false)
+    .order("started_at", { ascending: false });
   if (options.since) query = query.gte("started_at", options.since.toISOString());
   if (options.statuses) query = query.in("status", options.statuses);
   if (options.limit) query = query.limit(options.limit);
@@ -155,9 +207,72 @@ async function fetchSessions(options: { since?: Date; statuses?: string[]; limit
   return unwrap(res);
 }
 
+async function fetchImportedActivities(
+  options: { since?: Date; limit?: number } = {},
+): Promise<ImportedActivityRow[]> {
+  let query = supabase
+    .from("imported_activities")
+    .select("*")
+    .order("started_at", { ascending: false });
+  if (options.since) query = query.gte("started_at", options.since.toISOString());
+  if (options.limit) query = query.limit(options.limit);
+  const res = await query.returns<ImportedActivityRow[]>();
+  if (res.error) throw asIronDeskError(new Error(res.error.message));
+  return res.data ?? [];
+}
+
+function loggedActivityIdentities(
+  sessions: FullSessionRow[],
+  cardio: CardioRow[] = [],
+): LoggedActivityIdentity[] {
+  return [
+    ...sessions.map((session) => ({
+      name: session.title,
+      startedAt: session.started_at,
+      durationMinutes: sessionTotals(session).durationMin,
+    })),
+    ...cardio.map((session) => ({
+      name: session.name,
+      startedAt: session.started_at,
+      durationMinutes: session.duration_min,
+    })),
+  ];
+}
+
+function withoutNativeMirrors(
+  imported: ImportedDashboardActivity[],
+  sessions: FullSessionRow[],
+  cardio: CardioRow[] = [],
+): ImportedDashboardActivity[] {
+  return excludeLikelyMirroredActivities(imported, loggedActivityIdentities(sessions, cardio));
+}
+
 export async function getHistory(): Promise<HistorySession[]> {
-  const rows = await fetchSessions({ statuses: ["completed"], limit: 100 });
-  return rows.map(toHistorySession);
+  const account = await getAccount();
+  const timeZone = safeTimeZone(account.profile?.timezone);
+  const [rows, cardioRes, importedRows] = await Promise.all([
+    fetchSessions({ statuses: ["completed"], limit: 100 }),
+    supabase
+      .from("cardio_sessions")
+      .select("*")
+      .eq("is_sample", false)
+      .order("started_at", { ascending: false })
+      .limit(100)
+      .returns<CardioRow[]>(),
+    fetchImportedActivities({ limit: 200 }),
+  ]);
+  if (cardioRes.error) throw asIronDeskError(new Error(cardioRes.error.message));
+  const cardio = cardioRes.data ?? [];
+  const imported = withoutNativeMirrors(
+    importedActivitiesToDashboard(importedRows, timeZone),
+    rows,
+    cardio,
+  );
+  return [
+    ...rows.map(toHistorySession),
+    ...cardio.map(toCardioHistorySession),
+    ...imported.map(toImportedHistorySession),
+  ].sort((left, right) => Date.parse(right.date) - Date.parse(left.date));
 }
 
 export async function getSession(id: string): Promise<HistorySession | null> {
@@ -165,6 +280,7 @@ export async function getSession(id: string): Promise<HistorySession | null> {
     .from("workout_sessions")
     .select(FULL_SESSION_SELECT)
     .eq("id", id)
+    .eq("is_sample", false)
     .maybeSingle()
     .returns<FullSessionRow | null>();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
@@ -173,55 +289,114 @@ export async function getSession(id: string): Promise<HistorySession | null> {
 
 // ----------------------------------------------------------------- dashboard
 export async function getDashboard(): Promise<DashboardDay | null> {
-  const [account, today, week, cardio, nutrition, recovery] = await Promise.all([
-    getAccount(),
-    fetchSessions({ since: startOfToday(), statuses: ["completed", "active"] }),
-    fetchSessions({ since: new Date(Date.now() - 7 * 86400000), statuses: ["completed"] }),
+  const account = await getAccount();
+  const timeZone = safeTimeZone(account.profile?.timezone);
+  const now = new Date();
+  const dayKey = dayKeyForInstant(now, timeZone);
+  const recentSince = new Date(now.getTime() - 7 * 86_400_000);
+  const [sessionRows, cardioRes, importedRows, nutrition, latestRecovery] = await Promise.all([
+    fetchSessions({ since: recentSince, statuses: ["completed", "active"] }),
     supabase
       .from("cardio_sessions")
       .select("*")
-      .gte("started_at", startOfToday().toISOString())
+      .eq("is_sample", false)
+      .gte("started_at", recentSince.toISOString())
       .returns<CardioRow[]>(),
-    getNutrition(),
+    fetchImportedActivities({ since: recentSince, limit: 500 }),
+    getNutrition(dayKey),
     getRecovery(),
   ]);
+  if (cardioRes.error) throw asIronDeskError(new Error(cardioRes.error.message));
 
-  const hasAnything = today.length || week.length || (cardio.data ?? []).length || nutrition || recovery;
+  const today = sessionRows.filter(
+    (session) => dayKeyForInstant(session.started_at, timeZone) === dayKey,
+  );
+  const week = sessionRows.filter((session) => session.status === "completed");
+  const cardioRows = cardioRes.data ?? [];
+  const todayCardio = cardioRows.filter(
+    (session) => dayKeyForInstant(session.started_at, timeZone) === dayKey,
+  );
+  const importedWeek = withoutNativeMirrors(
+    importedActivitiesToDashboard(importedRows, timeZone),
+    week,
+    cardioRows,
+  );
+  const todayImported = withoutNativeMirrors(
+    importedActivitiesForLocalDay(importedRows, dayKey, timeZone),
+    today,
+    todayCardio,
+  );
+  const recovery = latestRecovery?.day === dayKey ? latestRecovery : null;
+
+  const hasAnything =
+    today.length ||
+    week.length ||
+    todayCardio.length ||
+    todayImported.length ||
+    importedWeek.length ||
+    nutrition ||
+    recovery;
   if (!hasAnything) return null;
 
   return buildDashboard({
     todaySessions: today,
     weekSessions: week,
-    todayCardio: cardio.data ?? [],
+    todayCardio,
+    weekCardio: cardioRows,
+    todayImported,
+    weekImported: importedWeek,
     nutrition,
     recovery,
     preferences: account.preferences,
     displayName: account.profile?.display_name ?? "Athlete",
+    dayKey,
+    timeZone,
   });
 }
 
 // ----------------------------------------------------------------- nutrition
-export async function getNutrition(day = localDayKey()): Promise<NutritionDay | null> {
+export async function getNutrition(day?: string): Promise<NutritionDay | null> {
   const account = await getAccount();
-  const dayRes = await supabase.from("nutrition_days").select("*").eq("day", day).maybeSingle();
+  const effectiveDay = day ?? dayKeyForInstant(new Date(), account.profile?.timezone);
+  const dayRes = await supabase
+    .from("nutrition_days")
+    .select("*")
+    .eq("day", effectiveDay)
+    .eq("is_sample", false)
+    .maybeSingle();
   if (dayRes.error) throw asIronDeskError(new Error(dayRes.error.message));
   const row = (dayRes.data ?? null) as NutritionDayRow | null;
   if (!row) return null;
-  const mealsRes = await supabase.from("meals").select("*").eq("nutrition_day_id", row.id).order("created_at");
+  const mealsRes = await supabase
+    .from("meals")
+    .select("*")
+    .eq("nutrition_day_id", row.id)
+    .order("created_at");
   return buildNutrition(row, (mealsRes.data ?? []) as MealRow[], account.preferences);
 }
 
 /** Creates today's nutrition day from the user's targets if it does not exist. */
-export async function ensureNutritionDay(day = localDayKey()): Promise<string> {
+export async function ensureNutritionDay(day?: string): Promise<string> {
   const userId = await requireUserId();
   const account = await getAccount();
-  const existing = await supabase.from("nutrition_days").select("id").eq("day", day).maybeSingle();
+  const effectiveDay = day ?? dayKeyForInstant(new Date(), account.profile?.timezone);
+  const existing = await supabase
+    .from("nutrition_days")
+    .select("id, is_sample")
+    .eq("day", effectiveDay)
+    .maybeSingle();
+  if (existing.data?.id && existing.data.is_sample) {
+    throw new IronDeskError(
+      "Sample nutrition occupies today. Remove sample data in Settings before logging real meals.",
+      "conflict",
+    );
+  }
   if (existing.data?.id) return existing.data.id;
   const res = await supabase
     .from("nutrition_days")
     .insert({
       user_id: userId,
-      day,
+      day: effectiveDay,
       calorie_target: account.preferences?.calorie_target ?? null,
       protein_target_g: account.preferences?.protein_target_g ?? null,
     })
@@ -256,23 +431,40 @@ export async function addMeal(input: {
 
 export async function setHydration(ml: number): Promise<void> {
   const dayId = await ensureNutritionDay();
-  const { error } = await supabase.from("nutrition_days").update({ hydration_ml: Math.max(0, ml) }).eq("id", dayId);
+  const { error } = await supabase
+    .from("nutrition_days")
+    .update({ hydration_ml: Math.max(0, ml) })
+    .eq("id", dayId);
   if (error) throw asIronDeskError(new Error(error.message));
 }
 
 async function recalcNutritionTotals(dayId: string): Promise<void> {
-  const meals = await supabase.from("meals").select("calories, protein_g, carbs_g, fat_g").eq("nutrition_day_id", dayId);
+  const meals = await supabase
+    .from("meals")
+    .select("calories, protein_g, carbs_g, fat_g")
+    .eq("nutrition_day_id", dayId);
   const rows = meals.data ?? [];
-  const sum = (key: "calories" | "protein_g" | "carbs_g" | "fat_g") => rows.reduce((s, m) => s + (m[key] ?? 0), 0);
+  const sum = (key: "calories" | "protein_g" | "carbs_g" | "fat_g") =>
+    rows.reduce((s, m) => s + (m[key] ?? 0), 0);
   await supabase
     .from("nutrition_days")
-    .update({ calories: sum("calories"), protein_g: sum("protein_g"), carbs_g: sum("carbs_g"), fat_g: sum("fat_g") })
+    .update({
+      calories: sum("calories"),
+      protein_g: sum("protein_g"),
+      carbs_g: sum("carbs_g"),
+      fat_g: sum("fat_g"),
+    })
     .eq("id", dayId);
 }
 
 // ------------------------------------------------------------------ recovery
 export async function getRecovery(): Promise<RecoveryData | null> {
-  const res = await supabase.from("recovery_entries").select("*").order("day", { ascending: false }).limit(14);
+  const res = await supabase
+    .from("recovery_entries")
+    .select("*")
+    .eq("is_sample", false)
+    .order("day", { ascending: false })
+    .limit(14);
   if (res.error) throw asIronDeskError(new Error(res.error.message));
   const rows = (res.data ?? []) as RecoveryRow[];
   return buildRecovery(rows[0] ?? null, rows);
@@ -287,11 +479,11 @@ export async function saveRecoveryCheckIn(input: {
   note?: string;
   soreness?: { area: string; level: number }[];
 }): Promise<void> {
-  const userId = await requireUserId();
+  const [userId, account] = await Promise.all([requireUserId(), getAccount()]);
   const { error } = await supabase.from("recovery_entries").upsert(
     {
       user_id: userId,
-      day: localDayKey(),
+      day: dayKeyForInstant(new Date(), account.profile?.timezone),
       sleep_hours: input.sleepHours,
       sleep_efficiency_percent: input.sleepEfficiency ?? null,
       resting_hr: input.restingHr ?? null,
@@ -300,6 +492,7 @@ export async function saveRecoveryCheckIn(input: {
       note: input.note ?? null,
       soreness: input.soreness ?? [],
       source: "manual",
+      is_sample: false,
     },
     { onConflict: "user_id,day" },
   );
@@ -308,16 +501,47 @@ export async function saveRecoveryCheckIn(input: {
 
 // ------------------------------------------------------------------ progress
 export async function getProgress(): Promise<ProgressData | null> {
-  const [metricsRes, sessions] = await Promise.all([
-    supabase.from("body_metrics").select("*").order("recorded_at", { ascending: true }).returns<BodyMetricRow[]>(),
+  const account = await getAccount();
+  const timeZone = safeTimeZone(account.profile?.timezone);
+  const [metricsRes, importedMetricsRes, sessions] = await Promise.all([
+    supabase
+      .from("body_metrics")
+      .select("*")
+      .eq("is_sample", false)
+      .order("recorded_at", { ascending: true })
+      .returns<BodyMetricRow[]>(),
+    supabase
+      .from("health_metrics")
+      .select("*")
+      .eq("metric_type", "bodyweight_kg")
+      .order("recorded_at", { ascending: true })
+      .returns<HealthMetricRow[]>(),
     fetchSessions({ statuses: ["completed"], limit: 200 }),
   ]);
+  if (metricsRes.error) throw asIronDeskError(new Error(metricsRes.error.message));
+  if (importedMetricsRes.error) throw asIronDeskError(new Error(importedMetricsRes.error.message));
   const metrics = metricsRes.data ?? [];
-  if (!metrics.length && !sessions.length) return null;
-  return buildProgress(metrics, [...sessions].reverse());
+  const importedBodyweight = summarizeHealthMetricsByDay(importedMetricsRes.data ?? [], timeZone)
+    .filter((summary) => summary.bodyweightKg != null)
+    .map((summary) => ({ date: summary.day, kg: summary.bodyweightKg! }));
+  if (!metrics.length && !sessions.length && !importedBodyweight.length) return null;
+  const progress = buildProgress(metrics, [...sessions].reverse());
+  const merged = new Map(
+    progress.bodyweight.map((point) => [dayKeyForInstant(point.date, timeZone), point]),
+  );
+  for (const point of importedBodyweight)
+    if (!merged.has(point.date)) merged.set(point.date, point);
+  progress.bodyweight = [...merged.values()].sort((left, right) =>
+    left.date.localeCompare(right.date),
+  );
+  return progress;
 }
 
-export async function addBodyMetric(input: { weightKg: number; bodyFatPercent?: number; note?: string }): Promise<void> {
+export async function addBodyMetric(input: {
+  weightKg: number;
+  bodyFatPercent?: number;
+  note?: string;
+}): Promise<void> {
   const userId = await requireUserId();
   const { error } = await supabase.from("body_metrics").insert({
     user_id: userId,
@@ -342,20 +566,25 @@ async function loadExerciseHistory(): Promise<Map<string, ExerciseHistoryEntry[]
   const res = await supabase
     .from("session_exercises")
     .select(
-      "exercise_id, workout_sets(weight_kg, reps, completed, is_warmup), workout_sessions!inner(started_at, status)",
+      "exercise_id, workout_sets(weight_kg, reps, completed, is_warmup), workout_sessions!inner(started_at, status, is_sample)",
     )
     .not("exercise_id", "is", null)
     .returns<
       {
         exercise_id: string;
-        workout_sets: { weight_kg: number | null; reps: number | null; completed: boolean; is_warmup: boolean }[];
-        workout_sessions: { started_at: string; status: string };
+        workout_sets: {
+          weight_kg: number | null;
+          reps: number | null;
+          completed: boolean;
+          is_warmup: boolean;
+        }[];
+        workout_sessions: { started_at: string; status: string; is_sample: boolean };
       }[]
     >();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
   const map = new Map<string, ExerciseHistoryEntry[]>();
   for (const row of res.data ?? []) {
-    if (row.workout_sessions?.status !== "completed") continue;
+    if (row.workout_sessions?.status !== "completed" || row.workout_sessions.is_sample) continue;
     const working = (row.workout_sets ?? []).filter((s) => s.completed && !s.is_warmup);
     if (!working.length) continue;
     const best = working.reduce((a, b) => ((b.weight_kg ?? 0) > (a.weight_kg ?? 0) ? b : a));
@@ -376,12 +605,19 @@ async function loadExerciseHistory(): Promise<Map<string, ExerciseHistoryEntry[]
 
 export async function getExercises(): Promise<Exercise[]> {
   const [libRes, favRes, history] = await Promise.all([
-    supabase.from("exercises").select("*").eq("is_active", true).order("name").returns<ExerciseRow[]>(),
+    supabase
+      .from("exercises")
+      .select("*")
+      .eq("is_active", true)
+      .order("name")
+      .returns<ExerciseRow[]>(),
     supabase.from("exercise_favorites").select("exercise_id"),
     loadExerciseHistory(),
   ]);
   const favorites = new Set((favRes.data ?? []).map((f) => f.exercise_id));
-  return (libRes.data ?? []).map((row) => buildExercise(row, favorites.has(row.id), history.get(row.id) ?? []));
+  return (libRes.data ?? []).map((row) =>
+    buildExercise(row, favorites.has(row.id), history.get(row.id) ?? []),
+  );
 }
 
 export async function getExercise(id: string): Promise<Exercise | null> {
@@ -398,7 +634,9 @@ export async function getExercise(id: string): Promise<Exercise | null> {
 export async function toggleFavorite(exerciseId: string, favorite: boolean): Promise<void> {
   const userId = await requireUserId();
   if (favorite) {
-    const { error } = await supabase.from("exercise_favorites").upsert({ user_id: userId, exercise_id: exerciseId });
+    const { error } = await supabase
+      .from("exercise_favorites")
+      .upsert({ user_id: userId, exercise_id: exerciseId });
     if (error) throw asIronDeskError(new Error(error.message));
   } else {
     const { error } = await supabase
@@ -437,7 +675,8 @@ export async function createCustomExercise(input: CustomExerciseInput): Promise<
     .select("id")
     .single();
   if (res.error) {
-    if (res.error.message.includes("duplicate")) throw new IronDeskError("You already have a movement with that name.", "conflict");
+    if (res.error.message.includes("duplicate"))
+      throw new IronDeskError("You already have a movement with that name.", "conflict");
     throw asIronDeskError(new Error(res.error.message));
   }
   return res.data.id;
@@ -486,7 +725,8 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
       targetRpe: se.target_rpe == null ? null : Number(se.target_rpe),
       restSeconds: se.rest_seconds,
       loadGuidance: se.load_guidance,
-      sourceLoadUnit: se.source_load_unit === "lb" || se.source_load_unit === "kg" ? se.source_load_unit : null,
+      sourceLoadUnit:
+        se.source_load_unit === "lb" || se.source_load_unit === "kg" ? se.source_load_unit : null,
       isDropSet: se.is_drop_set,
       isHeavy: se.is_heavy,
       previous: "—",
@@ -510,6 +750,13 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
     id: row.id,
     status: (row.status as ActiveWorkout["status"]) ?? "active",
     persisted: true,
+    kind:
+      row.kind === "cardio" ||
+      row.kind === "conditioning" ||
+      row.kind === "mobility" ||
+      row.kind === "other"
+        ? row.kind
+        : "strength",
     title: row.title,
     focus: row.focus ?? "",
     startedAt: row.started_at,
@@ -596,7 +843,10 @@ export async function addSessionExercise(
     targetReps?: string | null;
   },
 ): Promise<string> {
-  const existing = await supabase.from("session_exercises").select("position").eq("session_id", sessionId);
+  const existing = await supabase
+    .from("session_exercises")
+    .select("position")
+    .eq("session_id", sessionId);
   const nextPosition = (existing.data ?? []).reduce((max, r) => Math.max(max, r.position), -1) + 1;
   const res = await supabase
     .from("session_exercises")
@@ -622,14 +872,21 @@ export async function removeSessionExercise(sessionExerciseId: string): Promise<
 
 export async function reorderSessionExercises(orderedIds: string[]): Promise<void> {
   await Promise.all(
-    orderedIds.map((id, index) => supabase.from("session_exercises").update({ position: index }).eq("id", id)),
+    orderedIds.map((id, index) =>
+      supabase.from("session_exercises").update({ position: index }).eq("id", id),
+    ),
   );
 }
 
 /** Substitution keeps the original exercise reference for later analysis. */
 export async function substituteSessionExercise(
   sessionExerciseId: string,
-  replacement: { exerciseId: string; name: string; muscle?: string | null; equipment?: string | null },
+  replacement: {
+    exerciseId: string;
+    name: string;
+    muscle?: string | null;
+    equipment?: string | null;
+  },
 ): Promise<void> {
   const current = await supabase
     .from("session_exercises")
@@ -654,7 +911,10 @@ export async function addSet(
   sessionExerciseId: string,
   input: { weightKg?: number; reps?: number; rpe?: number; isWarmup?: boolean },
 ): Promise<string> {
-  const existing = await supabase.from("workout_sets").select("set_number").eq("session_exercise_id", sessionExerciseId);
+  const existing = await supabase
+    .from("workout_sets")
+    .select("set_number")
+    .eq("session_exercise_id", sessionExerciseId);
   const nextNumber = (existing.data ?? []).reduce((max, r) => Math.max(max, r.set_number), 0) + 1;
   const res = await supabase
     .from("workout_sets")
@@ -670,7 +930,8 @@ export async function addSet(
     .single();
   if (res.error) {
     // Unique (session_exercise_id, set_number) guards against duplicate taps.
-    if (res.error.message.includes("duplicate")) throw new IronDeskError("That set was already added.", "conflict");
+    if (res.error.message.includes("duplicate"))
+      throw new IronDeskError("That set was already added.", "conflict");
     throw asIronDeskError(new Error(res.error.message));
   }
   return res.data.id;
@@ -711,7 +972,12 @@ export async function deleteSet(setId: string): Promise<void> {
 
 export async function updateSessionMeta(
   sessionId: string,
-  patch: { title?: string; focus?: string | null; notes?: string | null; perceivedEffort?: number | null },
+  patch: {
+    title?: string;
+    focus?: string | null;
+    notes?: string | null;
+    perceivedEffort?: number | null;
+  },
 ): Promise<void> {
   const payload: Database["public"]["Tables"]["workout_sessions"]["Update"] = {};
   if (patch.title !== undefined) payload["title"] = patch.title;
@@ -783,11 +1049,255 @@ export async function getCoach(): Promise<CoachData> {
 }
 
 // --------------------------------------------------------------- sample data
-/** Idempotent: does nothing if this account already holds sample rows. */
+export interface SampleDataSummary {
+  workouts: number;
+  cardio: number;
+  bodyMetrics: number;
+  nutritionDays: number;
+  recoveryEntries: number;
+  total: number;
+}
+
+export interface SampleDataRemovalResult extends SampleDataSummary {
+  seedMeals: number;
+  preservedNutritionDays: number;
+  preservedRecoveryEntries: number;
+}
+
+export async function getSampleDataSummary(): Promise<SampleDataSummary> {
+  const results = await Promise.all([
+    supabase
+      .from("workout_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("is_sample", true),
+    supabase
+      .from("cardio_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("is_sample", true),
+    supabase
+      .from("body_metrics")
+      .select("id", { count: "exact", head: true })
+      .eq("is_sample", true),
+    supabase
+      .from("nutrition_days")
+      .select("id", { count: "exact", head: true })
+      .eq("is_sample", true),
+    supabase
+      .from("recovery_entries")
+      .select("id", { count: "exact", head: true })
+      .eq("is_sample", true),
+  ]);
+  for (const result of results)
+    if (result.error) throw asIronDeskError(new Error(result.error.message));
+  const counts = results.map((result) => result.count ?? 0);
+  const workouts = counts[0] ?? 0;
+  const cardio = counts[1] ?? 0;
+  const bodyMetrics = counts[2] ?? 0;
+  const nutritionDays = counts[3] ?? 0;
+  const recoveryEntries = counts[4] ?? 0;
+  return {
+    workouts,
+    cardio,
+    bodyMetrics,
+    nutritionDays,
+    recoveryEntries,
+    total: workouts + cardio + bodyMetrics + nutritionDays + recoveryEntries,
+  };
+}
+
+/**
+ * Removes known sample data without cascading through meals or recovery values
+ * that no longer match the seed. Operations are deliberately sequential so a
+ * failed cleanup can be safely retried from the remaining `is_sample` rows.
+ */
+export async function removeSampleData(): Promise<SampleDataRemovalResult> {
+  await requireUserId();
+
+  const workoutResult = await supabase
+    .from("workout_sessions")
+    .delete()
+    .eq("is_sample", true)
+    .select("id");
+  if (workoutResult.error) throw asIronDeskError(new Error(workoutResult.error.message));
+
+  const cardioResult = await supabase
+    .from("cardio_sessions")
+    .delete()
+    .eq("is_sample", true)
+    .select("id");
+  if (cardioResult.error) throw asIronDeskError(new Error(cardioResult.error.message));
+
+  const bodyMetricResult = await supabase
+    .from("body_metrics")
+    .delete()
+    .eq("is_sample", true)
+    .select("id");
+  if (bodyMetricResult.error) throw asIronDeskError(new Error(bodyMetricResult.error.message));
+
+  let nutritionDays = 0;
+  let seedMeals = 0;
+  let preservedNutritionDays = 0;
+  const nutritionResult = await supabase
+    .from("nutrition_days")
+    .select("*")
+    .eq("is_sample", true)
+    .order("day", { ascending: true })
+    .returns<NutritionDayRow[]>();
+  if (nutritionResult.error) throw asIronDeskError(new Error(nutritionResult.error.message));
+
+  for (const nutritionDay of nutritionResult.data ?? []) {
+    const mealsResult = await supabase
+      .from("meals")
+      .select("*")
+      .eq("nutrition_day_id", nutritionDay.id)
+      .order("created_at", { ascending: true })
+      .returns<MealRow[]>();
+    if (mealsResult.error) throw asIronDeskError(new Error(mealsResult.error.message));
+
+    const { exactSeedMeals } = partitionSampleMeals(mealsResult.data ?? []);
+    for (const meal of exactSeedMeals) {
+      // Optimistic timestamp guard: an edit that lands after classification is
+      // preserved instead of being mistaken for an untouched seed meal.
+      const mealDeleteResult = await supabase
+        .from("meals")
+        .delete()
+        .eq("id", meal.id)
+        .eq("updated_at", meal.updated_at)
+        .select("id");
+      if (mealDeleteResult.error) throw asIronDeskError(new Error(mealDeleteResult.error.message));
+      seedMeals += mealDeleteResult.data?.length ?? 0;
+    }
+
+    // Re-read after guarded deletes so edited rows and meals added during the
+    // cleanup are included in the preserved day's derived totals.
+    const remainingMealsResult = await supabase
+      .from("meals")
+      .select("*")
+      .eq("nutrition_day_id", nutritionDay.id)
+      .order("created_at", { ascending: true })
+      .returns<MealRow[]>();
+    if (remainingMealsResult.error)
+      throw asIronDeskError(new Error(remainingMealsResult.error.message));
+    const remainingMeals = remainingMealsResult.data ?? [];
+
+    if (remainingMeals.length || !isExactSampleNutritionDay(nutritionDay)) {
+      // Only derived macro totals are recalculated, and only when meals remain.
+      // Targets, hydration and goal fields are intentionally absent from this
+      // patch so any parent-only user edits survive cleanup.
+      const nutritionPatch = remainingMeals.length
+        ? { is_sample: false, ...sumNutritionMeals(remainingMeals) }
+        : { is_sample: false };
+      const preserveResult = await supabase
+        .from("nutrition_days")
+        .update(nutritionPatch)
+        .eq("id", nutritionDay.id)
+        .eq("is_sample", true)
+        .select("id");
+      if (preserveResult.error) throw asIronDeskError(new Error(preserveResult.error.message));
+      preservedNutritionDays += preserveResult.data?.length ?? 0;
+    } else {
+      const deleteResult = await supabase
+        .from("nutrition_days")
+        .delete()
+        .eq("id", nutritionDay.id)
+        .eq("is_sample", true)
+        .eq("updated_at", nutritionDay.updated_at)
+        .select("id");
+      if (deleteResult.error) throw asIronDeskError(new Error(deleteResult.error.message));
+      if (deleteResult.data?.length) {
+        nutritionDays += deleteResult.data.length;
+      } else {
+        // A parent edit that races the optimistic delete is real evidence.
+        const preserveResult = await supabase
+          .from("nutrition_days")
+          .update({ is_sample: false })
+          .eq("id", nutritionDay.id)
+          .eq("is_sample", true)
+          .select("id");
+        if (preserveResult.error) throw asIronDeskError(new Error(preserveResult.error.message));
+        preservedNutritionDays += preserveResult.data?.length ?? 0;
+      }
+    }
+  }
+
+  let recoveryEntries = 0;
+  let preservedRecoveryEntries = 0;
+  const recoveryResult = await supabase
+    .from("recovery_entries")
+    .select("*")
+    .eq("is_sample", true)
+    .order("day", { ascending: true })
+    .returns<RecoveryRow[]>();
+  if (recoveryResult.error) throw asIronDeskError(new Error(recoveryResult.error.message));
+
+  for (const entry of recoveryResult.data ?? []) {
+    if (isExactSampleRecovery(entry)) {
+      const deleteResult = await supabase
+        .from("recovery_entries")
+        .delete()
+        .eq("id", entry.id)
+        .eq("is_sample", true)
+        .eq("updated_at", entry.updated_at)
+        .select("id");
+      if (deleteResult.error) throw asIronDeskError(new Error(deleteResult.error.message));
+      if (deleteResult.data?.length) {
+        recoveryEntries += deleteResult.data.length;
+        continue;
+      }
+    }
+
+    // A non-match, including a row edited after the guarded delete was
+    // classified, is real evidence. Preserve every field and clear only the
+    // sample marker.
+    const preserveResult = await supabase
+      .from("recovery_entries")
+      .update({ is_sample: false })
+      .eq("id", entry.id)
+      .eq("is_sample", true)
+      .select("id");
+    if (preserveResult.error) throw asIronDeskError(new Error(preserveResult.error.message));
+    preservedRecoveryEntries += preserveResult.data?.length ?? 0;
+  }
+
+  const workouts = workoutResult.data?.length ?? 0;
+  const cardio = cardioResult.data?.length ?? 0;
+  const bodyMetrics = bodyMetricResult.data?.length ?? 0;
+  return {
+    workouts,
+    cardio,
+    bodyMetrics,
+    nutritionDays,
+    recoveryEntries,
+    seedMeals,
+    preservedNutritionDays,
+    preservedRecoveryEntries,
+    total: workouts + cardio + bodyMetrics + nutritionDays + recoveryEntries,
+  };
+}
+
+/** Idempotent: does nothing if this account already holds any sample rows. */
 export async function addSampleData(): Promise<{ created: boolean }> {
   const userId = await requireUserId();
-  const existing = await supabase.from("workout_sessions").select("id").eq("is_sample", true).limit(1);
-  if ((existing.data ?? []).length) return { created: false };
+  const existingSamples = await getSampleDataSummary();
+  if (existingSamples.total) return { created: false };
+
+  const account = await getAccount();
+  const sampleDay = dayKeyForInstant(new Date(), account.profile?.timezone);
+  // Read both unique day slots before creating any samples. Inserts below are
+  // conditional and never upsert, so real nutrition/recovery cannot be
+  // replaced even if seeding is reintroduced in the UI later.
+  const existingNutrition = await supabase
+    .from("nutrition_days")
+    .select("id, is_sample")
+    .eq("day", sampleDay)
+    .maybeSingle();
+  if (existingNutrition.error) throw asIronDeskError(new Error(existingNutrition.error.message));
+  const existingRecovery = await supabase
+    .from("recovery_entries")
+    .select("id, is_sample")
+    .eq("day", sampleDay)
+    .maybeSingle();
+  if (existingRecovery.error) throw asIronDeskError(new Error(existingRecovery.error.message));
 
   const library = await supabase
     .from("exercises")
@@ -805,7 +1315,12 @@ export async function addSampleData(): Promise<{ created: boolean }> {
     ]);
   const byName = new Map((library.data ?? []).map((e) => [e.name, e]));
 
-  const plans: { dayOffset: number; title: string; focus: string; movements: [string, number, number[]][] }[] = [
+  const plans: {
+    dayOffset: number;
+    title: string;
+    focus: string;
+    movements: [string, number, number[]][];
+  }[] = [
     {
       dayOffset: 6,
       title: "Lower — Squat Focus",
@@ -921,12 +1436,12 @@ export async function addSampleData(): Promise<{ created: boolean }> {
   }));
   await supabase.from("body_metrics").insert(metrics);
 
-  const dayRes = await supabase
-    .from("nutrition_days")
-    .upsert(
-      {
+  if (!existingNutrition.data) {
+    const dayRes = await supabase
+      .from("nutrition_days")
+      .insert({
         user_id: userId,
-        day: localDayKey(),
+        day: sampleDay,
         calorie_target: 2900,
         protein_target_g: 185,
         carb_target_g: 320,
@@ -939,12 +1454,10 @@ export async function addSampleData(): Promise<{ created: boolean }> {
         weight_goal_direction: "cut",
         weight_goal_rate_kg_per_week: 0.3,
         is_sample: true,
-      },
-      { onConflict: "user_id,day" },
-    )
-    .select("id")
-    .single();
-  if (dayRes.data?.id) {
+      })
+      .select("id")
+      .single();
+    if (dayRes.error) throw asIronDeskError(new Error(dayRes.error.message));
     await supabase.from("meals").insert([
       {
         nutrition_day_id: dayRes.data.id,
@@ -979,10 +1492,10 @@ export async function addSampleData(): Promise<{ created: boolean }> {
     ]);
   }
 
-  await supabase.from("recovery_entries").upsert(
-    {
+  if (!existingRecovery.data) {
+    const recoveryInsert = await supabase.from("recovery_entries").insert({
       user_id: userId,
-      day: localDayKey(),
+      day: sampleDay,
       readiness: 72,
       sleep_hours: 7.4,
       sleep_efficiency_percent: 89,
@@ -996,9 +1509,9 @@ export async function addSampleData(): Promise<{ created: boolean }> {
       note: "Sample check-in.",
       source: "manual",
       is_sample: true,
-    },
-    { onConflict: "user_id,day" },
-  );
+    });
+    if (recoveryInsert.error) throw asIronDeskError(new Error(recoveryInsert.error.message));
+  }
 
   return { created: true };
 }
@@ -1017,6 +1530,26 @@ function releaseGateOf(value: string | null): ReleaseGate {
     : "public";
 }
 
+/**
+ * Repository-level visibility guard for personal templates. System templates
+ * may intentionally be assignment-only, but an athlete-owned template is not
+ * readable by the library until its child rows have been saved and the parent
+ * has been finalized for free starts.
+ */
+export function isTemplateVisibleInLibrary(
+  row: Pick<
+    TemplateRow,
+    "is_system" | "release_gate" | "requires_acknowledgment" | "library_startable"
+  >,
+): boolean {
+  if (row.is_system) return true;
+  return (
+    releaseGateOf(row.release_gate) === "public" &&
+    (row.library_startable ?? true) &&
+    !(row.requires_acknowledgment ?? false)
+  );
+}
+
 function mapTemplate(row: TemplateRow): WorkoutTemplate {
   return {
     id: row.id,
@@ -1029,7 +1562,8 @@ function mapTemplate(row: TemplateRow): WorkoutTemplate {
     notes: row.notes,
     kind: "strength",
     environment: row.environment === "home" || row.environment === "gym" ? row.environment : null,
-    workoutType: row.workout_type === "heavy" || row.workout_type === "pump" ? row.workout_type : null,
+    workoutType:
+      row.workout_type === "heavy" || row.workout_type === "pump" ? row.workout_type : null,
     category: row.category,
     level: row.level,
     estimatedMinutes: row.estimated_minutes,
@@ -1054,7 +1588,8 @@ function mapTemplate(row: TemplateRow): WorkoutTemplate {
         targetRpe: te.target_rpe == null ? null : Number(te.target_rpe),
         restSeconds: te.rest_seconds,
         loadGuidance: te.load_guidance,
-        sourceLoadUnit: te.source_load_unit === "lb" || te.source_load_unit === "kg" ? te.source_load_unit : null,
+        sourceLoadUnit:
+          te.source_load_unit === "lb" || te.source_load_unit === "kg" ? te.source_load_unit : null,
         isDropSet: te.is_drop_set,
         isHeavy: te.is_heavy,
         notes: te.notes,
@@ -1070,7 +1605,7 @@ export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> {
     .order("name", { ascending: true })
     .returns<TemplateRow[]>();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
-  return (res.data ?? []).map(mapTemplate);
+  return (res.data ?? []).filter(isTemplateVisibleInLibrary).map(mapTemplate);
 }
 
 export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplate | null> {
@@ -1081,7 +1616,228 @@ export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplate | 
     .maybeSingle()
     .returns<TemplateRow | null>();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
-  return res.data ? mapTemplate(res.data) : null;
+  return res.data && isTemplateVisibleInLibrary(res.data) ? mapTemplate(res.data) : null;
+}
+
+interface NormalizedPersonalTemplateDraft {
+  name: string;
+  focus: string | null;
+  exercises: {
+    exerciseId: string;
+    name: string;
+    targetSets: number;
+    targetReps: string;
+  }[];
+}
+
+/** Pure validation shared by the builder UI and the repository write gate. */
+export function normalizePersonalTemplateDraft(
+  draft: PersonalTemplateDraft,
+): NormalizedPersonalTemplateDraft {
+  const name = draft.name.trim();
+  const focus = draft.focus?.trim() || null;
+  if (!name) throw new IronDeskError("Name your workout before saving it.", "validation");
+  if (name.length > 80)
+    throw new IronDeskError("Workout name must be 80 characters or fewer.", "validation");
+  if (focus && focus.length > 120)
+    throw new IronDeskError("Workout focus must be 120 characters or fewer.", "validation");
+  if (draft.exercises.length < 1)
+    throw new IronDeskError("Add at least one movement before saving.", "validation");
+  if (draft.exercises.length > 30)
+    throw new IronDeskError("A saved workout can contain at most 30 movements.", "validation");
+
+  const seen = new Set<string>();
+  const exercises = draft.exercises.map((exercise) => {
+    const exerciseId = exercise.exerciseId.trim();
+    const targetReps = exercise.targetReps.trim();
+    if (!exerciseId)
+      throw new IronDeskError("Every movement must come from the exercise library.", "validation");
+    if (seen.has(exerciseId))
+      throw new IronDeskError(
+        "Each movement can appear only once in a saved workout.",
+        "validation",
+      );
+    seen.add(exerciseId);
+    if (
+      !Number.isInteger(exercise.targetSets) ||
+      exercise.targetSets < 1 ||
+      exercise.targetSets > 20
+    )
+      throw new IronDeskError("Sets must be a whole number from 1 to 20.", "validation");
+    if (!targetReps || targetReps.length > 32)
+      throw new IronDeskError("Rep targets must be between 1 and 32 characters.", "validation");
+    return {
+      exerciseId,
+      name: exercise.name.trim(),
+      targetSets: exercise.targetSets,
+      targetReps,
+    };
+  });
+
+  return { name, focus, exercises };
+}
+
+const STAGED_PERSONAL_TEMPLATE = {
+  release_gate: "coach_review",
+  requires_acknowledgment: true,
+  library_startable: false,
+} as const;
+
+const FINALIZED_PERSONAL_TEMPLATE = {
+  release_gate: "public",
+  requires_acknowledgment: false,
+  library_startable: true,
+} as const;
+
+async function cleanupStagedPersonalTemplate(
+  templateId: string,
+  userId: string,
+): Promise<string | null> {
+  const cleanup = await supabase
+    .from("workout_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("release_gate", STAGED_PERSONAL_TEMPLATE.release_gate)
+    .eq("library_startable", STAGED_PERSONAL_TEMPLATE.library_startable);
+  return cleanup.error?.message ?? null;
+}
+
+async function failAfterStagedTemplateCleanup(
+  templateId: string,
+  userId: string,
+  failureMessage: string,
+): Promise<never> {
+  const cleanupMessage = await cleanupStagedPersonalTemplate(templateId, userId);
+  if (cleanupMessage) {
+    throw new IronDeskError(
+      `The workout could not be completed (${failureMessage}), and automatic cleanup also failed: ${cleanupMessage}`,
+      "database",
+    );
+  }
+  throw asIronDeskError(new Error(failureMessage));
+}
+
+/**
+ * Creates an owner-scoped personal template without exposing a partial parent.
+ * Exercise names are re-read through RLS, the parent is staged as non-startable,
+ * ordered children are inserted, and only then is the parent finalized. Either
+ * child or finalization failure removes only a still-staged owner row.
+ */
+export async function createPersonalWorkoutTemplate(draft: PersonalTemplateDraft): Promise<string> {
+  const userId = await requireUserId();
+  const normalized = normalizePersonalTemplateDraft(draft);
+  const exerciseIds = normalized.exercises.map((exercise) => exercise.exerciseId);
+  const library = await supabase
+    .from("exercises")
+    .select("id, name")
+    .in("id", exerciseIds)
+    .eq("is_active", true);
+  if (library.error) throw asIronDeskError(new Error(library.error.message));
+  const canonicalNames = new Map((library.data ?? []).map((row) => [row.id, row.name]));
+  if (canonicalNames.size !== exerciseIds.length)
+    throw new IronDeskError(
+      "One or more selected movements are no longer available. Refresh the library and try again.",
+      "validation",
+    );
+
+  const parent = await supabase
+    .from("workout_templates")
+    .insert({
+      user_id: userId,
+      name: normalized.name,
+      focus: normalized.focus,
+      notes: null,
+      is_system: false,
+      source_key: null,
+      source_name: null,
+      source_version: 1,
+      environment: null,
+      workout_type: null,
+      category: "strength",
+      level: null,
+      estimated_minutes: null,
+      tags: ["custom"],
+      sort_order: 1_000,
+      legacy_day_id: null,
+      ...STAGED_PERSONAL_TEMPLATE,
+      warnings: [],
+    })
+    .select("id")
+    .single();
+  const templateId = unwrap(parent).id;
+
+  const children = normalized.exercises.map((exercise, position) => ({
+    template_id: templateId,
+    exercise_id: exercise.exerciseId,
+    exercise_name: canonicalNames.get(exercise.exerciseId)!,
+    position,
+    target_sets: exercise.targetSets,
+    target_reps: exercise.targetReps,
+    target_rpe: null,
+    rest_seconds: null,
+    load_guidance: null,
+    source_load_unit: null,
+    is_drop_set: false,
+    is_heavy: false,
+    notes: null,
+  }));
+  const inserted = await supabase.from("template_exercises").insert(children);
+  if (inserted.error) {
+    return failAfterStagedTemplateCleanup(templateId, userId, inserted.error.message);
+  }
+
+  const finalized = await supabase
+    .from("workout_templates")
+    .update(FINALIZED_PERSONAL_TEMPLATE)
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("release_gate", STAGED_PERSONAL_TEMPLATE.release_gate)
+    .eq("library_startable", STAGED_PERSONAL_TEMPLATE.library_startable)
+    .select("id")
+    .maybeSingle();
+  if (finalized.error) {
+    return failAfterStagedTemplateCleanup(templateId, userId, finalized.error.message);
+  }
+  if (finalized.data?.id !== templateId) {
+    return failAfterStagedTemplateCleanup(
+      templateId,
+      userId,
+      "The workout could not be finalized. Refresh the library and try again.",
+    );
+  }
+  return templateId;
+}
+
+/** Deletes only an explicitly verified owner-scoped personal template. */
+export async function deletePersonalWorkoutTemplate(templateId: string): Promise<void> {
+  const userId = await requireUserId();
+  const existing = await supabase
+    .from("workout_templates")
+    .select("id, user_id, is_system")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (existing.error) throw asIronDeskError(new Error(existing.error.message));
+  if (!existing.data)
+    throw new IronDeskError("That personal workout is no longer available.", "not_found");
+  if (existing.data.is_system || existing.data.user_id !== userId)
+    throw new IronDeskError("IronDesk Originals cannot be deleted.", "validation");
+
+  const removed = await supabase
+    .from("workout_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .select("id");
+  if (removed.error) throw asIronDeskError(new Error(removed.error.message));
+  if (!removed.data?.length)
+    throw new IronDeskError(
+      "That personal workout was not deleted. Refresh and try again.",
+      "conflict",
+    );
 }
 
 /**
@@ -1099,7 +1855,10 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
 
   const active = await getActiveWorkout();
   if (active) {
-    throw new IronDeskError("You already have a session in progress. Finish or cancel it first.", "conflict");
+    throw new IronDeskError(
+      "You already have a session in progress. Finish or cancel it first.",
+      "conflict",
+    );
   }
 
   const template = await getWorkoutTemplate(templateId);
@@ -1128,10 +1887,15 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
   const sessionId = unwrap(created).id;
 
   // Resolve muscle/equipment context from the canonical library where linked.
-  const exerciseIds = template.exercises.map((e) => e.exerciseId).filter((id): id is string => Boolean(id));
+  const exerciseIds = template.exercises
+    .map((e) => e.exerciseId)
+    .filter((id): id is string => Boolean(id));
   const context = new Map<string, { primary_muscle: string; equipment: string }>();
   if (exerciseIds.length) {
-    const lib = await supabase.from("exercises").select("id, primary_muscle, equipment").in("id", exerciseIds);
+    const lib = await supabase
+      .from("exercises")
+      .select("id, primary_muscle, equipment")
+      .in("id", exerciseIds);
     for (const row of lib.data ?? []) context.set(row.id, row);
   }
 
@@ -1199,7 +1963,7 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
     supabase
       .from("session_exercises")
       .select(
-        "exercise_id, exercise_name, workout_sets(weight_kg, reps, rpe, completed, is_warmup), workout_sessions!inner(started_at, status)",
+        "exercise_id, exercise_name, workout_sets(weight_kg, reps, rpe, completed, is_warmup), workout_sessions!inner(started_at, status, is_sample)",
       )
       .returns<
         {
@@ -1212,12 +1976,13 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
             completed: boolean;
             is_warmup: boolean;
           }[];
-          workout_sessions: { started_at: string; status: string };
+          workout_sessions: { started_at: string; status: string; is_sample: boolean };
         }[]
       >(),
     supabase
       .from("recovery_entries")
       .select("readiness, day")
+      .eq("is_sample", false)
       .order("day", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -1232,7 +1997,7 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
   };
 
   for (const row of setsRes.data ?? []) {
-    if (row.workout_sessions?.status !== "completed") continue;
+    if (row.workout_sessions?.status !== "completed" || row.workout_sessions.is_sample) continue;
     const working = (row.workout_sets ?? []).filter(
       (s) => s.completed && !s.is_warmup && (s.weight_kg ?? 0) > 0 && (s.reps ?? 0) > 0,
     );

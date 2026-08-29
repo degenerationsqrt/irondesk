@@ -14,7 +14,9 @@ import {
 } from "@/components/irondesk/primitives";
 import { progressQuery } from "@/lib/irondesk/queries";
 import { ProgressEmptyState } from "@/components/irondesk/empty-states";
+import { formatWeight, formatWeightText, fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
+import { useUnits } from "@/lib/irondesk/use-units";
 
 export const Route = createFileRoute("/progress")({
   head: () => ({
@@ -26,7 +28,10 @@ export const Route = createFileRoute("/progress")({
           "Bodyweight, estimated 1RM, weekly volume, acute vs chronic training load, cardio fitness and PR history.",
       },
       { property: "og:title", content: "Progress & Trends — IronDesk" },
-      { property: "og:description", content: "Strength, volume, load and cardio trends over time." },
+      {
+        property: "og:description",
+        content: "Strength, volume, load and cardio trends over time.",
+      },
     ],
   }),
   component: ProgressPage,
@@ -40,14 +45,29 @@ const ranges = [
 
 function ProgressPage() {
   const p = useModeData(progressQuery);
-  if (!p) return <ProgressEmptyState />;
   const [range, setRange] = useState<(typeof ranges)[number]["key"]>("12w");
+  const units = useUnits();
+  if (!p) return <ProgressEmptyState />;
   const take = ranges.find((r) => r.key === range)?.take ?? 12;
   const tail = <T,>(arr: T[]) => arr.slice(Math.max(0, arr.length - take));
 
   const load = tail(p.load);
+  const e1rm = tail(p.e1rm).map((point) => ({
+    ...point,
+    squat: fromKg(point.squat, units),
+    bench: fromKg(point.bench, units),
+    deadlift: fromKg(point.deadlift, units),
+  }));
+  const volume = tail(p.volume).map((point) => ({
+    ...point,
+    tonnage: fromKg(point.tonnage, units),
+  }));
+  const bodyweight = tail(p.bodyweight).map((point) => ({
+    date: point.date,
+    weight: fromKg(point.kg, units),
+  }));
   const latestLoad = load[load.length - 1];
-  const ratio = latestLoad ? latestLoad.acute / latestLoad.chronic : 0;
+  const ratio = latestLoad && latestLoad.chronic > 0 ? latestLoad.acute / latestLoad.chronic : null;
 
   return (
     <div className="space-y-4">
@@ -74,23 +94,34 @@ function ProgressPage() {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatCard
           label="Current streak"
-          value={p.streak.current}
-          unit="days"
+          value={p.streak.currentWeeks}
+          unit={p.streak.currentWeeks === 1 ? "week" : "weeks"}
           tone="success"
           icon={<Flame className="size-4" />}
         />
-        <StatCard label="Best streak" value={p.streak.best} unit="days" />
-        <StatCard label="Weeks on target" value={p.streak.weeksHitTarget} tone="primary" />
+        <StatCard
+          label="Best streak"
+          value={p.streak.bestWeeks}
+          unit={p.streak.bestWeeks === 1 ? "week" : "weeks"}
+        />
+        <StatCard label="Weeks tracked" value={p.streak.weeksTracked} tone="primary" />
         <StatCard
           label="Acute:chronic"
-          value={ratio.toFixed(2)}
-          tone={ratio > 1.3 ? "danger" : ratio < 0.8 ? "warning" : "success"}
-          hint={ratio > 1.3 ? "Spike risk" : "Inside safe band"}
+          value={ratio == null ? "—" : ratio.toFixed(2)}
+          tone={
+            ratio == null ? "default" : ratio > 1.3 ? "danger" : ratio < 0.8 ? "warning" : "success"
+          }
+          hint={
+            ratio == null ? "load unavailable" : ratio > 1.3 ? "Spike risk" : "Inside safe band"
+          }
         />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartCard title="Estimated 1RM" eyebrow="Main lifts" height={260}
+        <ChartCard
+          title="Estimated 1RM"
+          eyebrow="Main lifts"
+          height={260}
           footer={
             <ChartLegend
               items={[
@@ -102,9 +133,9 @@ function ProgressPage() {
           }
         >
           <MultiLineChart
-            data={tail(p.e1rm)}
+            data={e1rm}
             xKey="date"
-            unit="kg"
+            unit={weightUnit(units)}
             series={[
               { key: "squat", label: "Squat", color: "var(--chart-1)" },
               { key: "bench", label: "Bench", color: "var(--chart-2)" },
@@ -114,7 +145,7 @@ function ProgressPage() {
         </ChartCard>
 
         <ChartCard title="Weekly Volume" eyebrow="Tonnage per week" height={260}>
-          <SimpleBarChart data={tail(p.volume)} xKey="week" yKey="tonnage" unit="kg" />
+          <SimpleBarChart data={volume} xKey="week" yKey="tonnage" unit={weightUnit(units)} />
         </ChartCard>
 
         <ChartCard
@@ -142,10 +173,10 @@ function ProgressPage() {
 
         <ChartCard title="Bodyweight" eyebrow="Trend" height={260}>
           <MultiLineChart
-            data={tail(p.bodyweight)}
+            data={bodyweight}
             xKey="date"
-            unit="kg"
-            series={[{ key: "kg", label: "Bodyweight", color: "var(--chart-5)" }]}
+            unit={weightUnit(units)}
+            series={[{ key: "weight", label: "Bodyweight", color: "var(--chart-5)" }]}
           />
         </ChartCard>
       </div>
@@ -170,7 +201,11 @@ function ProgressPage() {
                   <Pill>{pr.date}</Pill>
                 </span>
               }
-              value={pr.detail}
+              value={
+                pr.weightKg != null && pr.reps != null
+                  ? `${formatWeight(pr.weightKg, units)} × ${pr.reps}${pr.e1rmKg != null ? ` (e1RM ${formatWeight(pr.e1rmKg, units)})` : ""}`
+                  : formatWeightText(pr.detail, units)
+              }
             />
           ))}
           <div className="mt-3 grid grid-cols-2 gap-2">

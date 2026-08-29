@@ -5,9 +5,21 @@
  * live mode, the athlete's own templates. Filters are client-side over the
  * already-loaded set so the controls stay instant on a phone mid-session.
  */
-import { Dumbbell, Flame, Home, Lock, Play, Search, Timer, X } from "lucide-react";
+import {
+  Dumbbell,
+  Flame,
+  Home,
+  Lock,
+  Play,
+  Search,
+  Timer,
+  Trash2,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { CustomWorkoutBuilder } from "@/components/irondesk/custom-workout-builder";
 import { EmptyState, Pill, SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,7 +27,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { isFreeStartable, RELEASE_GATE_LABEL } from "@/lib/irondesk/program-logic";
 import { templatesQuery } from "@/lib/irondesk/queries";
-import type { TemplateExercise, WorkoutTemplate } from "@/lib/irondesk/types";
+import type {
+  Exercise,
+  PersonalTemplateDraft,
+  TemplateExercise,
+  WorkoutTemplate,
+} from "@/lib/irondesk/types";
 import { formatLoadGuidance, type Units } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
@@ -34,7 +51,8 @@ const BODY_AREA_LABEL: Record<string, string> = {
 };
 
 const bodyArea = (t: WorkoutTemplate) =>
-  t.tags.find((tag) => tag in BODY_AREA_LABEL) ?? (t.legacyDayId ? t.legacyDayId.toLowerCase() : null);
+  t.tags.find((tag) => tag in BODY_AREA_LABEL) ??
+  (t.legacyDayId ? t.legacyDayId.toLowerCase() : null);
 
 function FilterChip({
   active,
@@ -75,16 +93,17 @@ function PrescriptionLine({ ex, units }: { ex: TemplateExercise; units: Units })
           {ex.targetSets} × {ex.targetReps}
         </span>
         {load && (
-          <span className="numeric text-muted-foreground" title={load.source ? `Source: ${load.source}` : undefined}>
+          <span
+            className="numeric text-muted-foreground"
+            title={load.source ? `Source: ${load.source}` : undefined}
+          >
             {load.text}
           </span>
         )}
         {ex.isHeavy && <Pill tone="warning">Heavy</Pill>}
         {ex.isDropSet && <Pill tone="primary">Drop</Pill>}
         {ex.restSeconds != null && (
-          <span className="text-muted-foreground">
-            {Math.round(ex.restSeconds / 60)}m rest
-          </span>
+          <span className="text-muted-foreground">{Math.round(ex.restSeconds / 60)}m rest</span>
         )}
       </div>
     </div>
@@ -97,6 +116,7 @@ function TemplateCard({
   onStart,
   busy,
   locked,
+  onDelete,
 }: {
   template: WorkoutTemplate;
   onPreview: () => void;
@@ -104,6 +124,8 @@ function TemplateCard({
   busy: boolean;
   /** Assignment-only content: startable through an assigned program only. */
   locked?: boolean;
+  /** Present only for an owner-scoped personal template. */
+  onDelete?: () => void;
 }) {
   const area = bodyArea(template);
   return (
@@ -160,6 +182,18 @@ function TemplateCard({
             <Button size="sm" variant="secondary" onClick={onPreview}>
               Preview
             </Button>
+            {onDelete ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={onDelete}
+                aria-label={`Delete ${template.name}`}
+                className="text-muted-foreground hover:text-danger"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            ) : null}
           </>
         )}
       </div>
@@ -167,13 +201,17 @@ function TemplateCard({
   );
 }
 
-
 export function TemplateLibrary({
   onStart,
   onUnlockStart,
   busy,
   canStart,
   note,
+  exercises,
+  onCreatePersonal,
+  onStartCreated,
+  onDeletePersonal,
+  builderReadOnlyNote,
 }: {
   onStart: (template: WorkoutTemplate) => void;
   /**
@@ -187,6 +225,12 @@ export function TemplateLibrary({
   canStart: boolean;
   /** Explains why starting is unavailable. */
   note?: string;
+  /** Full readable library used by the personal workout builder. */
+  exercises?: readonly Exercise[];
+  onCreatePersonal?: (draft: PersonalTemplateDraft) => Promise<string>;
+  onStartCreated?: (templateId: string) => Promise<void>;
+  onDeletePersonal?: (templateId: string) => Promise<void>;
+  builderReadOnlyNote?: string;
 }) {
   const templates = useModeData(templatesQuery);
   const units = useUnits();
@@ -195,6 +239,9 @@ export function TemplateLibrary({
   const [type, setType] = useState<TypeFilter>("all");
   const [area, setArea] = useState<string | "all">("all");
   const [preview, setPreview] = useState<WorkoutTemplate | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [manageError, setManageError] = useState<string | null>(null);
   /** Explicit per-preview consent required before unlocking gated content. */
   const [acknowledged, setAcknowledged] = useState(false);
 
@@ -224,7 +271,11 @@ export function TemplateLibrary({
 
   const originals = filtered.filter((t) => t.isSystem && isFreeStartable(t));
   const assignedOnly = filtered.filter((t) => t.isSystem && !isFreeStartable(t));
-  const personal = filtered.filter((t) => !t.isSystem);
+  // Repository reads already hide staged rows; keep this UI guard so a stale
+  // cache or demo fixture still cannot surface a non-startable personal orphan.
+  const personal = filtered.filter((t) => !t.isSystem && isFreeStartable(t));
+  const canWritePersonal = Boolean(exercises && onCreatePersonal && onStartCreated);
+  const canShowBuilder = Boolean(exercises);
   const anyFilter = query.trim() !== "" || env !== "all" || type !== "all" || area !== "all";
 
   const reset = () => {
@@ -232,6 +283,24 @@ export function TemplateLibrary({
     setEnv("all");
     setType("all");
     setArea("all");
+  };
+
+  const removePersonal = async (template: WorkoutTemplate) => {
+    if (!onDeletePersonal || template.isSystem || deletingId) return;
+    if (!window.confirm(`Delete “${template.name}”? This removes only your saved template.`))
+      return;
+    setDeletingId(template.id);
+    setManageError(null);
+    try {
+      await onDeletePersonal(template.id);
+      if (preview?.id === template.id) setPreview(null);
+    } catch (caught) {
+      setManageError(
+        caught instanceof Error ? caught.message : "Could not delete that personal workout.",
+      );
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -270,17 +339,27 @@ export function TemplateLibrary({
               Gym
             </FilterChip>
             <span className="mx-1 w-px shrink-0 bg-border" aria-hidden />
-            <FilterChip active={type === "heavy"} onClick={() => setType(type === "heavy" ? "all" : "heavy")}>
+            <FilterChip
+              active={type === "heavy"}
+              onClick={() => setType(type === "heavy" ? "all" : "heavy")}
+            >
               Heavy
             </FilterChip>
-            <FilterChip active={type === "pump"} onClick={() => setType(type === "pump" ? "all" : "pump")}>
+            <FilterChip
+              active={type === "pump"}
+              onClick={() => setType(type === "pump" ? "all" : "pump")}
+            >
               Pump
             </FilterChip>
           </div>
 
           <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
             {areas.map((a) => (
-              <FilterChip key={a} active={area === a} onClick={() => setArea(area === a ? "all" : a)}>
+              <FilterChip
+                key={a}
+                active={area === a}
+                onClick={() => setArea(area === a ? "all" : a)}
+              >
                 {BODY_AREA_LABEL[a] ?? a}
               </FilterChip>
             ))}
@@ -317,9 +396,9 @@ export function TemplateLibrary({
       {assignedOnly.length > 0 && (
         <SectionCard title="Assigned Program Library" eyebrow="Legacy Beta">
           <p className="mb-3 text-xs text-muted-foreground">
-            These prescriptions ship through assigned programs because they carry source review notes. Enroll in the
-            matching program in My Program for guided delivery and progression, or review the notes and unlock any
-            one of them as free training.
+            These prescriptions ship through assigned programs because they carry source review
+            notes. Enroll in the matching program in My Program for guided delivery and progression,
+            or review the notes and unlock any one of them as free training.
           </p>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {assignedOnly.map((t) => (
@@ -336,19 +415,53 @@ export function TemplateLibrary({
         </SectionCard>
       )}
 
-      {personal.length > 0 && (
-        <SectionCard title="My Templates" eyebrow="Personal">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {personal.map((t) => (
-              <TemplateCard
-                key={t.id}
-                template={t}
-                busy={busy || !canStart}
-                onPreview={() => setPreview(t)}
-                onStart={() => onStart(t)}
-              />
-            ))}
-          </div>
+      {(personal.length > 0 || canShowBuilder) && (
+        <SectionCard
+          title="My Templates"
+          eyebrow="Personal"
+          action={
+            canShowBuilder ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setManageError(null);
+                  setBuilding(true);
+                }}
+              >
+                <WandSparkles className="size-4" /> Build your own
+              </Button>
+            ) : undefined
+          }
+        >
+          {manageError ? (
+            <p
+              className="mb-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+              role="alert"
+            >
+              {manageError}
+            </p>
+          ) : null}
+          {personal.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {personal.map((t) => (
+                <TemplateCard
+                  key={t.id}
+                  template={t}
+                  busy={busy || !canStart || deletingId === t.id}
+                  onPreview={() => setPreview(t)}
+                  onStart={() => onStart(t)}
+                  {...(onDeletePersonal ? { onDelete: () => void removePersonal(t) } : {})}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Build a workout from the complete exercise library, then save it here for one-tap
+              starts.
+            </p>
+          )}
         </SectionCard>
       )}
 
@@ -386,7 +499,11 @@ export function TemplateLibrary({
                 ))}
               </div>
               {isFreeStartable(preview) ? (
-                <Button className="w-full" disabled={busy || !canStart} onClick={() => onStart(preview)}>
+                <Button
+                  className="w-full"
+                  disabled={busy || !canStart}
+                  onClick={() => onStart(preview)}
+                >
                   <Play className="size-4" /> Start this workout
                 </Button>
               ) : onUnlockStart && canStart ? (
@@ -398,8 +515,9 @@ export function TemplateLibrary({
                       className="mt-0.5"
                     />
                     <span>
-                      I have reviewed the source notes above and accept responsibility for training this
-                      prescription outside an assigned program. Load and volume stay my judgement call.
+                      I have reviewed the source notes above and accept responsibility for training
+                      this prescription outside an assigned program. Load and volume stay my
+                      judgement call.
                     </span>
                   </label>
                   <Button
@@ -417,6 +535,34 @@ export function TemplateLibrary({
               )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={building} onOpenChange={setBuilding}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="tracking-tight">Build your own workout</DialogTitle>
+            <p className="text-xs text-muted-foreground">
+              Choose movements from the full library, set the prescription and arrange the training
+              order.
+            </p>
+          </DialogHeader>
+          {building && exercises ? (
+            <CustomWorkoutBuilder
+              exercises={exercises}
+              disabled={busy}
+              onClose={() => setBuilding(false)}
+              {...(onCreatePersonal ? { onCreate: onCreatePersonal } : {})}
+              {...(onStartCreated ? { onStart: onStartCreated } : {})}
+              {...(!canWritePersonal
+                ? {
+                    readOnlyNote:
+                      builderReadOnlyNote ??
+                      "Read-only preview. Sign in to save this workout to My Templates or start it.",
+                  }
+                : {})}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

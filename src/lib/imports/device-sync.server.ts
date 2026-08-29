@@ -17,8 +17,16 @@
 import { z } from "zod";
 
 import { withHashes } from "./dedupe";
-import type { MetricType, NormalizedRecord, ParseIssue } from "./types";
-import { METRIC_TYPES } from "./types";
+import {
+  HEALTH_CONNECT_MAX_RECORDS,
+  normalizePayload,
+  syncPayloadSchema,
+  type SyncPayload,
+} from "./health-connect-payload";
+import type { NormalizedRecord } from "./types";
+
+export { normalizePayload, syncPayloadSchema } from "./health-connect-payload";
+export type { SyncPayload } from "./health-connect-payload";
 
 const NORMALIZED_VERSION = 1;
 
@@ -29,11 +37,10 @@ const NORMALIZED_VERSION = 1;
  */
 export const DEVICE_SYNC_INITIAL_JOB_STATUS = "committing" as const;
 
-
 /** Hard caps applied before any database work. */
 export const SYNC_LIMITS = {
   maxBodyBytes: 4 * 1024 * 1024,
-  maxRecords: 10_000,
+  maxRecords: HEALTH_CONNECT_MAX_RECORDS,
   chunkSize: 500,
   pairingTtlMinutes: 15,
 } as const;
@@ -51,7 +58,10 @@ export async function sha256Hex(input: string): Promise<string> {
 export function newDeviceToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 /** Constant-time-ish compare for equal-length hex digests. */
@@ -62,171 +72,11 @@ export function hashesEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/* -------------------------------- payload --------------------------------- */
-
-/** Optional Health Connect provenance. Retained verbatim in `raw_metadata`. */
-const sourceMetaSchema = z.object({
-  source_package: z.string().max(160).optional(),
-  device_manufacturer: z.string().max(80).optional(),
-  device_model: z.string().max(80).optional(),
-  device_type: z.string().max(40).optional(),
-  recording_method: z.string().max(40).optional(),
-});
-
-type SourceMeta = z.infer<typeof sourceMetaSchema>;
-
-const SOURCE_META_KEYS = Object.keys(sourceMetaSchema.shape) as (keyof SourceMeta)[];
-
-/** Picks only the provenance keys, so an absent provenance stays an empty object. */
-function metaOf(record: Partial<SourceMeta>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const key of SOURCE_META_KEYS) {
-    const value = record[key];
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
-}
-
-const metricSchema = sourceMetaSchema.extend({
-  external_id: z.string().min(1).max(200).optional(),
-  metric: z.string().min(1).max(60),
-  timestamp: z.string().min(4).max(40),
-  timezone: z.string().max(60).optional(),
-  value: z.number().finite(),
-  unit: z.string().max(20).optional(),
-});
-
-const activitySchema = sourceMetaSchema.extend({
-  external_id: z.string().min(1).max(200).optional(),
-  activity_type: z.string().min(1).max(60),
-  name: z.string().max(160).optional(),
-  start_time: z.string().min(4).max(40),
-  timezone: z.string().max(60).optional(),
-  duration_sec: z.number().int().nonnegative().max(86_400 * 7).optional(),
-  distance_m: z.number().nonnegative().max(1_000_000).optional(),
-  calories: z.number().int().nonnegative().max(50_000).optional(),
-  average_heart_rate: z.number().int().min(20).max(260).optional(),
-  max_heart_rate: z.number().int().min(20).max(260).optional(),
-  steps: z.number().int().nonnegative().max(500_000).optional(),
-  notes: z.string().max(2_000).optional(),
-});
-
-export const syncPayloadSchema = z.object({
-  source: z.literal("irondesk-health-connect"),
-  version: z.number().int().min(1).max(1),
-  exportedAt: z.string().max(40).optional(),
-  device: z.object({ label: z.string().max(80).optional(), timezone: z.string().max(60).optional() }).optional(),
-  records: z.array(metricSchema).max(SYNC_LIMITS.maxRecords).default([]),
-  activities: z.array(activitySchema).max(SYNC_LIMITS.maxRecords).default([]),
-});
-
-export type SyncPayload = z.infer<typeof syncPayloadSchema>;
-
 export const pairingRequestSchema = z.object({
   code: z.string().min(4).max(40),
   device_label: z.string().min(1).max(80).default("Android phone"),
   platform: z.string().max(20).default("android"),
 });
-
-/* ------------------------------ normalizing -------------------------------- */
-
-const METRIC_ALIASES: Record<string, MetricType> = {
-  step: "steps",
-  step_count: "steps",
-  sleep: "sleep_minutes",
-  sleep_duration: "sleep_minutes",
-  sleep_efficiency: "sleep_efficiency_percent",
-  rhr: "resting_hr",
-  resting_heart_rate: "resting_hr",
-  hrv: "hrv_ms",
-  hrv_rmssd: "hrv_ms",
-  weight: "bodyweight_kg",
-  bodyweight: "bodyweight_kg",
-  body_weight: "bodyweight_kg",
-  active_energy: "active_calories",
-  heart_rate: "heart_rate_bpm",
-  distance: "distance_m",
-};
-
-const UNIT_OF: Record<MetricType, string> = {
-  steps: "count",
-  sleep_minutes: "min",
-  sleep_efficiency_percent: "%",
-  resting_hr: "bpm",
-  hrv_ms: "ms",
-  bodyweight_kg: "kg",
-  active_calories: "kcal",
-  distance_m: "m",
-  heart_rate_bpm: "bpm",
-};
-
-function metricTypeOf(raw: string): MetricType | null {
-  const key = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
-  const direct = METRIC_TYPES.find((candidate) => candidate === key);
-  return direct ?? METRIC_ALIASES[key] ?? null;
-}
-
-function isoOrNull(value: string): string | null {
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
-}
-
-/** Turns a validated payload into the shared normalized record model. */
-export function normalizePayload(payload: SyncPayload): { records: NormalizedRecord[]; issues: ParseIssue[] } {
-  const records: NormalizedRecord[] = [];
-  const issues: ParseIssue[] = [];
-
-  payload.records.forEach((metric, index) => {
-    const metricType = metricTypeOf(metric.metric);
-    if (!metricType) {
-      issues.push({ severity: "warning", row: index, message: `Skipped "${metric.metric}" — not a metric IronDesk stores.` });
-      return;
-    }
-    const recordedAt = isoOrNull(metric.timestamp);
-    if (!recordedAt) {
-      issues.push({ severity: "error", row: index, message: `Skipped a ${metricType} record with an unreadable timestamp.` });
-      return;
-    }
-    records.push({
-      kind: "metric",
-      externalId: metric.external_id ?? null,
-      metricType,
-      recordedAt,
-      sourceTimezone: metric.timezone ?? payload.device?.timezone ?? null,
-      value: metric.value,
-      unit: metric.unit ?? UNIT_OF[metricType],
-      notes: null,
-      raw: metaOf(metric),
-    });
-  });
-
-  payload.activities.forEach((activity, index) => {
-    const startedAt = isoOrNull(activity.start_time);
-    if (!startedAt) {
-      issues.push({ severity: "error", row: index, message: `Skipped "${activity.activity_type}" — unreadable start time.` });
-      return;
-    }
-    records.push({
-      kind: "activity",
-      externalId: activity.external_id ?? null,
-      activityType: activity.activity_type,
-      name: activity.name ?? null,
-      startedAt,
-      sourceTimezone: activity.timezone ?? payload.device?.timezone ?? null,
-      durationSec: activity.duration_sec ?? null,
-      distanceM: activity.distance_m ?? null,
-      calories: activity.calories ?? null,
-      avgHr: activity.average_heart_rate ?? null,
-      maxHr: activity.max_heart_rate ?? null,
-      elevationGainM: null,
-      steps: activity.steps ?? null,
-      notes: activity.notes ?? null,
-      raw: metaOf(activity),
-    });
-  });
-
-  return { records, issues };
-}
 
 /* --------------------------------- ingest ---------------------------------- */
 
@@ -240,7 +90,10 @@ export interface DeviceIdentity {
 type AdminClient = Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"];
 
 /** Resolves a bearer device token to its owner. Returns null for anything unknown. */
-export async function resolveDevice(admin: AdminClient, bearer: string | null): Promise<DeviceIdentity | null> {
+export async function resolveDevice(
+  admin: AdminClient,
+  bearer: string | null,
+): Promise<DeviceIdentity | null> {
   const token = bearer?.replace(/^Bearer\s+/i, "").trim();
   if (!token || token.length < 20 || token.length > 200) return null;
   const hash = await sha256Hex(token);
@@ -250,7 +103,12 @@ export async function resolveDevice(admin: AdminClient, bearer: string | null): 
     .eq("token_hash", hash)
     .maybeSingle();
   if (!data || !hashesEqual(data.token_hash, hash)) return null;
-  return { deviceId: data.id, userId: data.user_id, label: data.label, dataSourceId: data.data_source_id };
+  return {
+    deviceId: data.id,
+    userId: data.user_id,
+    label: data.label,
+    dataSourceId: data.data_source_id,
+  };
 }
 
 export interface IngestResult {
@@ -268,7 +126,11 @@ export interface IngestResult {
  * Writes one device push as a single import batch, then derives recovery and
  * bodyweight rows from it. Everything is attributed to `device.userId`.
  */
-export async function ingestForDevice(admin: AdminClient, device: DeviceIdentity, payload: SyncPayload): Promise<IngestResult> {
+export async function ingestForDevice(
+  admin: AdminClient,
+  device: DeviceIdentity,
+  payload: SyncPayload,
+): Promise<IngestResult> {
   const { records, issues } = normalizePayload(payload);
   const hashed = await withHashes(records, "health_connect");
   const warnings = issues.filter((issue) => issue.severity === "warning");
@@ -394,7 +256,10 @@ export async function ingestForDevice(admin: AdminClient, device: DeviceIdentity
 
     await admin
       .from("device_links")
-      .update({ last_sync_at: new Date().toISOString(), last_sync_summary: summary as unknown as never })
+      .update({
+        last_sync_at: new Date().toISOString(),
+        last_sync_summary: summary as unknown as never,
+      })
       .eq("id", device.deviceId);
     if (device.dataSourceId) {
       await admin
@@ -450,6 +315,14 @@ interface DayAggregate {
   hrvMs?: number;
   weightKg?: number;
   weightAt?: string;
+  weightTimezone?: string | null;
+}
+
+interface RecoveryPatch {
+  sleep_hours?: number;
+  sleep_efficiency_percent?: number;
+  resting_hr?: number;
+  hrv_ms?: number;
 }
 
 export function aggregateByDay(records: NormalizedRecord[]): Map<string, DayAggregate> {
@@ -460,21 +333,29 @@ export function aggregateByDay(records: NormalizedRecord[]): Map<string, DayAggr
     const entry = days.get(day) ?? {};
     switch (record.metricType) {
       case "sleep_minutes":
+        if (record.unit !== "min") break;
         entry.sleepMinutes = Math.max(entry.sleepMinutes ?? 0, record.value);
         break;
       case "sleep_efficiency_percent":
+        if (record.unit !== "%") break;
         entry.sleepEfficiency = record.value;
         break;
       case "resting_hr":
+        if (record.unit !== "bpm") break;
         entry.restingHr = Math.round(record.value);
         break;
       case "hrv_ms":
+        if (record.unit !== "ms") break;
         entry.hrvMs = Math.round(record.value);
         break;
       case "bodyweight_kg":
+        // Defense in depth: only the shared payload normalizer's canonical kg
+        // output is allowed to reach body_metrics.weight_kg.
+        if (record.unit !== "kg") break;
         if (!entry.weightAt || record.recordedAt > entry.weightAt) {
           entry.weightKg = record.value;
           entry.weightAt = record.recordedAt;
+          entry.weightTimezone = record.sourceTimezone;
         }
         break;
       default:
@@ -487,6 +368,28 @@ export function aggregateByDay(records: NormalizedRecord[]): Map<string, DayAggr
 
 const inRange = (value: number | undefined, min: number, max: number): number | null =>
   value == null || !Number.isFinite(value) || value < min || value > max ? null : value;
+
+/** Only fields evidenced by this batch belong in an existing-row update. */
+function recoveryPatchOf(aggregate: DayAggregate): RecoveryPatch {
+  const patch: RecoveryPatch = {};
+  const sleepHours =
+    aggregate.sleepMinutes == null ? null : Math.round((aggregate.sleepMinutes / 60) * 10) / 10;
+  const sleep = inRange(sleepHours ?? undefined, 0, 24);
+  const efficiency = inRange(aggregate.sleepEfficiency, 0, 100);
+  const restingHr = inRange(aggregate.restingHr, 25, 140);
+  const hrvMs = inRange(aggregate.hrvMs, 5, 300);
+  if (sleep !== null) patch.sleep_hours = sleep;
+  if (efficiency !== null) patch.sleep_efficiency_percent = efficiency;
+  if (restingHr !== null) patch.resting_hr = restingHr;
+  if (hrvMs !== null) patch.hrv_ms = hrvMs;
+  return patch;
+}
+
+const shiftUtcDay = (day: string, amount: number): string => {
+  const value = new Date(`${day}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+};
 
 /**
  * Fills Recovery and Body Metrics from synced data.
@@ -503,11 +406,6 @@ export async function applyDerivedRows(
   const days = aggregateByDay(records);
   if (!days.size) return { recoveryDays: 0, bodyweightDays: 0 };
 
-  // Existing rows carry no timezone, so they are bucketed with the zone this
-  // batch reported; that keeps "already has a reading for that day" honest.
-  const batchZone =
-    records.find((record) => record.kind === "metric" && record.sourceTimezone)?.sourceTimezone ?? null;
-
   const dayKeys = [...days.keys()].sort();
   const from = dayKeys[0]!;
   const to = dayKeys[dayKeys.length - 1]!;
@@ -522,14 +420,8 @@ export async function applyDerivedRows(
 
   let recoveryDays = 0;
   for (const [day, aggregate] of days) {
-    const sleepHours = aggregate.sleepMinutes == null ? null : Math.round((aggregate.sleepMinutes / 60) * 10) / 10;
-    const patch = {
-      sleep_hours: inRange(sleepHours ?? undefined, 0, 24),
-      sleep_efficiency_percent: inRange(aggregate.sleepEfficiency, 0, 100),
-      resting_hr: inRange(aggregate.restingHr, 25, 140),
-      hrv_ms: inRange(aggregate.hrvMs, 5, 300),
-    };
-    if (Object.values(patch).every((value) => value === null)) continue;
+    const patch = recoveryPatchOf(aggregate);
+    if (!Object.keys(patch).length) continue;
 
     const existing = recoveryByDay.get(day);
     if (!existing) {
@@ -544,17 +436,35 @@ export async function applyDerivedRows(
     if (!error) recoveryDays += 1;
   }
 
-  const weightDays = [...days.entries()].filter(([, aggregate]) => inRange(aggregate.weightKg, 20, 400) !== null);
+  const weightDays = [...days.entries()].filter(
+    ([, aggregate]) => inRange(aggregate.weightKg, 20, 400) !== null,
+  );
   let bodyweightDays = 0;
   if (weightDays.length) {
+    // IANA offsets range across both sides of UTC and can move a local day into
+    // the preceding or following UTC date. Pad the lookup, then compare using
+    // the same local-day bucketing as the incoming records.
+    const searchFrom = `${shiftUtcDay(from, -1)}T00:00:00.000Z`;
+    const searchTo = `${shiftUtcDay(to, 1)}T23:59:59.999Z`;
     const { data: existingWeights } = await admin
       .from("body_metrics")
       .select("id, recorded_at")
       .eq("user_id", userId)
-      .gte("recorded_at", `${from}T00:00:00Z`)
-      .lte("recorded_at", `${to}T23:59:59Z`)
+      .gte("recorded_at", searchFrom)
+      .lte("recorded_at", searchTo)
       .order("recorded_at", { ascending: true });
-    const takenDays = new Set((existingWeights ?? []).map((row) => dayOf(row.recorded_at, batchZone)));
+    // A travel sync can contain readings from more than one timezone. Evaluate
+    // each stored instant against every requested local day+zone pair instead
+    // of applying one batch-wide zone to all days.
+    const takenDays = new Set(
+      weightDays
+        .filter(([day, aggregate]) =>
+          (existingWeights ?? []).some(
+            (row) => dayOf(row.recorded_at, aggregate.weightTimezone ?? null) === day,
+          ),
+        )
+        .map(([day]) => day),
+    );
     const inserts = weightDays
       .filter(([day]) => !takenDays.has(day))
       .map(([, aggregate]) => ({

@@ -8,6 +8,7 @@
  */
 import type { Exercise } from "./types";
 import { performanceKey, type PerformanceMap, type PerformancePoint } from "./progression";
+import { toKg } from "./units";
 
 export interface ProgressionContext {
   performance: PerformanceMap;
@@ -20,25 +21,30 @@ export interface ProgressionContext {
  * `3×9 @ 32 kg`, `3×7 @ +25 kg` — into a performance point. Returns null when
  * the line carries no load (e.g. bodyweight-only detail).
  */
-export function parseDemoHistoryDetail(
-  date: string,
-  detail: string,
-): PerformancePoint | null {
+export function parseDemoHistoryDetail(date: string, detail: string): PerformancePoint | null {
   const shape = detail.match(/(\d+)\s*[x×]\s*(\d+)/i);
-  const load = detail.match(/@\s*\+?(\d+(?:\.\d+)?)\s*kg/i);
+  const load = detail.match(
+    /@\s*\+?((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(kg|lb|lbs|pounds?)\b/i,
+  );
   if (!shape || !load) return null;
   const rpe = detail.match(/RPE\s*(\d+(?:\.\d+)?)/i);
+  const loadValue = Number(load[1]!.replace(/,/g, ""));
+  const loadUnit = load[2]!.toLowerCase();
+  const weightKg = loadUnit === "kg" ? loadValue : toKg(loadValue, "imperial");
   return {
     date,
     sets: Number(shape[1]),
     reps: Number(shape[2]),
-    weightKg: Number(load[1]),
+    weightKg,
     rpe: rpe ? Number(rpe[1]) : null,
   };
 }
 
 /** Builds the demo performance map, keyed by exercise id and normalized name. */
-export function demoProgressionContext(exercises: Exercise[], readiness: number | null): ProgressionContext {
+export function demoProgressionContext(
+  exercises: Exercise[],
+  readiness: number | null,
+): ProgressionContext {
   const performance: PerformanceMap = {};
   for (const exercise of exercises) {
     const points = exercise.history

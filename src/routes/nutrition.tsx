@@ -14,7 +14,9 @@ import {
 } from "@/components/irondesk/primitives";
 import { dashboardQuery, nutritionQuery } from "@/lib/irondesk/queries";
 import { NutritionEmptyState } from "@/components/irondesk/empty-states";
+import { fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
+import { useUnits } from "@/lib/irondesk/use-units";
 
 export const Route = createFileRoute("/nutrition")({
   head: () => ({
@@ -35,6 +37,7 @@ export const Route = createFileRoute("/nutrition")({
 function NutritionPage() {
   const n = useModeData(nutritionQuery);
   const day = useModeData(dashboardQuery);
+  const units = useUnits();
   if (!n) return <NutritionEmptyState />;
   const pct = (a: number, b: number) => Math.round((a / b) * 100);
   const macroData = [
@@ -111,7 +114,9 @@ function NutritionPage() {
           <div className="flex items-center gap-3">
             <Droplets className="size-8 text-primary" />
             <div>
-              <span className="numeric text-3xl font-bold">{(n.hydrationMl / 1000).toFixed(1)}</span>
+              <span className="numeric text-3xl font-bold">
+                {(n.hydrationMl / 1000).toFixed(1)}
+              </span>
               <span className="ml-1 text-sm text-muted-foreground">
                 / {(n.hydrationTargetMl / 1000).toFixed(1)} L
               </span>
@@ -161,12 +166,29 @@ function NutritionPage() {
             <p className="text-sm font-semibold capitalize">{n.weightGoal.direction}</p>
           </div>
           <div className="mt-3">
-            <DataRow label="Target rate" value={`${n.weightGoal.rateKgPerWeek} kg / week`} />
-            <DataRow label="Net balance today" value={day ? `${day.energy.net} kcal` : "—"} />
-            <DataRow label="Status" value={day?.energy.status ?? "No data"} />
+            <DataRow
+              label="Target rate"
+              value={`${fromKg(n.weightGoal.rateKgPerWeek, units)} ${weightUnit(units)} / week`}
+            />
+            <DataRow
+              label="Net balance today"
+              value={day?.energy.net == null ? "Unavailable" : `${day.energy.net} kcal`}
+            />
+            <DataRow
+              label="Status"
+              value={
+                day?.energy.status === "unavailable"
+                  ? "Needs resting-energy evidence"
+                  : (day?.energy.status ?? "No data")
+              }
+            />
             <DataRow
               label="Expenditure"
-              value={day ? `${day.energy.bmr + day.energy.exerciseBurn} kcal` : "—"}
+              value={
+                day?.energy.bmr == null
+                  ? "Exercise calories only"
+                  : `${day.energy.bmr + day.energy.exerciseBurn} kcal`
+              }
             />
           </div>
         </SectionCard>

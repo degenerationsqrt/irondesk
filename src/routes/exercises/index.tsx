@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ExerciseDialog } from "@/components/irondesk/exercise-dialog";
 import { useAuth } from "@/lib/auth/auth-provider";
+import { formatExerciseCardEvidence } from "@/lib/irondesk/exercise-evidence";
 import { exercisesQuery } from "@/lib/irondesk/queries";
 import * as repo from "@/lib/irondesk/repo";
 import type { Exercise } from "@/lib/irondesk/types";
-import { fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useIronDeskInvalidate, useModeData } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 
@@ -114,7 +114,13 @@ function ExercisesPage() {
         <div className="flex flex-wrap gap-1.5">
           {(["all", "favorites", "recent", "custom"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)} className={chip(mode === m)}>
-              {m === "all" ? "All" : m === "favorites" ? "Favorites" : m === "recent" ? "Recent" : "Custom"}
+              {m === "all"
+                ? "All"
+                : m === "favorites"
+                  ? "Favorites"
+                  : m === "recent"
+                    ? "Recent"
+                    : "Custom"}
             </button>
           ))}
         </div>
@@ -166,74 +172,67 @@ function ExercisesPage() {
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((e) => (
-            <Link
-              key={e.id}
-              to="/exercises/$exerciseId"
-              params={{ exerciseId: e.id }}
-              className="panel p-4 transition-colors hover:border-primary/40"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="label-eyebrow">{e.pattern}</p>
-                  <p className="truncate text-base font-semibold">{e.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {e.muscle} · {e.equipment}
-                  </p>
+          {filtered.map((e) => {
+            const evidence = formatExerciseCardEvidence(e, units);
+
+            return (
+              <Link
+                key={e.id}
+                to="/exercises/$exerciseId"
+                params={{ exerciseId: e.id }}
+                className="panel p-4 transition-colors hover:border-primary/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="label-eyebrow">{e.pattern}</p>
+                    <p className="truncate text-base font-semibold">{e.name}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {e.muscle} · {e.equipment}
+                    </p>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {live && e.isCustom && (
+                      <button
+                        onClick={(event) => {
+                          event.preventDefault();
+                          setDialog({ open: true, exercise: e });
+                        }}
+                        aria-label={`Edit ${e.name}`}
+                        className="text-muted-foreground transition-colors hover:text-primary"
+                      >
+                        <Pencil className="size-4" />
+                      </button>
+                    )}
+                    {live ? (
+                      <button
+                        onClick={(event) => {
+                          event.preventDefault();
+                          void toggleFavorite(e);
+                        }}
+                        aria-label={`Toggle favorite for ${e.name}`}
+                      >
+                        <Star
+                          className={`size-4 ${e.favorite ? "fill-warning text-warning" : "text-muted-foreground"}`}
+                        />
+                      </button>
+                    ) : (
+                      e.favorite && <Star className="size-4 fill-warning text-warning" />
+                    )}
+                  </span>
                 </div>
-                <span className="flex shrink-0 items-center gap-1">
-                  {live && e.isCustom && (
-                    <button
-                      onClick={(event) => {
-                        event.preventDefault();
-                        setDialog({ open: true, exercise: e });
-                      }}
-                      aria-label={`Edit ${e.name}`}
-                      className="text-muted-foreground transition-colors hover:text-primary"
-                    >
-                      <Pencil className="size-4" />
-                    </button>
-                  )}
-                  {live ? (
-                    <button
-                      onClick={(event) => {
-                        event.preventDefault();
-                        void toggleFavorite(e);
-                      }}
-                      aria-label={`Toggle favorite for ${e.name}`}
-                    >
-                      <Star
-                        className={`size-4 ${e.favorite ? "fill-warning text-warning" : "text-muted-foreground"}`}
-                      />
-                    </button>
-                  ) : (
-                    e.favorite && <Star className="size-4 fill-warning text-warning" />
-                  )}
-                </span>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <MetricTile
-                  label="Best set"
-                  value={e.best.weightKg > 0 ? `${fromKg(e.best.weightKg, units)}×${e.best.reps}` : "—"}
-                  tone="warning"
-                />
-                <MetricTile
-                  label="Est. 1RM"
-                  value={
-                    e.e1rmTrend.length ? fromKg(e.e1rmTrend[e.e1rmTrend.length - 1]!.e1rm, units) : "—"
-                  }
-                  unit={weightUnit(units)}
-                  tone="primary"
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {e.lastPerformed ? <Pill>Last {e.lastPerformed}</Pill> : <Pill>Not logged</Pill>}
-                {e.secondary.slice(0, 2).map((s) => (
-                  <Pill key={s}>{s}</Pill>
-                ))}
-              </div>
-            </Link>
-          ))}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <MetricTile label="Best set" value={evidence.bestSet} tone="warning" />
+                  <MetricTile label="Est. 1RM" value={evidence.estimatedOneRepMax} tone="primary" />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {e.lastPerformed ? <Pill>Last {e.lastPerformed}</Pill> : <Pill>Not logged</Pill>}
+                  {e.secondary.slice(0, 2).map((s) => (
+                    <Pill key={s}>{s}</Pill>
+                  ))}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
       {dialog.open && (

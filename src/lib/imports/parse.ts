@@ -7,9 +7,17 @@
  */
 import { CsvError, parseCsv } from "./csv";
 import { FitError, parseFit } from "./fit";
+import { HealthConnectPayloadError, parseHealthConnectEnvelope } from "./health-connect-payload";
 import { JsonError, parseJsonTable } from "./json";
 import { applyMapping, guessMapping, mappingIsUsable } from "./mapping";
-import { LIMITS, SUPPORTED_EXTENSIONS, type FileFormat, type ImportMapping, type ParseIssue, type ParseResult } from "./types";
+import {
+  LIMITS,
+  SUPPORTED_EXTENSIONS,
+  type FileFormat,
+  type ImportMapping,
+  type ParseIssue,
+  type ParseResult,
+} from "./types";
 import { XmlError, parseGpx, parseTcx } from "./xml";
 import { ZipError, readZip } from "./zip";
 
@@ -51,21 +59,39 @@ export function validateUpload(file: { name: string; size: number; type?: string
   }
   if (file.size <= 0) throw new UploadError(`"${file.name}" is empty.`);
   if (file.size > LIMITS.maxFileBytes) {
-    throw new UploadError(`"${file.name}" is larger than ${Math.round(LIMITS.maxFileBytes / 1024 / 1024)} MB.`);
+    throw new UploadError(
+      `"${file.name}" is larger than ${Math.round(LIMITS.maxFileBytes / 1024 / 1024)} MB.`,
+    );
   }
   return format;
 }
 
-const decodeText = (bytes: Uint8Array): string => new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+/** Prevents a selected import source from silently accepting another source's format. */
+export function assertAllowedFormat(
+  format: FileFormat,
+  allowedFormats: readonly FileFormat[],
+  sourceLabel = "This import source",
+): void {
+  if (allowedFormats.includes(format)) return;
+  const accepted = allowedFormats.map((candidate) => `.${candidate}`).join(", ");
+  throw new UploadError(
+    `${sourceLabel} accepts ${accepted}. Choose the matching source before importing this file.`,
+  );
+}
+
+const decodeText = (bytes: Uint8Array): string =>
+  new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 
 /** Cheap magic-byte sanity check so a mislabelled file fails early and clearly. */
 function checkMagic(format: FileFormat, bytes: Uint8Array): void {
   const startsWith = (...codes: number[]) => codes.every((code, i) => bytes[i] === code);
-  if (format === "zip" && !startsWith(0x50, 0x4b)) throw new UploadError("This file is not a real ZIP archive.");
+  if (format === "zip" && !startsWith(0x50, 0x4b))
+    throw new UploadError("This file is not a real ZIP archive.");
   if (format === "fit") {
     // FIT header: byte 8..11 spell ".FIT".
     const tag = String.fromCharCode(bytes[8] ?? 0, bytes[9] ?? 0, bytes[10] ?? 0, bytes[11] ?? 0);
-    if (tag !== ".FIT") throw new UploadError("This file is not a real FIT file (missing .FIT header tag).");
+    if (tag !== ".FIT")
+      throw new UploadError("This file is not a real FIT file (missing .FIT header tag).");
   }
   if ((format === "tcx" || format === "gpx") && !decodeText(bytes.subarray(0, 512)).includes("<")) {
     throw new UploadError("This file does not contain XML.");
@@ -77,7 +103,25 @@ function tabular(
   bytes: Uint8Array,
   mapping: ImportMapping | undefined,
 ): ParseResult {
-  const table = format === "csv" ? parseCsv(decodeText(bytes)) : parseJsonTable(decodeText(bytes));
+  const text = decodeText(bytes);
+  if (format === "json") {
+    const companion = parseHealthConnectEnvelope(text);
+    if (companion) {
+      return {
+        format,
+        detectedSourceType: "health_connect",
+        recognized: true,
+        records: companion.records.slice(0, LIMITS.maxRecords),
+        issues: companion.issues,
+        skippedFields: [],
+        notes: [
+          "Companion archive recognized. This file stores activity and health evidence only; it does not populate Recovery or Body Metrics. Use live companion sync for those derived views.",
+        ],
+      };
+    }
+  }
+
+  const table = format === "csv" ? parseCsv(text) : parseJsonTable(text);
   const resolved = guessMapping(table.headers, mapping);
   const usable = mappingIsUsable(resolved);
   if (!usable) {
@@ -88,7 +132,8 @@ function tabular(
       issues: [
         {
           severity: "warning",
-          message: "The columns in this file were not recognized — map them below before importing.",
+          message:
+            "The columns in this file were not recognized — map them below before importing.",
         },
       ],
       skippedFields: table.headers,
@@ -104,26 +149,56 @@ function tabular(
     issues: mapped.issues,
     skippedFields: mapped.skippedFields,
     table,
-    notes: mapped.records.length > LIMITS.maxRecords ? [`Only the first ${LIMITS.maxRecords} records are imported.`] : [],
+    notes:
+      mapped.records.length > LIMITS.maxRecords
+        ? [`Only the first ${LIMITS.maxRecords} records are imported.`]
+        : [],
   };
 }
 
-async function parseSingle(name: string, bytes: Uint8Array, mapping?: ImportMapping): Promise<ParseResult> {
+async function parseSingle(
+  name: string,
+  bytes: Uint8Array,
+  mapping?: ImportMapping,
+  allowedFormats?: readonly FileFormat[],
+): Promise<ParseResult> {
   const format = formatOf(name);
+  if (allowedFormats) assertAllowedFormat(format, allowedFormats);
   checkMagic(format, bytes);
   try {
     switch (format) {
       case "tcx": {
         const out = parseTcx(decodeText(bytes));
-        return { format, recognized: true, records: out.records, issues: out.issues, skippedFields: out.skippedFields, notes: out.notes };
+        return {
+          format,
+          recognized: true,
+          records: out.records,
+          issues: out.issues,
+          skippedFields: out.skippedFields,
+          notes: out.notes,
+        };
       }
       case "gpx": {
         const out = parseGpx(decodeText(bytes));
-        return { format, recognized: true, records: out.records, issues: out.issues, skippedFields: out.skippedFields, notes: out.notes };
+        return {
+          format,
+          recognized: true,
+          records: out.records,
+          issues: out.issues,
+          skippedFields: out.skippedFields,
+          notes: out.notes,
+        };
       }
       case "fit": {
         const out = parseFit(bytes);
-        return { format, recognized: true, records: out.records, issues: out.issues, skippedFields: out.skippedFields, notes: out.notes };
+        return {
+          format,
+          recognized: true,
+          records: out.records,
+          issues: out.issues,
+          skippedFields: out.skippedFields,
+          notes: out.notes,
+        };
       }
       case "csv":
       case "json":
@@ -138,6 +213,7 @@ async function parseSingle(name: string, bytes: Uint8Array, mapping?: ImportMapp
       error instanceof JsonError ||
       error instanceof FitError ||
       error instanceof ZipError ||
+      error instanceof HealthConnectPayloadError ||
       error instanceof UploadError
     ) {
       throw new UploadError(error.message);
@@ -147,15 +223,22 @@ async function parseSingle(name: string, bytes: Uint8Array, mapping?: ImportMapp
 }
 
 /** Parses an upload, expanding a ZIP container when needed. */
-export async function parseUpload(name: string, bytes: Uint8Array, mapping?: ImportMapping): Promise<ParseResult> {
+export async function parseUpload(
+  name: string,
+  bytes: Uint8Array,
+  mapping?: ImportMapping,
+  allowedFormats?: readonly FileFormat[],
+): Promise<ParseResult> {
   const format = formatOf(name);
+  if (allowedFormats) assertAllowedFormat(format, allowedFormats);
   checkMagic(format, bytes);
-  if (format !== "zip") return parseSingle(name, bytes, mapping);
+  if (format !== "zip") return parseSingle(name, bytes, mapping, allowedFormats);
 
   const entries = await readZip(bytes);
   const supported = entries.filter((entry) => {
     try {
-      return formatOf(entry.name) !== "zip";
+      const entryFormat = formatOf(entry.name);
+      return entryFormat !== "zip" && (!allowedFormats || allowedFormats.includes(entryFormat));
     } catch {
       return false;
     }
@@ -163,7 +246,10 @@ export async function parseUpload(name: string, bytes: Uint8Array, mapping?: Imp
 
   const issues: ParseIssue[] = entries
     .filter((entry) => !supported.includes(entry))
-    .map((entry) => ({ severity: "warning" as const, message: `Skipped "${entry.name}" — unsupported file type inside the archive.` }));
+    .map((entry) => ({
+      severity: "warning" as const,
+      message: `Skipped "${entry.name}" — unsupported file type inside the archive.`,
+    }));
 
   if (!supported.length) throw new UploadError("The archive contains no supported files.");
 
@@ -179,21 +265,34 @@ export async function parseUpload(name: string, bytes: Uint8Array, mapping?: Imp
 
   for (const entry of supported) {
     try {
-      const parsed = await parseSingle(entry.name, entry.bytes, mapping);
+      const parsed = await parseSingle(entry.name, entry.bytes, mapping, allowedFormats);
       if (!parsed.recognized) {
-        result.issues.push({ severity: "warning", message: `"${entry.name}" needs field mapping and was skipped in this archive import.` });
+        result.issues.push({
+          severity: "warning",
+          message: `"${entry.name}" needs field mapping and was skipped in this archive import.`,
+        });
         continue;
       }
       result.records.push(...parsed.records);
-      result.issues.push(...parsed.issues.map((issue) => ({ ...issue, message: `${entry.name}: ${issue.message}` })));
-      for (const field of parsed.skippedFields) if (!result.skippedFields.includes(field)) result.skippedFields.push(field);
+      if (!result.detectedSourceType && parsed.detectedSourceType) {
+        result.detectedSourceType = parsed.detectedSourceType;
+      }
+      result.issues.push(
+        ...parsed.issues.map((issue) => ({ ...issue, message: `${entry.name}: ${issue.message}` })),
+      );
+      for (const field of parsed.skippedFields)
+        if (!result.skippedFields.includes(field)) result.skippedFields.push(field);
       for (const note of parsed.notes) if (!result.notes.includes(note)) result.notes.push(note);
     } catch (error) {
-      result.issues.push({ severity: "error", message: `"${entry.name}": ${error instanceof Error ? error.message : "unreadable"}` });
+      result.issues.push({
+        severity: "error",
+        message: `"${entry.name}": ${error instanceof Error ? error.message : "unreadable"}`,
+      });
     }
   }
 
-  if (!result.records.length) throw new UploadError("Nothing in the archive could be imported. See the errors listed above.");
+  if (!result.records.length)
+    throw new UploadError("Nothing in the archive could be imported. See the errors listed above.");
   result.records = result.records.slice(0, LIMITS.maxRecords);
   return result;
 }

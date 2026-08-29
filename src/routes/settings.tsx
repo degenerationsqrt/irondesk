@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { PageHeader } from "@/components/irondesk/app-shell";
-import { DataRow, SectionCard } from "@/components/irondesk/primitives";
+import { DataRow, Pill, SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,14 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery, equipmentCatalogQuery } from "@/lib/irondesk/queries";
 import * as repo from "@/lib/irondesk/repo";
-import { fromCm, toCm, weightUnit, type Units } from "@/lib/irondesk/units";
+import {
+  DEFAULT_UNITS,
+  fromCm,
+  resolveUnits,
+  toCm,
+  weightUnit,
+  type Units,
+} from "@/lib/irondesk/units";
 import { useIronDeskInvalidate } from "@/lib/irondesk/use-data";
 
 export const Route = createFileRoute("/settings")({
@@ -26,7 +33,10 @@ export const Route = createFileRoute("/settings")({
           "Manage your IronDesk profile, units, training goals, available equipment, notification and privacy preferences.",
       },
       { property: "og:title", content: "Settings — IronDesk" },
-      { property: "og:description", content: "Profile, units, goals, equipment and privacy controls." },
+      {
+        property: "og:description",
+        content: "Profile, units, goals, equipment and privacy controls.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -34,19 +44,36 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
-const GOALS = ["strength", "hypertrophy", "conditioning", "recomposition", "endurance", "sport_performance"];
+const GOALS = [
+  "strength",
+  "hypertrophy",
+  "conditioning",
+  "recomposition",
+  "endurance",
+  "sport_performance",
+];
 
 function SettingsPage() {
   const { mode, demo, user } = useAuth();
   const invalidate = useIronDeskInvalidate();
   const { data: account } = useQuery({ ...accountQuery, enabled: mode === "live" });
   const { data: catalog } = useQuery({ ...equipmentCatalogQuery, enabled: mode === "live" });
+  const {
+    data: sampleSummary,
+    isLoading: sampleSummaryLoading,
+    isError: sampleSummaryError,
+    refetch: refetchSampleSummary,
+  } = useQuery({
+    queryKey: ["irondesk", "live", "sample-data-summary"],
+    queryFn: () => repo.getSampleDataSummary(),
+    enabled: mode === "live",
+  });
 
   const [displayName, setDisplayName] = useState("");
   const [timezone, setTimezone] = useState("UTC");
   const [height, setHeight] = useState("");
   const [dob, setDob] = useState("");
-  const [units, setUnits] = useState<Units>("metric");
+  const [units, setUnits] = useState<Units>(DEFAULT_UNITS);
   const [goal, setGoal] = useState("strength");
   const [days, setDays] = useState(4);
   const [calories, setCalories] = useState("");
@@ -65,7 +92,7 @@ function SettingsPage() {
     if (!account) return;
     const p = account.profile;
     const pref = account.preferences;
-    const u: Units = pref?.units === "imperial" ? "imperial" : "metric";
+    const u = resolveUnits(pref?.units);
     setUnits(u);
     setDisplayName(p?.display_name ?? "");
     setTimezone(p?.timezone ?? "UTC");
@@ -127,16 +154,42 @@ function SettingsPage() {
     }
   };
 
-  const runSample = async () => {
-    if (!window.confirm("Add example sessions, meals and recovery entries to your account? This runs once.")) return;
-    setSampleState("Working…");
+  const removeSamples = async () => {
+    if (!sampleSummary?.total) return;
+    if (
+      !window.confirm(
+        `Clean up ${sampleSummary.total} records currently marked as samples? Known sample workouts, cardio and body metrics are removed. Nutrition removes only exact IronDesk seed meals; unrecognized meals or any changed day values preserve the day as real data. Recovery is deleted only when it still exactly matches the seed.`,
+      )
+    )
+      return;
+    setSampleState("Removing sample data…");
     try {
-      const result = await repo.addSampleData();
+      const removed = await repo.removeSampleData();
       invalidate();
-      setSampleState(result.created ? "Sample data added to your account." : "Your account already holds sample data.");
+      await refetchSampleSummary();
+      const preserved = removed.preservedNutritionDays + removed.preservedRecoveryEntries;
+      const removalParts = [
+        `${removed.total} known sample record${removed.total === 1 ? "" : "s"}`,
+        `${removed.seedMeals} exact seed meal${removed.seedMeals === 1 ? "" : "s"}`,
+      ];
+      setSampleState(
+        `Removed ${removalParts.join(" and ")}. ${
+          preserved
+            ? `Preserved ${preserved} changed or unrecognized nutrition/recovery record${preserved === 1 ? "" : "s"} as real data.`
+            : "No changed or unrecognized nutrition/recovery records needed preservation."
+        }`,
+      );
     } catch (caught) {
-      setSampleState(caught instanceof Error ? caught.message : "Could not add sample data.");
+      setSampleState(caught instanceof Error ? caught.message : "Could not remove sample data.");
     }
+  };
+
+  const changeUnits = (next: Units) => {
+    if (next === units) return;
+    if (height && Number.isFinite(Number(height))) {
+      setHeight(String(fromCm(toCm(Number(height), units), next)));
+    }
+    setUnits(next);
   };
 
   if (demo) {
@@ -145,7 +198,7 @@ function SettingsPage() {
         <PageHeader title="Settings" subtitle="Demo mode — settings are read-only." />
         <SectionCard title="Demo Athlete" eyebrow="Read only">
           <DataRow label="Athlete" value="Demo Athlete" />
-          <DataRow label="Units" value="Metric (kg)" />
+          <DataRow label="Units" value="Imperial (lb)" />
           <DataRow label="Primary goal" value="Strength" />
           <DataRow label="Training days" value="4 / week" />
           <p className="mt-3 text-xs text-muted-foreground">
@@ -163,7 +216,12 @@ function SettingsPage() {
         subtitle="Profile, units, goals, equipment and privacy."
         action={
           <Button onClick={() => void save()} disabled={status === "saving"}>
-            {status === "saving" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save
+            {status === "saving" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Check className="size-4" />
+            )}{" "}
+            Save
           </Button>
         }
       />
@@ -174,7 +232,9 @@ function SettingsPage() {
         </p>
       )}
       {status === "error" && message && (
-        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{message}</p>
+        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {message}
+        </p>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -191,7 +251,12 @@ function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ht">Height ({units === "imperial" ? "in" : "cm"})</Label>
-                <Input id="ht" type="number" value={height} onChange={(e) => setHeight(e.target.value)} />
+                <Input
+                  id="ht"
+                  type="number"
+                  value={height}
+                  onChange={(e) => setHeight(e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="db">Date of birth</Label>
@@ -211,9 +276,11 @@ function SettingsPage() {
                   <button
                     key={u}
                     type="button"
-                    onClick={() => setUnits(u)}
+                    onClick={() => changeUnits(u)}
                     className={`h-10 rounded-md border text-sm font-semibold capitalize transition ${
-                      units === u ? "border-primary bg-primary/12 text-primary" : "border-border bg-surface-2"
+                      units === u
+                        ? "border-primary bg-primary/12 text-primary"
+                        : "border-border bg-surface-2"
                     }`}
                   >
                     {u} ({weightUnit(u)})
@@ -230,7 +297,9 @@ function SettingsPage() {
                     type="button"
                     onClick={() => setGoal(g)}
                     className={`rounded-md border px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                      goal === g ? "border-primary bg-primary/12 text-primary" : "border-border bg-surface-2"
+                      goal === g
+                        ? "border-primary bg-primary/12 text-primary"
+                        : "border-border bg-surface-2"
                     }`}
                   >
                     {g.replace("_", " ")}
@@ -252,11 +321,21 @@ function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="kc">Calorie target</Label>
-                <Input id="kc" type="number" value={calories} onChange={(e) => setCalories(e.target.value)} />
+                <Input
+                  id="kc"
+                  type="number"
+                  value={calories}
+                  onChange={(e) => setCalories(e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="pr">Protein target (g)</Label>
-                <Input id="pr" type="number" value={protein} onChange={(e) => setProtein(e.target.value)} />
+                <Input
+                  id="pr"
+                  type="number"
+                  value={protein}
+                  onChange={(e) => setProtein(e.target.value)}
+                />
               </div>
             </div>
           </div>
@@ -274,7 +353,9 @@ function SettingsPage() {
                   )
                 }
                 className={`rounded-md border px-3 py-2 text-xs font-semibold transition ${
-                  equipment.includes(item.id) ? "border-primary bg-primary/12 text-primary" : "border-border bg-surface-2"
+                  equipment.includes(item.id)
+                    ? "border-primary bg-primary/12 text-primary"
+                    : "border-border bg-surface-2"
                 }`}
               >
                 {item.name}
@@ -303,17 +384,38 @@ function SettingsPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Sample Data" eyebrow="Optional">
+        <SectionCard title="Sample Data" eyebrow="Data integrity">
           <p className="text-sm text-muted-foreground">
-            Creates a small set of example sessions, meals and recovery entries owned by your account. Idempotent — running
-            it twice changes nothing.
+            Live analytics exclude rows marked as samples. Cleanup removes known sample workouts,
+            cardio and body metrics. On a sample nutrition day, only the three exact seed meals are
+            deleted. Other or edited meals, or any change to the day's targets, totals, hydration or
+            goal, preserve the day as real data. Macro totals are recalculated from remaining meals
+            without resetting those other fields. Recovery is deleted only when every seeded value
+            is unchanged; otherwise it is preserved as real data.
           </p>
-          <div className="mt-3 flex items-center gap-3">
-            <Button variant="secondary" onClick={() => void runSample()}>
-              Add sample data to my account
-            </Button>
-            {sampleState && <span className="text-xs text-muted-foreground">{sampleState}</span>}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {sampleSummaryLoading ? (
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Checking for sample rows…
+              </span>
+            ) : sampleSummaryError ? (
+              <Pill tone="warning">Sample-data status unavailable</Pill>
+            ) : sampleSummary?.total ? (
+              <>
+                <Button variant="destructive" onClick={() => void removeSamples()}>
+                  Clean up {sampleSummary.total} sample records
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {sampleSummary.workouts} workouts · {sampleSummary.cardio} cardio ·{" "}
+                  {sampleSummary.bodyMetrics} body metrics · {sampleSummary.nutritionDays} nutrition
+                  · {sampleSummary.recoveryEntries} recovery
+                </span>
+              </>
+            ) : (
+              <Pill tone="success">No sample rows found</Pill>
+            )}
           </div>
+          {sampleState && <p className="mt-2 text-xs text-muted-foreground">{sampleState}</p>}
         </SectionCard>
 
         <SectionCard
@@ -328,12 +430,12 @@ function SettingsPage() {
           <div className="space-y-2">
             <DataRow label="File imports (FIT / TCX / GPX / CSV / JSON / ZIP)" value="Available" />
             <DataRow label="Garmin-compatible export" value="TCX v2" />
-            <DataRow label="Live wearable sync" value="Not connected" />
+            <DataRow label="Device sync" value="Manage in Connections" />
             <DataRow label="Account deletion" value="Not implemented yet" />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Imports and TCX export are real. Continuous wearable sync and account deletion are not built yet — those two
-            remain honest placeholders.
+            Use Connections &amp; Imports to review device-sync access, imported activities and file
+            imports. Account deletion is not implemented yet.
           </p>
         </SectionCard>
       </div>

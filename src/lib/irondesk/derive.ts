@@ -34,6 +34,8 @@ import type {
   RecoveryRow,
   SessionExerciseRow,
 } from "./rows";
+import type { ImportedDashboardActivity } from "./imported-data-adapter";
+import { dayKeyForInstant, formatDayKey } from "./dates";
 
 const ZONES: ZoneKey[] = ["light", "moderate", "vigorous", "peak"];
 
@@ -92,7 +94,11 @@ export function sessionTotals(row: FullSessionRow): SessionTotals {
       const e1rm = estimate1rm(Number(s.weight_kg ?? 0), s.reps ?? 0);
       if (e1rm > bestE1rm) {
         bestE1rm = e1rm;
-        topSet = { exercise: se.exercise_name, weightKg: Number(s.weight_kg ?? 0), reps: s.reps ?? 0 };
+        topSet = {
+          exercise: se.exercise_name,
+          weightKg: Number(s.weight_kg ?? 0),
+          reps: s.reps ?? 0,
+        };
       }
     }
   }
@@ -133,23 +139,107 @@ export function toHistorySession(row: FullSessionRow): HistorySession {
     reps: t.reps,
     avgRpe: t.avgRpe,
     intensity: intensityFrom(t.avgRpe),
-    calories: row.calories ?? 0,
+    intensityAvailable: t.avgRpe > 0,
+    calories: row.calories,
     prCount: 0,
+    source: "irondesk",
+    sourceLabel: "IronDesk",
     blocks: (row.session_exercises ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
       .map((se) => ({
         exercise: se.exercise_name,
-        detail: describeBlock(se),
+        ...describeBlock(se),
       })),
   };
 }
 
-function describeBlock(se: SessionExerciseRow): string {
+function importedKind(kind: ImportedDashboardActivity["kind"]): ActivityKind {
+  return kind === "unknown" ? "other" : kind;
+}
+
+export function importedSourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    health_connect: "Health Connect",
+    garmin_file: "Garmin import",
+    fit_file: "FIT import",
+    tcx_file: "TCX import",
+    gpx_file: "GPX import",
+    csv_file: "CSV import",
+    json_file: "JSON import",
+  };
+  return (
+    labels[source] ?? source.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+  );
+}
+
+export function toImportedHistorySession(activity: ImportedDashboardActivity): HistorySession {
+  return {
+    id: activity.id,
+    date: activity.startedAt,
+    title: activity.name ?? activity.activityType.replaceAll("_", " "),
+    kind: importedKind(activity.kind),
+    bodyParts: [],
+    durationMin: activity.durationMinutes == null ? null : Math.round(activity.durationMinutes),
+    tonnageKg: 0,
+    sets: 0,
+    reps: 0,
+    avgRpe: 0,
+    intensity: "light",
+    intensityAvailable: false,
+    calories: activity.calories,
+    prCount: 0,
+    blocks: [],
+    source: activity.sourceType,
+    sourceLabel: importedSourceLabel(activity.sourceType),
+  };
+}
+
+/** True only when a native session contains actual training evidence. */
+export function hasNativeTrainingEvidence(row: FullSessionRow): boolean {
+  const totals = sessionTotals(row);
+  return (
+    totals.sets > 0 ||
+    (row.cardio_load ?? 0) > 0 ||
+    (row.active_zone_minutes ?? 0) > 0 ||
+    (row.avg_hr ?? 0) > 0
+  );
+}
+
+export function toCardioHistorySession(row: CardioRow): HistorySession {
+  return {
+    id: row.id,
+    date: row.started_at,
+    title: row.name,
+    kind: "cardio",
+    bodyParts: [],
+    durationMin: row.duration_min,
+    tonnageKg: 0,
+    sets: 0,
+    reps: 0,
+    avgRpe: 0,
+    intensity: "light",
+    intensityAvailable: false,
+    calories: row.calories,
+    prCount: 0,
+    blocks: [],
+    source: "irondesk",
+    sourceLabel: "IronDesk",
+  };
+}
+
+function describeBlock(se: SessionExerciseRow): Omit<HistorySession["blocks"][number], "exercise"> {
   const working = (se.workout_sets ?? []).filter((s) => !s.is_warmup && s.completed);
-  if (!working.length) return "No completed sets";
+  if (!working.length) return { detail: "No completed sets" };
   const best = working.reduce((a, b) => ((b.weight_kg ?? 0) > (a.weight_kg ?? 0) ? b : a));
-  return `${working.length} × ${best.reps ?? 0} @ ${round(Number(best.weight_kg ?? 0), 1)} kg`;
+  const weightKg = round(Number(best.weight_kg ?? 0), 1);
+  const reps = best.reps ?? 0;
+  return {
+    detail: `${working.length} × ${reps} @ ${weightKg} kg`,
+    weightKg,
+    sets: working.length,
+    reps,
+  };
 }
 
 export function zonesFromJson(value: unknown): ZoneSplit[] {
@@ -173,12 +263,14 @@ function cardioToActivity(row: CardioRow): ActivitySession {
     kind: "cardio",
     startedAt: row.started_at,
     durationMin: row.duration_min,
-    calories: row.calories ?? 0,
-    avgHr: row.avg_hr ?? 0,
-    maxHr: row.max_hr ?? 0,
-    cardioLoad: row.cardio_load ?? 0,
-    activeZoneMinutes: row.active_zone_minutes ?? 0,
+    calories: row.calories,
+    avgHr: row.avg_hr,
+    maxHr: row.max_hr,
+    cardioLoad: row.cardio_load,
+    activeZoneMinutes: row.active_zone_minutes,
     zones: zonesFromJson(row.zones),
+    source: "irondesk",
+    sourceLabel: "IronDesk",
     ...(row.notes ? { notes: row.notes } : {}),
   };
 }
@@ -191,12 +283,33 @@ function strengthToActivity(row: FullSessionRow): ActivitySession {
     kind: (row.kind as ActivityKind) ?? "strength",
     startedAt: row.started_at,
     durationMin: t.durationMin,
-    calories: row.calories ?? 0,
-    avgHr: row.avg_hr ?? 0,
-    maxHr: row.max_hr ?? 0,
-    cardioLoad: row.cardio_load ?? 0,
-    activeZoneMinutes: row.active_zone_minutes ?? 0,
+    calories: row.calories,
+    avgHr: row.avg_hr,
+    maxHr: row.max_hr,
+    cardioLoad: row.cardio_load,
+    activeZoneMinutes: row.active_zone_minutes,
     zones: [],
+    source: "irondesk",
+    sourceLabel: "IronDesk",
+  };
+}
+
+function importedToActivity(activity: ImportedDashboardActivity): ActivitySession {
+  return {
+    id: activity.id,
+    name: activity.name ?? activity.activityType.replaceAll("_", " "),
+    kind: importedKind(activity.kind),
+    startedAt: activity.startedAt,
+    durationMin: activity.durationMinutes == null ? null : Math.round(activity.durationMinutes),
+    calories: activity.calories,
+    avgHr: activity.avgHr,
+    maxHr: activity.maxHr,
+    cardioLoad: null,
+    activeZoneMinutes: null,
+    zones: [],
+    source: activity.sourceType,
+    sourceLabel: importedSourceLabel(activity.sourceType),
+    ...(activity.notes ? { notes: activity.notes } : {}),
   };
 }
 
@@ -204,7 +317,7 @@ export function strengthMetrics(sessions: FullSessionRow[]): StrengthMetrics {
   let sets = 0;
   let reps = 0;
   let tonnage = 0;
-  let top: StrengthMetrics["topLift"] = { exercise: "—", weightKg: 0, reps: 0 };
+  let top: StrengthMetrics["topLift"] = null;
   let bestE1rm = 0;
 
   for (const s of sessions) {
@@ -232,10 +345,15 @@ export interface DashboardInput {
   todaySessions: FullSessionRow[];
   weekSessions: FullSessionRow[];
   todayCardio: CardioRow[];
+  weekCardio: CardioRow[];
+  todayImported: ImportedDashboardActivity[];
+  weekImported: ImportedDashboardActivity[];
   nutrition: NutritionDay | null;
   recovery: RecoveryData | null;
   preferences: PreferencesRow | null;
   displayName: string;
+  dayKey: string;
+  timeZone: string;
 }
 
 /**
@@ -247,7 +365,17 @@ export interface DashboardInput {
  * Missing inputs simply contribute 0 and are reported in `dataQuality`.
  */
 export function buildDashboard(input: DashboardInput): DashboardDay {
-  const { todaySessions, weekSessions, todayCardio, nutrition, recovery, preferences } = input;
+  const {
+    todaySessions,
+    weekSessions,
+    todayCardio,
+    weekCardio,
+    todayImported,
+    weekImported,
+    nutrition,
+    recovery,
+    preferences,
+  } = input;
   const totals = strengthMetrics(todaySessions);
   const cardioLoad =
     todayCardio.reduce((s, c) => s + (c.cardio_load ?? 0), 0) +
@@ -257,25 +385,56 @@ export function buildDashboard(input: DashboardInput): DashboardDay {
     todaySessions.reduce((s, c) => s + (c.active_zone_minutes ?? 0), 0);
 
   const target = preferences?.training_days_per_week ?? 4;
+  const countableImported = weekImported.filter(
+    (activity) =>
+      activity.kind === "strength" ||
+      activity.kind === "cardio" ||
+      activity.kind === "conditioning",
+  );
+  const trainingDays = new Set([
+    ...weekSessions
+      .filter(hasNativeTrainingEvidence)
+      .map((session) => dayKeyForInstant(session.started_at, input.timeZone)),
+    ...weekCardio
+      .filter(
+        (session) =>
+          session.duration_min > 0 ||
+          (session.cardio_load ?? 0) > 0 ||
+          (session.active_zone_minutes ?? 0) > 0 ||
+          (session.avg_hr ?? 0) > 0,
+      )
+      .map((session) => dayKeyForInstant(session.started_at, input.timeZone)),
+    ...countableImported.map((activity) => activity.localDay),
+  ]);
+  const weekCount = trainingDays.size;
   const strengthPart = clamp((totals.tonnageKg / 1000) * 9, 0, 40);
   const cardioPart = clamp(cardioLoad / 8, 0, 30);
-  const consistencyPart = clamp((weekSessions.length / Math.max(1, target)) * 15, 0, 15);
-  const recoveryPart = recovery ? clamp((recovery.readiness / 100) * 15, 0, 15) : 10;
+  const consistencyPart = clamp((weekCount / Math.max(1, target)) * 15, 0, 15);
+  const recoveryPart =
+    recovery?.readiness != null ? clamp((recovery.readiness / 100) * 15, 0, 15) : 0;
   const ironScore = Math.round(strengthPart + cardioPart + consistencyPart + recoveryPart);
 
-  const totalStrain = Math.round(strengthPart * 2 + cardioPart * 2);
+  const totalStrain = Math.round(((strengthPart + cardioPart) / 70) * 21);
   const strainSum = strengthPart + cardioPart || 1;
   const cardioPercent = Math.round((cardioPart / strainSum) * 100);
+  const hasStrengthMetrics = totals.totalSets > 0;
+  const hasMeasuredStrain = totalStrain > 0;
 
   const zoneTotals = mergeZones(todayCardio.map((c) => zonesFromJson(c.zones)));
-  const avgHrValues = [...todayCardio.map((c) => c.avg_hr), ...todaySessions.map((s) => s.avg_hr)].filter(
-    (v): v is number => v != null && v > 0,
-  );
-  const avgHr = avgHrValues.length ? Math.round(avgHrValues.reduce((a, b) => a + b, 0) / avgHrValues.length) : 0;
+  const avgHrValues = [
+    ...todayCardio.map((c) => c.avg_hr),
+    ...todaySessions.map((s) => s.avg_hr),
+    ...todayImported.map((activity) => activity.avgHr),
+  ].filter((v): v is number => v != null && v > 0);
+  const avgHr = avgHrValues.length
+    ? Math.round(avgHrValues.reduce((a, b) => a + b, 0) / avgHrValues.length)
+    : null;
 
   const dataNotes: string[] = [];
-  if (!todaySessions.length && !todayCardio.length) dataNotes.push("No training logged today.");
-  if (!zoneTotals.length) dataNotes.push("Heart-rate zones need a wearable or a logged cardio session.");
+  if (!todaySessions.length && !todayCardio.length && !todayImported.length)
+    dataNotes.push("No training logged today.");
+  if (!zoneTotals.length)
+    dataNotes.push("Heart-rate zones need a wearable or a logged cardio session.");
   if (!nutrition) dataNotes.push("No nutrition logged today.");
   if (!recovery) dataNotes.push("No recovery check-in today.");
 
@@ -284,32 +443,33 @@ export function buildDashboard(input: DashboardInput): DashboardDay {
     tonnage: totals.tonnageKg,
     nutrition,
     recovery,
-    weekCount: weekSessions.length,
+    weekCount,
     target,
+    hasCardioEvidence:
+      todayCardio.length > 0 ||
+      todayImported.some(
+        (activity) => activity.kind === "cardio" || activity.kind === "conditioning",
+      ),
+    hasStrengthEvidence:
+      todaySessions.length > 0 || todayImported.some((activity) => activity.kind === "strength"),
   });
-  const overall = grades.length
-    ? Math.round(grades.reduce((s, g) => s + g.score, 0) / grades.length)
-    : 0;
-
   const sessions: ActivitySession[] = [
     ...todaySessions.map(strengthToActivity),
     ...todayCardio.map(cardioToActivity),
+    ...todayImported.map(importedToActivity),
   ].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
 
   const energyIntake = nutrition?.consumed.calories ?? 0;
-  const exerciseBurn = sessions.reduce((s, a) => s + a.calories, 0);
-  const bmr = 1750;
-  const net = energyIntake - bmr - exerciseBurn;
+  const exerciseBurn = sessions.reduce((sum, activity) => sum + (activity.calories ?? 0), 0);
+  const bmr = null;
+  const net = null;
 
   return {
-    date: new Date().toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-    }),
+    date: formatDayKey(input.dayKey),
+    timeZone: input.timeZone,
     statusLine: statusLine(ironScore, dataNotes.length),
     ironScore,
-    grade: gradeFromScore(overall || ironScore),
+    grade: gradeFromScore(ironScore),
     strain: {
       total: totalStrain,
       cardioPercent: strainSum > 1 ? cardioPercent : 0,
@@ -321,40 +481,82 @@ export function buildDashboard(input: DashboardInput): DashboardDay {
     avgHr,
     zoneTotals,
     strength: totals,
-    nutrition:
-      nutrition ??
-      {
-        targets: {
-          calories: preferences?.calorie_target ?? 0,
-          proteinG: preferences?.protein_target_g ?? 0,
-          carbsG: 0,
-          fatG: 0,
-        },
-        consumed: { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
-        meals: [],
-        hydrationMl: 0,
-        hydrationTargetMl: 3000,
-        weightGoal: { direction: "maintain", rateKgPerWeek: 0 },
+    nutrition: nutrition ?? {
+      targets: {
+        calories: preferences?.calorie_target ?? 0,
+        proteinG: preferences?.protein_target_g ?? 0,
+        carbsG: 0,
+        fatG: 0,
       },
+      consumed: { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+      meals: [],
+      hydrationMl: 0,
+      hydrationTargetMl: 3000,
+      weightGoal: { direction: "maintain", rateKgPerWeek: 0 },
+    },
     energy: {
       intake: energyIntake,
       bmr,
       exerciseBurn,
       net,
-      status: net < -200 ? "deficit" : net > 200 ? "surplus" : "maintenance",
+      status: "unavailable",
     },
     grades,
-    suggestions: buildSuggestions({ dataNotes, totals, cardioLoad, weekCount: weekSessions.length, target, recovery }),
-    keyTakeaway: keyTakeaway({ ironScore, dataNotes, weekCount: weekSessions.length, target }),
+    suggestions: buildSuggestions({
+      dataNotes,
+      totals,
+      cardioLoad,
+      weekCount,
+      target,
+      recovery,
+      hasCardioEvidence:
+        todayCardio.length > 0 ||
+        todayImported.some(
+          (activity) => activity.kind === "cardio" || activity.kind === "conditioning",
+        ),
+      hasStrengthEvidence:
+        todaySessions.some(hasNativeTrainingEvidence) ||
+        todayImported.some((activity) => activity.kind === "strength"),
+    }),
+    keyTakeaway: keyTakeaway({ ironScore, dataNotes, weekCount, target }),
     weeklyLoad: weeklyLoad(weekSessions),
     recentProgress: [
-      { label: "Sessions this week", value: `${weekSessions.length}`, delta: `target ${target}`, positive: weekSessions.length >= target },
-      { label: "Tonnage today", value: `${Math.round(totals.tonnageKg)} kg`, delta: `${totals.totalSets} sets`, positive: totals.tonnageKg > 0 },
-      { label: "Active zone min", value: `${azm}`, delta: azm > 0 ? "logged" : "none yet", positive: azm > 0 },
+      {
+        label: "Training days (7d)",
+        value: `${weekCount}`,
+        delta: `target ${target}`,
+        positive: weekCount >= target,
+      },
+      {
+        label: "Working sets today",
+        value: hasStrengthMetrics ? `${totals.totalSets}` : "—",
+        delta: hasStrengthMetrics ? `${totals.totalReps} reps` : "set data unavailable",
+        positive: hasStrengthMetrics,
+      },
+      {
+        label: "Active zone min",
+        value: `${azm}`,
+        delta: azm > 0 ? "logged" : "none yet",
+        positive: azm > 0,
+      },
     ],
     dataQuality: {
       level: dataNotes.length === 0 ? "rich" : dataNotes.length < 3 ? "partial" : "sparse",
       notes: dataNotes,
+    },
+    dataAvailability: {
+      strength:
+        todaySessions.length > 0 || todayImported.some((activity) => activity.kind === "strength"),
+      strengthMetrics: hasStrengthMetrics,
+      cardio:
+        todayCardio.length > 0 ||
+        todayImported.some(
+          (activity) => activity.kind === "cardio" || activity.kind === "conditioning",
+        ),
+      nutrition: Boolean(nutrition),
+      recovery: Boolean(recovery),
+      heartRateZones: zoneTotals.length > 0,
+      measuredStrain: hasMeasuredStrain,
     },
   };
 }
@@ -367,18 +569,20 @@ function statusLine(score: number, gaps: number): string {
 }
 
 function strainInterpretation(total: number, cardioPercent: number): string {
-  if (total === 0) return "No strain recorded yet today.";
-  if (total < 30) return "Light day. Useful for recovery, not for adaptation.";
-  if (total < 70)
+  if (total === 0) return "No measured training strain yet.";
+  if (total <= 6) return "Light measured load. Useful for recovery or a low-dose training day.";
+  if (total <= 14)
     return cardioPercent > 55
-      ? "Moderate strain, cardio-dominant. Strength stimulus is light."
-      : "Moderate strain, muscular-dominant. Solid maintainable dose.";
-  return "High strain. Watch tomorrow's readiness before repeating.";
+      ? "Productive measured load, cardio-dominant."
+      : "Productive measured load, muscular-dominant.";
+  if (total <= 18) return "High measured load. Check recovery before repeating it tomorrow.";
+  return "Very high measured load. Prioritize recovery before another hard session.";
 }
 
 function mergeZones(lists: ZoneSplit[][]): ZoneSplit[] {
   const minutes = new Map<ZoneKey, number>();
-  for (const list of lists) for (const z of list) minutes.set(z.zone, (minutes.get(z.zone) ?? 0) + z.minutes);
+  for (const list of lists)
+    for (const z of list) minutes.set(z.zone, (minutes.get(z.zone) ?? 0) + z.minutes);
   const total = [...minutes.values()].reduce((a, b) => a + b, 0);
   if (!total) return [];
   return ZONES.filter((z) => minutes.has(z)).map((zone) => ({
@@ -395,25 +599,68 @@ function buildGrades(args: {
   recovery: RecoveryData | null;
   weekCount: number;
   target: number;
+  hasCardioEvidence: boolean;
+  hasStrengthEvidence: boolean;
 }): GradeLine[] {
   const cardioScore = clamp((args.cardioLoad / 120) * 100);
   const strengthScore = clamp((args.tonnage / 8000) * 100);
-  const nutritionScore = args.nutrition
-    ? clamp(
-        100 -
-          Math.abs((args.nutrition.consumed.calories || 0) - (args.nutrition.targets.calories || 1)) /
-            Math.max(1, args.nutrition.targets.calories || 1) *
-            100,
-      )
-    : 0;
-  const recoveryScore = args.recovery ? args.recovery.readiness : 0;
+  const hasNutritionTarget = (args.nutrition?.targets.calories ?? 0) > 0;
+  const nutritionScore =
+    hasNutritionTarget && args.nutrition
+      ? clamp(
+          100 -
+            (Math.abs(
+              (args.nutrition.consumed.calories || 0) - (args.nutrition.targets.calories || 1),
+            ) /
+              Math.max(1, args.nutrition.targets.calories || 1)) *
+              100,
+        )
+      : 0;
+  const recoveryScore = args.recovery?.readiness ?? 0;
   const consistencyScore = clamp((args.weekCount / Math.max(1, args.target)) * 100);
   const lines: GradeLine[] = [
-    { label: "Cardio", score: Math.round(cardioScore), note: args.cardioLoad ? `${args.cardioLoad} cardio load` : "No cardio logged" },
-    { label: "Strength", score: Math.round(strengthScore), note: args.tonnage ? `${Math.round(args.tonnage)} kg tonnage` : "No lifting logged" },
-    { label: "Nutrition", score: Math.round(nutritionScore), note: args.nutrition ? "Vs. calorie target" : "Not logged" },
-    { label: "Recovery", score: Math.round(recoveryScore), note: args.recovery ? "From check-in" : "No check-in" },
-    { label: "Consistency", score: Math.round(consistencyScore), note: `${args.weekCount}/${args.target} sessions` },
+    {
+      label: "Cardio",
+      score: Math.round(cardioScore),
+      note: args.cardioLoad
+        ? `${args.cardioLoad} measured cardio load`
+        : args.hasCardioEvidence
+          ? "Activity logged; load unavailable"
+          : "Not logged",
+      available: args.cardioLoad > 0,
+    },
+    {
+      label: "Strength",
+      score: Math.round(strengthScore),
+      note: args.tonnage
+        ? `${Math.round(args.tonnage)} kg tonnage`
+        : args.hasStrengthEvidence
+          ? "Strength activity logged; sets unavailable"
+          : "Not logged",
+      available: args.tonnage > 0,
+    },
+    {
+      label: "Nutrition",
+      score: Math.round(nutritionScore),
+      note: !args.nutrition
+        ? "Not logged"
+        : hasNutritionTarget
+          ? "Vs. calorie target"
+          : "Calorie target not set",
+      available: hasNutritionTarget,
+    },
+    {
+      label: "Recovery",
+      score: Math.round(recoveryScore),
+      note: args.recovery?.readiness != null ? "From recorded readiness" : "Readiness not recorded",
+      available: args.recovery?.readiness != null,
+    },
+    {
+      label: "Consistency",
+      score: Math.round(consistencyScore),
+      note: `${args.weekCount}/${args.target} training days (7d)`,
+      available: true,
+    },
   ].map((l) => ({ ...l, grade: gradeFromScore(l.score) }));
   return lines;
 }
@@ -425,30 +672,33 @@ function buildSuggestions(args: {
   weekCount: number;
   target: number;
   recovery: RecoveryData | null;
+  hasCardioEvidence: boolean;
+  hasStrengthEvidence: boolean;
 }): Suggestion[] {
   const out: Suggestion[] = [];
   if (args.weekCount < args.target)
     out.push({
       id: "consistency",
-      title: `Log ${args.target - args.weekCount} more session${args.target - args.weekCount > 1 ? "s" : ""} this week`,
-      detail: "Consistency drives adaptation more than any single workout.",
+      title: `Log ${args.target - args.weekCount} more training day${args.target - args.weekCount > 1 ? "s" : ""} in this 7-day window`,
+      detail:
+        "Distinct training days drive the consistency score; multiple sessions on one day count once.",
       severity: "warn",
     });
-  if (!args.totals.totalSets)
+  if (!args.hasStrengthEvidence)
     out.push({
       id: "strength",
       title: "Get a lifting session on the board",
       detail: "Start a workout and log at least 12 working sets to register a strength stimulus.",
       severity: "info",
     });
-  if (args.cardioLoad === 0)
+  if (!args.hasCardioEvidence)
     out.push({
       id: "cardio",
       title: "Add 25-35 min of zone 2",
       detail: "Low-intensity aerobic work raises work capacity without adding recovery cost.",
       severity: "info",
     });
-  if (args.recovery && args.recovery.readiness < 55)
+  if (args.recovery?.readiness != null && args.recovery.readiness < 55)
     out.push({
       id: "recovery",
       title: "Readiness is low — cut volume 20%",
@@ -456,11 +706,21 @@ function buildSuggestions(args: {
       severity: "risk",
     });
   for (const note of args.dataNotes.slice(0, 2))
-    out.push({ id: `gap-${note.slice(0, 8)}`, title: "Close a data gap", detail: note, severity: "info" });
+    out.push({
+      id: `gap-${note.slice(0, 8)}`,
+      title: "Close a data gap",
+      detail: note,
+      severity: "info",
+    });
   return out.slice(0, 5);
 }
 
-function keyTakeaway(args: { ironScore: number; dataNotes: string[]; weekCount: number; target: number }): string {
+function keyTakeaway(args: {
+  ironScore: number;
+  dataNotes: string[];
+  weekCount: number;
+  target: number;
+}): string {
   if (args.dataNotes.length >= 3)
     return "Not enough logged data to grade today. Log a session, a meal, or a recovery check-in and IronScore becomes meaningful.";
   if (args.weekCount >= args.target)
@@ -475,7 +735,10 @@ function weeklyLoad(sessions: FullSessionRow[]): { day: string; load: number }[]
     const d = new Date(s.started_at);
     const label = labels[(d.getDay() + 6) % 7]!;
     const t = sessionTotals(s);
-    buckets.set(label, (buckets.get(label) ?? 0) + Math.round(t.tonnageKg / 100) + (s.cardio_load ?? 0));
+    buckets.set(
+      label,
+      (buckets.get(label) ?? 0) + Math.round(t.tonnageKg / 100) + (s.cardio_load ?? 0),
+    );
   }
   return labels.map((day) => ({ day, load: buckets.get(day) ?? 0 }));
 }
@@ -494,7 +757,12 @@ export function buildNutrition(
       carbsG: day.carb_target_g ?? 0,
       fatG: day.fat_target_g ?? 0,
     },
-    consumed: { calories: day.calories, proteinG: day.protein_g, carbsG: day.carbs_g, fatG: day.fat_g },
+    consumed: {
+      calories: day.calories,
+      proteinG: day.protein_g,
+      carbsG: day.carbs_g,
+      fatG: day.fat_g,
+    },
     meals: meals.map((m) => ({
       id: m.id,
       name: m.name,
@@ -517,57 +785,95 @@ export function buildNutrition(
 // ------------------------------------------------------------------- recovery
 export function buildRecovery(row: RecoveryRow | null, trend: RecoveryRow[]): RecoveryData | null {
   if (!row) return null;
-  const readiness = row.readiness ?? estimateReadiness(row);
+  const readiness = row.readiness;
   const placeholders: string[] = [];
-  if (row.hrv_ms == null) placeholders.push("HRV requires a connected wearable — not available yet.");
-  if (row.source !== "wearable") placeholders.push("Sleep and resting HR are self-reported, not device-measured.");
+  const wearableSource =
+    row.source === "wearable" ||
+    row.source === "health_connect" ||
+    row.source === "android_companion";
+  if (readiness == null)
+    placeholders.push("No readiness score was recorded, so training guidance is unavailable.");
+  if (row.sleep_hours == null)
+    placeholders.push("Sleep duration was not available in this recovery record.");
+  if (row.hrv_ms == null) placeholders.push("HRV was not available in this recovery record.");
+  if (!wearableSource && (row.sleep_hours != null || row.resting_hr != null))
+    placeholders.push("Sleep and resting HR are self-reported for this entry.");
+  const sourceLabel = row.is_sample
+    ? "Demo sample"
+    : row.source === "health_connect" || row.source === "android_companion"
+      ? "Health Connect"
+      : row.source === "wearable"
+        ? "Connected wearable"
+        : "Manual check-in";
   return {
     readiness,
-    status: readiness >= 75 ? "Primed" : readiness >= 55 ? "Moderate" : "Compromised",
+    status:
+      readiness == null
+        ? "Readiness unavailable"
+        : readiness >= 75
+          ? "Primed"
+          : readiness >= 55
+            ? "Moderate"
+            : "Compromised",
     recommendation:
-      readiness >= 75
-        ? "Green light. Push the top set and keep accessory volume as planned."
-        : readiness >= 55
-          ? "Train as planned but cap the top set at RPE 8 and trim the last accessory."
-          : "Deload today: 60% of planned volume, no sets above RPE 7.",
+      readiness == null
+        ? "No training recommendation is generated without a recorded readiness score. Review the available recovery inputs and choose your session load manually."
+        : readiness >= 75
+          ? "Green light. Push the top set and keep accessory volume as planned."
+          : readiness >= 55
+            ? "Train as planned but cap the top set at RPE 8 and trim the last accessory."
+            : "Deload today: 60% of planned volume, no sets above RPE 7.",
     sleep: {
-      hours: Number(row.sleep_hours ?? 0),
-      efficiencyPercent: row.sleep_efficiency_percent ?? 0,
-      note: row.sleep_hours == null ? "Not logged" : Number(row.sleep_hours) >= 7.5 ? "Adequate duration" : "Below your target duration",
+      hours: row.sleep_hours == null ? null : Number(row.sleep_hours),
+      efficiencyPercent: row.sleep_efficiency_percent,
+      note:
+        row.sleep_hours == null
+          ? "Not logged"
+          : Number(row.sleep_hours) >= 7.5
+            ? "Adequate duration"
+            : "Below your target duration",
     },
-    restingHr: row.resting_hr ?? 0,
+    restingHr: row.resting_hr,
     hrvMs: row.hrv_ms,
-    soreness: Array.isArray(row.soreness) ? (row.soreness as { area: string; level: number }[]) : [],
-    fatigue: row.fatigue ?? 0,
-    stress: row.stress ?? 0,
+    soreness: Array.isArray(row.soreness)
+      ? (row.soreness as { area: string; level: number }[])
+      : [],
+    fatigue: row.fatigue,
+    stress: row.stress,
     trend: trend
       .slice()
       .reverse()
-      .map((r) => ({ date: r.day, readiness: r.readiness ?? estimateReadiness(r) })),
+      .filter((r) => r.readiness != null)
+      .map((r) => ({ date: r.day, readiness: r.readiness! })),
     placeholders,
+    day: row.day,
+    source: row.source,
+    sourceLabel,
+    dataOrigin: row.is_sample ? "sample" : wearableSource ? "wearable" : "manual",
   };
 }
 
-/** Fallback readiness when the user logged inputs but no explicit score. */
-function estimateReadiness(row: RecoveryRow): number {
-  const sleep = clamp((Number(row.sleep_hours ?? 6) / 8) * 100);
-  const fatigue = clamp(100 - (row.fatigue ?? 5) * 10);
-  const stress = clamp(100 - (row.stress ?? 5) * 10);
-  return Math.round(sleep * 0.45 + fatigue * 0.35 + stress * 0.2);
-}
-
 // ------------------------------------------------------------------- progress
-export function buildProgress(bodyMetrics: BodyMetricRow[], sessions: FullSessionRow[]): ProgressData {
+export function buildProgress(
+  bodyMetrics: BodyMetricRow[],
+  sessions: FullSessionRow[],
+  now = new Date(),
+): ProgressData {
   const bodyweight = bodyMetrics
     .filter((m) => m.weight_kg != null)
-    .map((m) => ({ date: m.recorded_at, kg: Number(m.weight_kg) }));
+    .map((m) => ({ date: m.recorded_at, kg: Number(m.weight_kg) }))
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
 
   const e1rmByDate = new Map<string, { squat: number; bench: number; deadlift: number }>();
   const volumeByWeek = new Map<string, number>();
   const prs: ProgressData["prs"] = [];
   const bestByExercise = new Map<string, number>();
 
-  for (const s of sessions) {
+  const evidencedSessions = sessions
+    .filter(hasNativeTrainingEvidence)
+    .slice()
+    .sort((left, right) => Date.parse(left.started_at) - Date.parse(right.started_at));
+  for (const s of evidencedSessions) {
     const day = s.started_at.slice(0, 10);
     const week = isoWeekLabel(new Date(s.started_at));
     const t = sessionTotals(s);
@@ -593,13 +899,19 @@ export function buildProgress(bodyMetrics: BodyMetricRow[], sessions: FullSessio
               date: s.started_at,
               exercise: se.exercise_name,
               detail: `${round(Number(set.weight_kg ?? 0), 1)} kg × ${set.reps} (e1RM ${e1rm} kg)`,
+              weightKg: round(Number(set.weight_kg ?? 0), 1),
+              reps: set.reps ?? 0,
+              e1rmKg: e1rm,
             });
         }
       }
     }
   }
 
-  const volume = [...volumeByWeek.entries()].map(([week, tonnage]) => ({ week, tonnage: Math.round(tonnage) }));
+  const volume = [...volumeByWeek.entries()].map(([week, tonnage]) => ({
+    week,
+    tonnage: Math.round(tonnage),
+  }));
   const load = volume.map((v, i) => {
     const window = volume.slice(Math.max(0, i - 3), i + 1);
     return {
@@ -609,7 +921,8 @@ export function buildProgress(bodyMetrics: BodyMetricRow[], sessions: FullSessio
     };
   });
 
-  const completed = sessions.filter((s) => s.status === "completed");
+  const completed = evidencedSessions.filter((s) => s.status === "completed");
+  const streaks = trainingWeekStreaks(completed, now);
   return {
     bodyweight,
     e1rm: [...e1rmByDate.entries()].map(([date, v]) => ({ date, ...v })),
@@ -617,26 +930,63 @@ export function buildProgress(bodyMetrics: BodyMetricRow[], sessions: FullSessio
     load,
     cardioFitness: [],
     streak: {
-      current: currentStreakWeeks(completed),
-      best: currentStreakWeeks(completed),
-      weeksHitTarget: volume.length,
+      currentWeeks: streaks.current,
+      bestWeeks: streaks.best,
+      weeksTracked: volume.length,
     },
     prs: prs.slice(-12).reverse(),
   };
 }
 
-function currentStreakWeeks(sessions: FullSessionRow[]): number {
-  const weeks = new Set(sessions.map((s) => isoWeekLabel(new Date(s.started_at))));
-  return weeks.size;
+const WEEK_MS = 7 * 86_400_000;
+
+function weekStartUtc(value: Date): number {
+  if (Number.isNaN(value.getTime())) return Number.NaN;
+  const date = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  return date.getTime();
+}
+
+/** Consecutive ISO training weeks; a completed prior week remains current until this week ends. */
+export function trainingWeekStreaks(
+  sessions: FullSessionRow[],
+  now = new Date(),
+): { current: number; best: number } {
+  const currentWeek = weekStartUtc(now);
+  const starts = [
+    ...new Set(
+      sessions
+        .map((session) => weekStartUtc(new Date(session.started_at)))
+        .filter((start) => Number.isFinite(start) && start <= currentWeek),
+    ),
+  ].sort((left, right) => left - right);
+  if (!starts.length) return { current: 0, best: 0 };
+
+  let best = 1;
+  let run = 1;
+  for (let index = 1; index < starts.length; index += 1) {
+    run = starts[index]! - starts[index - 1]! === WEEK_MS ? run + 1 : 1;
+    best = Math.max(best, run);
+  }
+
+  const latest = starts[starts.length - 1]!;
+  if (currentWeek - latest > WEEK_MS) return { current: 0, best };
+  let current = 1;
+  for (let index = starts.length - 1; index > 0; index -= 1) {
+    if (starts[index]! - starts[index - 1]! !== WEEK_MS) break;
+    current += 1;
+  }
+  return { current, best };
 }
 
 export function isoWeekLabel(d: Date): string {
-  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const dayNum = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `W${String(week).padStart(2, "0")}`;
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 // ------------------------------------------------------------------ exercises
@@ -646,7 +996,10 @@ export function buildExercise(
   history: { date: string; weightKg: number; reps: number; sets: number; tonnageKg: number }[],
 ): Exercise {
   const best = history.reduce(
-    (acc, h) => (estimate1rm(h.weightKg, h.reps) > estimate1rm(acc.weightKg, acc.reps) ? { weightKg: h.weightKg, reps: h.reps } : acc),
+    (acc, h) =>
+      estimate1rm(h.weightKg, h.reps) > estimate1rm(acc.weightKg, acc.reps)
+        ? { weightKg: h.weightKg, reps: h.reps }
+        : acc,
     { weightKg: 0, reps: 0 },
   );
   return {
@@ -719,11 +1072,12 @@ export function buildCoach(args: {
     });
 
   const risk: Suggestion[] = [];
-  if (recovery && recovery.readiness < 55)
+  if (recovery?.readiness != null && recovery.readiness < 55)
     risk.push({
       id: "readiness",
       title: "Readiness below 55",
-      detail: "Two consecutive low-readiness days with high tonnage is the classic overreach pattern.",
+      detail:
+        "Two consecutive low-readiness days with high tonnage is the classic overreach pattern.",
       severity: "risk",
     });
   if (week.length >= 6)
@@ -744,7 +1098,10 @@ export function buildCoach(args: {
   const adjustments: Suggestion[] = [
     {
       id: "adj-1",
-      title: goal === "strength" ? "Add one heavy top single per main lift" : "Add one extra hard set per movement",
+      title:
+        goal === "strength"
+          ? "Add one heavy top single per main lift"
+          : "Add one extra hard set per movement",
       detail: `Matched to your primary goal: ${goal}.`,
       severity: "info",
     },
@@ -764,9 +1121,11 @@ export function buildCoach(args: {
 
   return {
     today: {
-      headline: sessions.length ? "Train the plan, cap the top set" : "Start with a baseline session",
+      headline: sessions.length
+        ? "Train the plan, cap the top set"
+        : "Start with a baseline session",
       body: sessions.length
-        ? `Based on ${week.length} session(s) in the last 7 days and ${recovery ? `readiness ${recovery.readiness}` : "no recovery check-in"}, today should be a normal working day.`
+        ? `Based on ${week.length} session(s) in the last 7 days and ${recovery?.readiness != null ? `readiness ${recovery.readiness}` : "no recorded readiness score"}, today should be a normal working day.`
         : "There is no history to autoregulate against yet. Log a full session at RPE 7-8 to establish a baseline.",
       bullets: sessions.length
         ? ["Keep top sets at RPE 8", "Hold rest at 2-3 min on main lifts", "Log every working set"]
@@ -776,7 +1135,11 @@ export function buildCoach(args: {
       headline: "Tomorrow's outline",
       body: "Deterministic outline derived from your logged split and weekly target — not a live AI model.",
       blocks: [
-        { name: "Primary", detail: goal === "conditioning" ? "Intervals, 6 × 3 min hard" : "Main lift, 4 × 4 @ RPE 8" },
+        {
+          name: "Primary",
+          detail:
+            goal === "conditioning" ? "Intervals, 6 × 3 min hard" : "Main lift, 4 × 4 @ RPE 8",
+        },
         { name: "Secondary", detail: "Two accessories, 3 × 8-12" },
         { name: "Aerobic", detail: "20-30 min zone 2" },
       ],

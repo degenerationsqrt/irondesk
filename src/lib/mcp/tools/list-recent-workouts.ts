@@ -9,7 +9,11 @@ export default defineTool({
   description:
     "List the signed-in athlete's most recent IronDesk workout sessions with status, focus, effort and completion time.",
   inputSchema: {
-    limit: z.number().int().optional().describe("How many sessions to return (default 10, max 50)."),
+    limit: z
+      .number()
+      .int()
+      .optional()
+      .describe("How many sessions to return (default 10, max 50)."),
     status: z
       .enum(["draft", "active", "completed", "cancelled"])
       .optional()
@@ -23,6 +27,7 @@ export default defineTool({
     let query = supabase
       .from("workout_sessions")
       .select("id, title, kind, focus, status, started_at, completed_at, perceived_effort, notes")
+      .eq("is_sample", false)
       .order("started_at", { ascending: false })
       .limit(take);
     if (status) query = query.eq("status", status);

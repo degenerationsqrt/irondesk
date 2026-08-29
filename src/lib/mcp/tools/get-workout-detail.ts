@@ -17,6 +17,7 @@ export default defineTool({
       .from("workout_sessions")
       .select("id, title, kind, focus, status, started_at, completed_at, perceived_effort, notes")
       .eq("id", session_id)
+      .eq("is_sample", false)
       .maybeSingle();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     if (!session) return { content: [{ type: "text", text: "Workout not found." }], isError: true };
