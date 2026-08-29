@@ -24,6 +24,7 @@ import {
   toHistorySession,
   toImportedHistorySession,
 } from "./derive";
+import type { ManualCardioInput } from "./cardio-log";
 import { dayKeyForInstant, safeTimeZone } from "./dates";
 import { IronDeskError, asIronDeskError } from "./errors";
 import {
@@ -68,6 +69,7 @@ import type {
   Exercise,
   HistorySession,
   NutritionDay,
+  PersonalTemplateDraft,
   ProgressData,
   RecoveryData,
   ReleaseGate,
@@ -155,6 +157,43 @@ export async function setUserEquipment(equipmentIds: string[]): Promise<void> {
 }
 
 // ------------------------------------------------------------------ sessions
+/**
+ * Saves one completed manual cardio activity without creating a strength-style
+ * workout session. Optional evidence stays null; no load or zones are inferred.
+ */
+export async function logCardioSession(input: ManualCardioInput): Promise<string> {
+  const userId = await requireUserId();
+  const startedAt = new Date(input.startedAt);
+  if (!input.name.trim() || input.name.trim().length > 80)
+    throw new IronDeskError("Enter a valid cardio activity name.", "validation");
+  if (Number.isNaN(startedAt.getTime()))
+    throw new IronDeskError("Choose a valid cardio date and time.", "validation");
+  if (!Number.isInteger(input.durationMin) || input.durationMin < 1 || input.durationMin > 1_440)
+    throw new IronDeskError("Cardio duration must be between 1 and 1,440 minutes.", "validation");
+
+  const result = await supabase
+    .from("cardio_sessions")
+    .insert({
+      user_id: userId,
+      session_id: null,
+      name: input.name.trim(),
+      started_at: startedAt.toISOString(),
+      duration_min: input.durationMin,
+      distance_km: input.distanceKm,
+      calories: input.calories,
+      avg_hr: input.avgHr,
+      max_hr: input.maxHr,
+      cardio_load: input.cardioLoad,
+      active_zone_minutes: input.activeZoneMinutes,
+      zones: [],
+      notes: input.notes?.trim() || null,
+      is_sample: false,
+    })
+    .select("id")
+    .single();
+  return unwrap(result).id;
+}
+
 async function fetchSessions(options: { since?: Date; statuses?: string[]; limit?: number } = {}) {
   let query = supabase
     .from("workout_sessions")
@@ -711,6 +750,13 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
     id: row.id,
     status: (row.status as ActiveWorkout["status"]) ?? "active",
     persisted: true,
+    kind:
+      row.kind === "cardio" ||
+      row.kind === "conditioning" ||
+      row.kind === "mobility" ||
+      row.kind === "other"
+        ? row.kind
+        : "strength",
     title: row.title,
     focus: row.focus ?? "",
     startedAt: row.started_at,
@@ -1484,6 +1530,26 @@ function releaseGateOf(value: string | null): ReleaseGate {
     : "public";
 }
 
+/**
+ * Repository-level visibility guard for personal templates. System templates
+ * may intentionally be assignment-only, but an athlete-owned template is not
+ * readable by the library until its child rows have been saved and the parent
+ * has been finalized for free starts.
+ */
+export function isTemplateVisibleInLibrary(
+  row: Pick<
+    TemplateRow,
+    "is_system" | "release_gate" | "requires_acknowledgment" | "library_startable"
+  >,
+): boolean {
+  if (row.is_system) return true;
+  return (
+    releaseGateOf(row.release_gate) === "public" &&
+    (row.library_startable ?? true) &&
+    !(row.requires_acknowledgment ?? false)
+  );
+}
+
 function mapTemplate(row: TemplateRow): WorkoutTemplate {
   return {
     id: row.id,
@@ -1539,7 +1605,7 @@ export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> {
     .order("name", { ascending: true })
     .returns<TemplateRow[]>();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
-  return (res.data ?? []).map(mapTemplate);
+  return (res.data ?? []).filter(isTemplateVisibleInLibrary).map(mapTemplate);
 }
 
 export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplate | null> {
@@ -1550,7 +1616,228 @@ export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplate | 
     .maybeSingle()
     .returns<TemplateRow | null>();
   if (res.error) throw asIronDeskError(new Error(res.error.message));
-  return res.data ? mapTemplate(res.data) : null;
+  return res.data && isTemplateVisibleInLibrary(res.data) ? mapTemplate(res.data) : null;
+}
+
+interface NormalizedPersonalTemplateDraft {
+  name: string;
+  focus: string | null;
+  exercises: {
+    exerciseId: string;
+    name: string;
+    targetSets: number;
+    targetReps: string;
+  }[];
+}
+
+/** Pure validation shared by the builder UI and the repository write gate. */
+export function normalizePersonalTemplateDraft(
+  draft: PersonalTemplateDraft,
+): NormalizedPersonalTemplateDraft {
+  const name = draft.name.trim();
+  const focus = draft.focus?.trim() || null;
+  if (!name) throw new IronDeskError("Name your workout before saving it.", "validation");
+  if (name.length > 80)
+    throw new IronDeskError("Workout name must be 80 characters or fewer.", "validation");
+  if (focus && focus.length > 120)
+    throw new IronDeskError("Workout focus must be 120 characters or fewer.", "validation");
+  if (draft.exercises.length < 1)
+    throw new IronDeskError("Add at least one movement before saving.", "validation");
+  if (draft.exercises.length > 30)
+    throw new IronDeskError("A saved workout can contain at most 30 movements.", "validation");
+
+  const seen = new Set<string>();
+  const exercises = draft.exercises.map((exercise) => {
+    const exerciseId = exercise.exerciseId.trim();
+    const targetReps = exercise.targetReps.trim();
+    if (!exerciseId)
+      throw new IronDeskError("Every movement must come from the exercise library.", "validation");
+    if (seen.has(exerciseId))
+      throw new IronDeskError(
+        "Each movement can appear only once in a saved workout.",
+        "validation",
+      );
+    seen.add(exerciseId);
+    if (
+      !Number.isInteger(exercise.targetSets) ||
+      exercise.targetSets < 1 ||
+      exercise.targetSets > 20
+    )
+      throw new IronDeskError("Sets must be a whole number from 1 to 20.", "validation");
+    if (!targetReps || targetReps.length > 32)
+      throw new IronDeskError("Rep targets must be between 1 and 32 characters.", "validation");
+    return {
+      exerciseId,
+      name: exercise.name.trim(),
+      targetSets: exercise.targetSets,
+      targetReps,
+    };
+  });
+
+  return { name, focus, exercises };
+}
+
+const STAGED_PERSONAL_TEMPLATE = {
+  release_gate: "coach_review",
+  requires_acknowledgment: true,
+  library_startable: false,
+} as const;
+
+const FINALIZED_PERSONAL_TEMPLATE = {
+  release_gate: "public",
+  requires_acknowledgment: false,
+  library_startable: true,
+} as const;
+
+async function cleanupStagedPersonalTemplate(
+  templateId: string,
+  userId: string,
+): Promise<string | null> {
+  const cleanup = await supabase
+    .from("workout_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("release_gate", STAGED_PERSONAL_TEMPLATE.release_gate)
+    .eq("library_startable", STAGED_PERSONAL_TEMPLATE.library_startable);
+  return cleanup.error?.message ?? null;
+}
+
+async function failAfterStagedTemplateCleanup(
+  templateId: string,
+  userId: string,
+  failureMessage: string,
+): Promise<never> {
+  const cleanupMessage = await cleanupStagedPersonalTemplate(templateId, userId);
+  if (cleanupMessage) {
+    throw new IronDeskError(
+      `The workout could not be completed (${failureMessage}), and automatic cleanup also failed: ${cleanupMessage}`,
+      "database",
+    );
+  }
+  throw asIronDeskError(new Error(failureMessage));
+}
+
+/**
+ * Creates an owner-scoped personal template without exposing a partial parent.
+ * Exercise names are re-read through RLS, the parent is staged as non-startable,
+ * ordered children are inserted, and only then is the parent finalized. Either
+ * child or finalization failure removes only a still-staged owner row.
+ */
+export async function createPersonalWorkoutTemplate(draft: PersonalTemplateDraft): Promise<string> {
+  const userId = await requireUserId();
+  const normalized = normalizePersonalTemplateDraft(draft);
+  const exerciseIds = normalized.exercises.map((exercise) => exercise.exerciseId);
+  const library = await supabase
+    .from("exercises")
+    .select("id, name")
+    .in("id", exerciseIds)
+    .eq("is_active", true);
+  if (library.error) throw asIronDeskError(new Error(library.error.message));
+  const canonicalNames = new Map((library.data ?? []).map((row) => [row.id, row.name]));
+  if (canonicalNames.size !== exerciseIds.length)
+    throw new IronDeskError(
+      "One or more selected movements are no longer available. Refresh the library and try again.",
+      "validation",
+    );
+
+  const parent = await supabase
+    .from("workout_templates")
+    .insert({
+      user_id: userId,
+      name: normalized.name,
+      focus: normalized.focus,
+      notes: null,
+      is_system: false,
+      source_key: null,
+      source_name: null,
+      source_version: 1,
+      environment: null,
+      workout_type: null,
+      category: "strength",
+      level: null,
+      estimated_minutes: null,
+      tags: ["custom"],
+      sort_order: 1_000,
+      legacy_day_id: null,
+      ...STAGED_PERSONAL_TEMPLATE,
+      warnings: [],
+    })
+    .select("id")
+    .single();
+  const templateId = unwrap(parent).id;
+
+  const children = normalized.exercises.map((exercise, position) => ({
+    template_id: templateId,
+    exercise_id: exercise.exerciseId,
+    exercise_name: canonicalNames.get(exercise.exerciseId)!,
+    position,
+    target_sets: exercise.targetSets,
+    target_reps: exercise.targetReps,
+    target_rpe: null,
+    rest_seconds: null,
+    load_guidance: null,
+    source_load_unit: null,
+    is_drop_set: false,
+    is_heavy: false,
+    notes: null,
+  }));
+  const inserted = await supabase.from("template_exercises").insert(children);
+  if (inserted.error) {
+    return failAfterStagedTemplateCleanup(templateId, userId, inserted.error.message);
+  }
+
+  const finalized = await supabase
+    .from("workout_templates")
+    .update(FINALIZED_PERSONAL_TEMPLATE)
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .eq("release_gate", STAGED_PERSONAL_TEMPLATE.release_gate)
+    .eq("library_startable", STAGED_PERSONAL_TEMPLATE.library_startable)
+    .select("id")
+    .maybeSingle();
+  if (finalized.error) {
+    return failAfterStagedTemplateCleanup(templateId, userId, finalized.error.message);
+  }
+  if (finalized.data?.id !== templateId) {
+    return failAfterStagedTemplateCleanup(
+      templateId,
+      userId,
+      "The workout could not be finalized. Refresh the library and try again.",
+    );
+  }
+  return templateId;
+}
+
+/** Deletes only an explicitly verified owner-scoped personal template. */
+export async function deletePersonalWorkoutTemplate(templateId: string): Promise<void> {
+  const userId = await requireUserId();
+  const existing = await supabase
+    .from("workout_templates")
+    .select("id, user_id, is_system")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (existing.error) throw asIronDeskError(new Error(existing.error.message));
+  if (!existing.data)
+    throw new IronDeskError("That personal workout is no longer available.", "not_found");
+  if (existing.data.is_system || existing.data.user_id !== userId)
+    throw new IronDeskError("IronDesk Originals cannot be deleted.", "validation");
+
+  const removed = await supabase
+    .from("workout_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .select("id");
+  if (removed.error) throw asIronDeskError(new Error(removed.error.message));
+  if (!removed.data?.length)
+    throw new IronDeskError(
+      "That personal workout was not deleted. Refresh and try again.",
+      "conflict",
+    );
 }
 
 /**

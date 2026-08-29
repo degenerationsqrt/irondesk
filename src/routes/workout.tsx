@@ -17,19 +17,53 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PageHeader } from "@/components/irondesk/app-shell";
-import { EmptyState, MetricTile, Pill, ProgressBar, SectionCard } from "@/components/irondesk/primitives";
+import { CardioLogForm } from "@/components/irondesk/cardio-log-form";
+import { ExercisePicker } from "@/components/irondesk/exercise-picker";
+import {
+  EmptyState,
+  MetricTile,
+  Pill,
+  ProgressBar,
+  SectionCard,
+} from "@/components/irondesk/primitives";
 import { AssignedWorkoutCard } from "@/components/irondesk/program-panels";
 import { TemplateLibrary } from "@/components/irondesk/template-library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { useAuth } from "@/lib/auth/auth-provider";
-import { exercisesQuery, historyQuery, progressionQuery, workoutQuery } from "@/lib/irondesk/queries";
+import type { ManualCardioInput } from "@/lib/irondesk/cardio-log";
+import { safeTimeZone } from "@/lib/irondesk/dates";
+import {
+  accountQuery,
+  exercisesQuery,
+  historyQuery,
+  progressionQuery,
+  workoutQuery,
+} from "@/lib/irondesk/queries";
 import { startLibraryWorkout } from "@/lib/irondesk/programs";
-import { lookupPoints, suggestWorkingWeight, type WorkingWeightSuggestion } from "@/lib/irondesk/progression";
+import {
+  lookupPoints,
+  suggestWorkingWeight,
+  type WorkingWeightSuggestion,
+} from "@/lib/irondesk/progression";
 import * as repo from "@/lib/irondesk/repo";
-import type { ActiveWorkout, SetEntry, WorkoutExercise, WorkoutTemplate } from "@/lib/irondesk/types";
-import { formatLoadGuidance, fromKg, toKg, weightUnit } from "@/lib/irondesk/units";
+import type {
+  ActiveWorkout,
+  Exercise,
+  PersonalTemplateDraft,
+  SetEntry,
+  WorkoutExercise,
+  WorkoutTemplate,
+} from "@/lib/irondesk/types";
+import {
+  defaultSetWeightKg,
+  formatLoadGuidance,
+  formatWeightedSet,
+  formatWeightText,
+  fromKg,
+  toKg,
+  weightUnit,
+} from "@/lib/irondesk/units";
 import { useIronDeskInvalidate, useModeData, useServiceMode } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 
@@ -43,7 +77,10 @@ export const Route = createFileRoute("/workout")({
           "Log sets, reps, RPE and rest in a one-handed workout console built for training under the bar.",
       },
       { property: "og:title", content: "Active Workout — IronDesk" },
-      { property: "og:description", content: "One-handed set logging with live volume and effort." },
+      {
+        property: "og:description",
+        content: "One-handed set logging with live volume and effort.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -66,6 +103,7 @@ function uid() {
 }
 
 type SaveState = "saved" | "saving" | "error";
+const previewCardioSave = async () => undefined;
 
 function WorkoutPage() {
   const mode = useServiceMode();
@@ -82,21 +120,30 @@ function WorkoutPage() {
         busy={false}
         canStart={false}
         note="Finish or cancel the session above to start one of these workouts."
+        exercises={library}
+        builderReadOnlyNote={
+          mode === "live"
+            ? "You can preview and arrange a custom workout now. Finish or cancel the active session before saving and starting it."
+            : "Read-only preview. Sign in to save this workout to My Templates or start it."
+        }
       />
+      {mode === "demo" ? (
+        <CardioLogForm live={false} timeZone="UTC" onSave={previewCardioSave} />
+      ) : null}
     </div>
   );
 }
 
 /** Launcher: IronDesk Original templates, a blank session, or a recent repeat. */
-function WorkoutStart({
-  library,
-  live,
-}: {
-  library: { id: string; name: string; muscle: string; equipment: string }[];
-  live: boolean;
-}) {
+function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean }) {
   const invalidate = useIronDeskInvalidate();
   const { data: history } = useQuery({ ...historyQuery("live"), enabled: live });
+  const { data: account } = useQuery({ ...accountQuery, enabled: live });
+  const browserTimeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    [],
+  );
+  const timeZone = safeTimeZone(account?.profile?.timezone ?? browserTimeZone);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,6 +187,27 @@ function WorkoutStart({
     }
   };
 
+  const saveCardio = async (input: ManualCardioInput) => {
+    await repo.logCardioSession(input);
+    invalidate();
+  };
+
+  const createPersonal = async (draft: PersonalTemplateDraft) => {
+    const templateId = await repo.createPersonalWorkoutTemplate(draft);
+    invalidate();
+    return templateId;
+  };
+
+  const startCreated = async (templateId: string) => {
+    await repo.startWorkoutFromTemplate(templateId);
+    invalidate();
+  };
+
+  const deletePersonal = async (templateId: string) => {
+    await repo.deletePersonalWorkoutTemplate(templateId);
+    invalidate();
+  };
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -151,7 +219,9 @@ function WorkoutStart({
       <AssignedWorkoutCard />
 
       {error && (
-        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
+        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
       )}
 
       <TemplateLibrary
@@ -160,25 +230,42 @@ function WorkoutStart({
         busy={busy}
         canStart={live}
         note="Demo mode is read-only — sign in to start a template and save your sets."
+        exercises={library}
+        {...(live
+          ? {
+              onCreatePersonal: createPersonal,
+              onStartCreated: startCreated,
+              onDeletePersonal: deletePersonal,
+            }
+          : {})}
       />
 
       <SectionCard title="New Session" eyebrow="Blank">
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => void begin({ title: "Strength Session", focus: "Full body", kind: "strength" })}>
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void begin({ title: "Strength Session", focus: "Full body", kind: "strength" })
+            }
+          >
             <Plus className="size-4" /> Strength session
           </Button>
           <Button
             variant="secondary"
             disabled={busy}
-            onClick={() => void begin({ title: "Conditioning", focus: "Conditioning", kind: "conditioning" })}
+            onClick={() =>
+              void begin({ title: "Conditioning", focus: "Conditioning", kind: "conditioning" })
+            }
           >
-            <Plus className="size-4" /> Conditioning
+            <Plus className="size-4" /> Strength / conditioning circuit
           </Button>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Sessions save as you log. You can leave and resume from any device.
         </p>
       </SectionCard>
+
+      <CardioLogForm key={timeZone} live={live} timeZone={timeZone} onSave={saveCardio} />
 
       <SectionCard title="Repeat Recent" eyebrow="Template">
         {history && history.length > 0 ? (
@@ -213,16 +300,6 @@ function WorkoutStart({
           />
         )}
       </SectionCard>
-
-      <SectionCard title="Library" eyebrow="Reference">
-        <div className="flex flex-wrap gap-2">
-          {library.slice(0, 10).map((l) => (
-            <span key={l.id} className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs font-semibold">
-              {l.name}
-            </span>
-          ))}
-        </div>
-      </SectionCard>
     </div>
   );
 }
@@ -233,7 +310,7 @@ function WorkoutConsole({
   live,
 }: {
   initial: ActiveWorkout;
-  library: { id: string; name: string; muscle: string; equipment: string }[];
+  library: Exercise[];
   live: boolean;
 }) {
   const invalidate = useIronDeskInvalidate();
@@ -253,6 +330,13 @@ function WorkoutConsole({
   const [confirming, setConfirming] = useState<"finish" | "cancel" | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const selectedExerciseIds = useMemo(
+    () =>
+      new Set(
+        exercises.map((exercise) => exercise.exerciseId).filter((id): id is string => Boolean(id)),
+      ),
+    [exercises],
+  );
   const pending = useRef(0);
   const busySets = useRef<Set<string>>(new Set());
 
@@ -352,7 +436,9 @@ function WorkoutConsole({
   const patchLocal = (exId: string, setId: string, patch: Partial<SetEntry>) =>
     setExercises((prev) =>
       prev.map((e) =>
-        e.id === exId ? { ...e, sets: e.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)) } : e,
+        e.id === exId
+          ? { ...e, sets: e.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)) }
+          : e,
       ),
     );
 
@@ -379,7 +465,8 @@ function WorkoutConsole({
       setRestStarted(Date.now());
     }
     if (setId.startsWith("local-")) return;
-    const restSeconds = next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
+    const restSeconds =
+      next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
     void persist(() =>
       repo.updateSet(setId, {
         completed: next,
@@ -399,18 +486,26 @@ function WorkoutConsole({
     const suggestion = suggestions[exId];
     const draft: SetEntry = {
       id: uid(),
-      weightKg: last?.weightKg ?? suggestion?.weightKg ?? 20,
+      weightKg: last?.weightKg ?? suggestion?.weightKg ?? defaultSetWeightKg(units),
       reps: last?.reps ?? suggestion?.reps ?? 8,
       rpe: last?.rpe ?? 7,
       done: false,
     };
-    setExercises((prev) => prev.map((e) => (e.id === exId ? { ...e, sets: [...e.sets, draft] } : e)));
+    setExercises((prev) =>
+      prev.map((e) => (e.id === exId ? { ...e, sets: [...e.sets, draft] } : e)),
+    );
     if (live && !exId.startsWith("local-")) {
       await persist(async () => {
-        const id = await repo.addSet(exId, { weightKg: draft.weightKg, reps: draft.reps, rpe: draft.rpe });
+        const id = await repo.addSet(exId, {
+          weightKg: draft.weightKg,
+          reps: draft.reps,
+          rpe: draft.rpe,
+        });
         setExercises((prev) =>
           prev.map((e) =>
-            e.id === exId ? { ...e, sets: e.sets.map((s) => (s.id === draft.id ? { ...s, id } : s)) } : e,
+            e.id === exId
+              ? { ...e, sets: e.sets.map((s) => (s.id === draft.id ? { ...s, id } : s)) }
+              : e,
           ),
         );
       });
@@ -425,7 +520,12 @@ function WorkoutConsole({
     if (!setId.startsWith("local-")) void persist(() => repo.deleteSet(setId));
   };
 
-  const addExercise = async (item: { id: string; name: string; muscle: string; equipment: string }) => {
+  const addExercise = async (item: {
+    id: string;
+    name: string;
+    muscle: string;
+    equipment: string;
+  }) => {
     const localId = uid();
     setExercises((prev) => [
       ...prev,
@@ -457,11 +557,20 @@ function WorkoutConsole({
     if (!exId.startsWith("local-")) void persist(() => repo.removeSessionExercise(exId));
   };
 
-  const substitute = (exId: string, item: { id: string; name: string; muscle: string; equipment: string }) => {
+  const substitute = (
+    exId: string,
+    item: { id: string; name: string; muscle: string; equipment: string },
+  ) => {
     setExercises((prev) =>
       prev.map((e) =>
         e.id === exId
-          ? { ...e, name: item.name, muscle: item.muscle, equipment: item.equipment, previous: "Substituted — no prior data" }
+          ? {
+              ...e,
+              name: item.name,
+              muscle: item.muscle,
+              equipment: item.equipment,
+              previous: "Substituted — no prior data",
+            }
           : e,
       ),
     );
@@ -515,7 +624,10 @@ function WorkoutConsole({
     return (
       <div className="mx-auto max-w-2xl">
         <PageHeader title="Workout complete" subtitle={summary.title} />
-        <SectionCard title="Session summary" eyebrow={live ? "Saved to your account" : "Demo — not saved"}>
+        <SectionCard
+          title="Session summary"
+          eyebrow={live ? "Saved to your account" : "Demo — not saved"}
+        >
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <MetricTile label="Duration" value={`${summary.durationMin}m`} />
             <MetricTile label="Sets" value={summary.sets} tone="primary" />
@@ -529,12 +641,15 @@ function WorkoutConsole({
           </div>
           <div className="mt-4 space-y-2">
             {exercises.map((e) => (
-              <div key={e.id} className="flex items-start justify-between gap-3 border-b border-border pb-2 last:border-0">
+              <div
+                key={e.id}
+                className="flex items-start justify-between gap-3 border-b border-border pb-2 last:border-0"
+              >
                 <p className="text-sm font-semibold">{e.name}</p>
                 <p className="numeric text-right text-xs text-muted-foreground">
                   {e.sets
                     .filter((s) => s.done)
-                    .map((s) => `${fromKg(s.weightKg, units)}×${s.reps}`)
+                    .map((s) => formatWeightedSet(s.weightKg, s.reps, units))
                     .join("  ·  ") || "—"}
                 </p>
               </div>
@@ -560,7 +675,11 @@ function WorkoutConsole({
             <Button variant="ghost" onClick={() => setConfirming("cancel")}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => setConfirming("finish")} className="font-semibold">
+            <Button
+              variant="destructive"
+              onClick={() => setConfirming("finish")}
+              className="font-semibold"
+            >
               Finish
             </Button>
           </div>
@@ -584,10 +703,17 @@ function WorkoutConsole({
             ) : (
               <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/12 px-2.5 py-1.5">
                 <span className="numeric text-lg font-bold text-primary">{mmss(rest)}</span>
-                <button onClick={() => setRest((r) => (r ?? 0) + 30)} className="text-xs font-semibold text-primary">
+                <button
+                  onClick={() => setRest((r) => (r ?? 0) + 30)}
+                  className="text-xs font-semibold text-primary"
+                >
                   +30s
                 </button>
-                <button onClick={() => setRest(null)} className="text-muted-foreground" aria-label="Clear rest timer">
+                <button
+                  onClick={() => setRest(null)}
+                  className="text-muted-foreground"
+                  aria-label="Clear rest timer"
+                >
                   <X className="size-4" />
                 </button>
               </div>
@@ -597,7 +723,12 @@ function WorkoutConsole({
         <div className="grid grid-cols-4 gap-2">
           <MetricTile label="Sets" value={`${totals.sets}/${totals.plannedSets}`} tone="primary" />
           <MetricTile label="Reps" value={totals.reps} />
-          <MetricTile label="Volume" value={fromKg(totals.volume, units).toLocaleString()} unit={unit} tone="warning" />
+          <MetricTile
+            label="Volume"
+            value={fromKg(totals.volume, units).toLocaleString()}
+            unit={unit}
+            tone="warning"
+          />
           <MetricTile label="Avg RPE" value={totals.rpe.toFixed(1)} tone="success" />
         </div>
       </div>
@@ -616,7 +747,8 @@ function WorkoutConsole({
           )}
           {saveState === "error" && (
             <span className="flex items-center gap-1.5 text-danger">
-              <CloudOff className="size-3.5" /> {saveError ?? "Unsaved changes"} — edits kept locally, retry any change.
+              <CloudOff className="size-3.5" /> {saveError ?? "Unsaved changes"} — edits kept
+              locally, retry any change.
             </span>
           )}
         </div>
@@ -653,12 +785,18 @@ function WorkoutConsole({
         <EmptyState
           title="No exercises yet"
           description="Add the first movement to start logging sets."
-          action={library[0] ? <Button onClick={() => void addExercise(library[0]!)}>Add {library[0]!.name}</Button> : undefined}
+          action={
+            library[0] ? (
+              <Button onClick={() => void addExercise(library[0]!)}>Add {library[0]!.name}</Button>
+            ) : undefined
+          }
         />
       ) : (
         exercises.map((ex) => {
           const doneSets = ex.sets.filter((s) => s.done).length;
-          const alternatives = library.filter((l) => l.muscle === ex.muscle && l.name !== ex.name).slice(0, 4);
+          const alternatives = library
+            .filter((l) => l.muscle === ex.muscle && l.name !== ex.name)
+            .slice(0, 4);
           return (
             <SectionCard
               key={ex.id}
@@ -669,10 +807,20 @@ function WorkoutConsole({
                   <Pill tone={doneSets >= ex.targetSets ? "success" : "default"}>
                     {doneSets}/{ex.targetSets} sets
                   </Pill>
-                  <Button size="sm" variant="ghost" onClick={() => setSubFor(ex.id === subFor ? null : ex.id)} aria-label="Substitute">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setSubFor(ex.id === subFor ? null : ex.id)}
+                    aria-label="Substitute"
+                  >
                     <Repeat2 className="size-4" />
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => removeExercise(ex.id)} aria-label="Remove exercise">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => removeExercise(ex.id)}
+                    aria-label="Remove exercise"
+                  >
                     <X className="size-4" />
                   </Button>
                 </div>
@@ -689,17 +837,24 @@ function WorkoutConsole({
                   const load = formatLoadGuidance(ex.loadGuidance, ex.sourceLoadUnit, units);
                   return load ? (
                     <span title={load.source ? `Source: ${load.source}` : undefined}>
-                      Load: <span className="numeric font-semibold text-foreground">{load.text}</span>
+                      Load:{" "}
+                      <span className="numeric font-semibold text-foreground">{load.text}</span>
                     </span>
                   ) : null;
                 })()}
                 {ex.restSeconds != null && (
                   <span>
-                    Rest: <span className="numeric font-semibold text-foreground">{mmss(ex.restSeconds)}</span>
+                    Rest:{" "}
+                    <span className="numeric font-semibold text-foreground">
+                      {mmss(ex.restSeconds)}
+                    </span>
                   </span>
                 )}
                 <span>
-                  Last time: <span className="numeric font-semibold text-foreground">{ex.previous}</span>
+                  Last time:{" "}
+                  <span className="numeric font-semibold text-foreground">
+                    {formatWeightText(ex.previous, units)}
+                  </span>
                 </span>
                 {ex.isHeavy && <Pill tone="warning">Heavy</Pill>}
                 {ex.isDropSet && <Pill tone="primary">Drop set</Pill>}
@@ -711,14 +866,15 @@ function WorkoutConsole({
                     <div className="min-w-0">
                       <p className="label-eyebrow text-primary">Suggested working set</p>
                       <p className="numeric mt-0.5 text-lg font-bold text-foreground">
-                        {fromKg(suggestions[ex.id]!.weightKg, units)} {unit} × {suggestions[ex.id]!.reps}
+                        {fromKg(suggestions[ex.id]!.weightKg, units)} {unit} ×{" "}
+                        {suggestions[ex.id]!.reps}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {suggestions[ex.id]!.deload && <Pill tone="warning">Deload</Pill>}
                       {suggestions[ex.id]!.notes.map((note) => (
                         <Pill key={note} tone="default">
-                          {note}
+                          {formatWeightText(note, units)}
                         </Pill>
                       ))}
                       <Button size="sm" variant="secondary" onClick={() => applySuggestion(ex.id)}>
@@ -726,7 +882,9 @@ function WorkoutConsole({
                       </Button>
                     </div>
                   </div>
-                  <p className="mt-1.5 text-xs text-muted-foreground">{suggestions[ex.id]!.reason}</p>
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    {formatWeightText(suggestions[ex.id]!.reason, units)}
+                  </p>
                 </div>
               )}
 
@@ -744,7 +902,9 @@ function WorkoutConsole({
                       </button>
                     ))}
                     {alternatives.length === 0 && (
-                      <p className="text-xs text-muted-foreground">No equipment-matched alternatives.</p>
+                      <p className="text-xs text-muted-foreground">
+                        No equipment-matched alternatives.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -766,12 +926,16 @@ function WorkoutConsole({
                       s.done ? "border-success/35 bg-success/8" : "border-border bg-surface-2/40"
                     }`}
                   >
-                    <span className="numeric text-center text-sm font-bold text-muted-foreground">{i + 1}</span>
+                    <span className="numeric text-center text-sm font-bold text-muted-foreground">
+                      {i + 1}
+                    </span>
                     <Input
                       type="number"
                       inputMode="decimal"
                       value={fromKg(s.weightKg, units)}
-                      onChange={(e) => editSet(ex.id, s.id, { weightKg: toKg(Number(e.target.value), units) })}
+                      onChange={(e) =>
+                        editSet(ex.id, s.id, { weightKg: toKg(Number(e.target.value), units) })
+                      }
                       className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                     <Input
@@ -810,7 +974,11 @@ function WorkoutConsole({
               </div>
 
               <div className="mt-3">
-                <Button variant="secondary" className="h-11 w-full" onClick={() => void addSet(ex.id)}>
+                <Button
+                  variant="secondary"
+                  className="h-11 w-full"
+                  onClick={() => void addSet(ex.id)}
+                >
                   <Plus className="size-4" /> Quick add set
                 </Button>
               </div>
@@ -830,17 +998,11 @@ function WorkoutConsole({
       )}
 
       <SectionCard title="Add Exercise" eyebrow="From library">
-        <div className="flex flex-wrap gap-2">
-          {library.slice(0, 10).map((l) => (
-            <button
-              key={l.id}
-              onClick={() => void addExercise(l)}
-              className="flex items-center gap-1.5 rounded-md border border-border-strong bg-surface-2 px-3 py-2 text-xs font-semibold hover:border-primary/50"
-            >
-              <Plus className="size-3.5" /> {l.name}
-            </button>
-          ))}
-        </div>
+        <ExercisePicker
+          exercises={library}
+          selectedIds={selectedExerciseIds}
+          onSelect={(exercise) => void addExercise(exercise)}
+        />
       </SectionCard>
 
       <SectionCard title="Session Notes" eyebrow="Context for the log">

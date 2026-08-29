@@ -14,7 +14,9 @@ import {
 } from "@/components/irondesk/primitives";
 import { recoveryQuery } from "@/lib/irondesk/queries";
 import { RecoveryEmptyState } from "@/components/irondesk/empty-states";
+import { formatWeightText } from "@/lib/irondesk/units";
 import { useModeData, useServiceMode } from "@/lib/irondesk/use-data";
+import { useUnits } from "@/lib/irondesk/use-units";
 
 export const Route = createFileRoute("/recovery")({
   head: () => ({
@@ -37,6 +39,7 @@ export const Route = createFileRoute("/recovery")({
 
 function RecoveryPage() {
   const r = useModeData(recoveryQuery);
+  const units = useUnits();
   const mode = useServiceMode();
   if (!r) return <RecoveryEmptyState />;
   const readiness = r.readiness;
@@ -69,7 +72,7 @@ function RecoveryPage() {
           )}
           <div>
             <p className="label-eyebrow">Status</p>
-            <p className="text-2xl font-bold tracking-tight">{r.status}</p>
+            <p className="text-2xl font-bold tracking-tight">{formatWeightText(r.status, units)}</p>
             <Pill tone={tone} className="mt-2">
               {readiness == null
                 ? "No score recorded"
@@ -81,7 +84,9 @@ function RecoveryPage() {
         </div>
         <div className="rounded-xl border border-primary/30 bg-primary/8 p-4">
           <p className="label-eyebrow text-primary">Recommendation</p>
-          <p className="mt-1.5 text-sm leading-relaxed">{r.recommendation}</p>
+          <p className="mt-1.5 text-sm leading-relaxed">
+            {formatWeightText(r.recommendation, units)}
+          </p>
         </div>
       </div>
 
@@ -149,7 +154,9 @@ function RecoveryPage() {
               />
             </div>
           )}
-          <p className="mt-3 text-xs text-muted-foreground">{r.sleep.note}</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {formatWeightText(r.sleep.note, units)}
+          </p>
         </SectionCard>
       </div>
 

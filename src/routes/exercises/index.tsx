@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth/auth-provider";
 import { exercisesQuery } from "@/lib/irondesk/queries";
 import * as repo from "@/lib/irondesk/repo";
 import type { Exercise } from "@/lib/irondesk/types";
-import { fromKg, weightUnit } from "@/lib/irondesk/units";
+import { formatWeightedSet, fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useIronDeskInvalidate, useModeData } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 
@@ -114,7 +114,13 @@ function ExercisesPage() {
         <div className="flex flex-wrap gap-1.5">
           {(["all", "favorites", "recent", "custom"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)} className={chip(mode === m)}>
-              {m === "all" ? "All" : m === "favorites" ? "Favorites" : m === "recent" ? "Recent" : "Custom"}
+              {m === "all"
+                ? "All"
+                : m === "favorites"
+                  ? "Favorites"
+                  : m === "recent"
+                    ? "Recent"
+                    : "Custom"}
             </button>
           ))}
         </div>
@@ -214,13 +220,19 @@ function ExercisesPage() {
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <MetricTile
                   label="Best set"
-                  value={e.best.weightKg > 0 ? `${fromKg(e.best.weightKg, units)}×${e.best.reps}` : "—"}
+                  value={
+                    e.best.weightKg > 0
+                      ? formatWeightedSet(e.best.weightKg, e.best.reps, units)
+                      : "—"
+                  }
                   tone="warning"
                 />
                 <MetricTile
                   label="Est. 1RM"
                   value={
-                    e.e1rmTrend.length ? fromKg(e.e1rmTrend[e.e1rmTrend.length - 1]!.e1rm, units) : "—"
+                    e.e1rmTrend.length
+                      ? fromKg(e.e1rmTrend[e.e1rmTrend.length - 1]!.e1rm, units)
+                      : "—"
                   }
                   unit={weightUnit(units)}
                   tone="primary"

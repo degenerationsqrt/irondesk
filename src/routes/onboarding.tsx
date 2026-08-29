@@ -10,7 +10,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { equipmentCatalogQuery } from "@/lib/irondesk/queries";
 import * as repo from "@/lib/irondesk/repo";
-import { fromCm, fromKg, toCm, toKg, weightUnit, type Units } from "@/lib/irondesk/units";
+import {
+  DEFAULT_UNITS,
+  fromCm,
+  fromKg,
+  resolveUnits,
+  toCm,
+  toKg,
+  weightUnit,
+  type Units,
+} from "@/lib/irondesk/units";
 import { useIronDeskInvalidate } from "@/lib/irondesk/use-data";
 
 export const Route = createFileRoute("/onboarding")({
@@ -52,7 +61,7 @@ function OnboardingPage() {
 
   const [step, setStep] = useState(0);
   const [displayName, setDisplayName] = useState("");
-  const [units, setUnits] = useState<Units>("metric");
+  const [units, setUnits] = useState<Units>(DEFAULT_UNITS);
   const [timezone, setTimezone] = useState("UTC");
   const [goal, setGoal] = useState<string>("strength");
   const [days, setDays] = useState(4);
@@ -71,8 +80,15 @@ function OnboardingPage() {
     void (async () => {
       try {
         const account = await repo.getAccount();
-        const accountUnits: Units =
-          account.preferences?.units === "imperial" ? "imperial" : "metric";
+        // A bootstrap row used to default to metric before the athlete made a
+        // choice. Treat an untouched profile as new, while preserving a saved
+        // metric choice once onboarding has actually started or completed.
+        const onboardingStarted =
+          Boolean(account.profile?.onboarding_completed) ||
+          (account.profile?.onboarding_step ?? 0) > 0;
+        const accountUnits = onboardingStarted
+          ? resolveUnits(account.preferences?.units)
+          : DEFAULT_UNITS;
         setUnits(accountUnits);
         if (account.profile) {
           setDisplayName(account.profile.display_name ?? "");

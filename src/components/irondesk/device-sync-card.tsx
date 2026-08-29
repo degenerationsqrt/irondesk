@@ -14,7 +14,38 @@ import { importKeys, linkedDevicesQuery } from "@/lib/imports/queries";
 import * as importRepo from "@/lib/imports/repo";
 
 const fmt = (value: string) =>
-  new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+function syncCounts(summary: importRepo.LinkedDevice["lastSyncSummary"]): string | null {
+  if (!summary) return null;
+  return [
+    summary.total == null ? null : `${summary.total} read`,
+    `${summary.imported ?? 0} new`,
+    `${summary.duplicates ?? 0} duplicates`,
+    summary.warnings ? `${summary.warnings} warnings` : null,
+    summary.failed ? `${summary.failed} skipped` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function derivedCounts(summary: importRepo.LinkedDevice["lastSyncSummary"]): string | null {
+  if (!summary) return null;
+  const parts = [
+    summary.recoveryDays
+      ? `${summary.recoveryDays} Recovery day${summary.recoveryDays === 1 ? "" : "s"}`
+      : null,
+    summary.bodyweightDays
+      ? `${summary.bodyweightDays} Body Metrics day${summary.bodyweightDays === 1 ? "" : "s"}`
+      : null,
+  ].filter(Boolean);
+  return parts.length ? `Updated ${parts.join(" · ")}` : null;
+}
 
 export function DeviceSyncCard() {
   const queryClient = useQueryClient();
@@ -30,22 +61,26 @@ export function DeviceSyncCard() {
       setError(null);
       setCode(result);
     },
-    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "The pairing code could not be created."),
+    onError: (cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : "The pairing code could not be created."),
   });
 
   const unlink = useMutation({
     mutationFn: (id: string) => importRepo.unlinkDevice(id),
     onSuccess: invalidate,
-    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "The device could not be unlinked."),
+    onError: (cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : "The device could not be unlinked."),
   });
 
   return (
-    <SectionCard title="Android companion" eyebrow="Health Connect">
+    <SectionCard title="Health Connect companion" eyebrow="Recommended · Android">
       <p className="text-sm text-muted-foreground">
-        Health Connect has no web API, so the IronDesk companion app reads the records you approve on your phone and pushes
-        them here. Pair the phone once, then use <span className="text-foreground">Sync Now</span> in the app. Sleep, resting
-        heart rate and HRV fill your Recovery days; bodyweight fills Body Metrics. Anything you logged by hand is never
-        overwritten.
+        Health Connect has no web API, so the IronDesk companion app reads the records you approve
+        on your phone and pushes them here. Pair the phone once, then use{" "}
+        <span className="text-foreground">Sync Now</span> in the app. Sleep, resting heart rate and
+        HRV fill your Recovery days; bodyweight fills Body Metrics. Live device sync is the only
+        Health Connect path on this page that populates those derived views; file uploads below are
+        evidence archives only. Anything you logged by hand is never overwritten.
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -59,7 +94,9 @@ export function DeviceSyncCard() {
 
       {code && (
         <div className="mt-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Enter this in the companion app</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            Enter this in the companion app
+          </p>
           <p className="numeric mt-1 text-2xl font-bold tracking-[0.3em]">{code.code}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Single use · expires {fmt(code.expiresAt)}. It is shown once and cannot be recovered.
@@ -75,39 +112,53 @@ export function DeviceSyncCard() {
           <p className="mt-1 text-sm text-muted-foreground">No device paired yet.</p>
         ) : (
           <ul className="mt-2 space-y-2">
-            {devices.data.map((device) => (
-              <li key={device.id} className="flex items-start justify-between gap-2 rounded-lg border border-border/70 p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{device.label}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {device.platform} · paired {fmt(device.createdAt)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {device.lastSyncAt
-                      ? `Last sync ${fmt(device.lastSyncAt)} · ${device.lastSyncSummary?.imported ?? 0} new · ${
-                          device.lastSyncSummary?.duplicates ?? 0
-                        } duplicates`
-                      : "Never synced"}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive"
-                  disabled={unlink.isPending}
-                  onClick={() => unlink.mutate(device.id)}
+            {devices.data.map((device) => {
+              const counts = syncCounts(device.lastSyncSummary);
+              const derived = derivedCounts(device.lastSyncSummary);
+              return (
+                <li
+                  key={device.id}
+                  className="flex items-start justify-between gap-2 rounded-lg border border-border/70 p-3"
                 >
-                  Unlink
-                </Button>
-              </li>
-            ))}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold">{device.label}</p>
+                      <span className="rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-success">
+                        Paired
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {device.platform.replace(/^./, (letter) => letter.toUpperCase())} · paired{" "}
+                      {fmt(device.createdAt)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {device.lastSyncAt
+                        ? `Last successful sync ${fmt(device.lastSyncAt)}`
+                        : "No successful sync yet"}
+                    </p>
+                    {counts && <p className="text-xs text-muted-foreground">{counts}</p>}
+                    {derived && <p className="text-xs text-muted-foreground">{derived}</p>}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive"
+                    disabled={unlink.isPending}
+                    onClick={() => unlink.mutate(device.id)}
+                  >
+                    Unlink
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
 
       <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-        <Smartphone className="size-3.5" /> Companion source lives in <code className="text-foreground">android-health-connect/</code>{" "}
-        — build and sideload it yourself; no signed APK is distributed from here.
+        <Smartphone className="size-3.5" /> Companion source lives in{" "}
+        <code className="text-foreground">android-health-connect/</code> — build and sideload it
+        yourself; no signed APK is distributed from here.
       </p>
     </SectionCard>
   );

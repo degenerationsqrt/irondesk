@@ -4,6 +4,7 @@ import {
   classifyLift,
   detectStall,
   loadIncrementKg,
+  loadIncrementLb,
   lookupPoints,
   parseTargetReps,
   performanceKey,
@@ -13,8 +14,14 @@ import {
 } from "@/lib/irondesk/progression";
 import { demoProgressionContext, parseDemoHistoryDetail } from "@/lib/irondesk/progression-source";
 import { exercises } from "@/lib/irondesk/data";
+import { kgToLb } from "@/lib/irondesk/units";
 
-const point = (date: string, weightKg: number, reps: number, rpe: number | null = null): PerformancePoint => ({
+const point = (
+  date: string,
+  weightKg: number,
+  reps: number,
+  rpe: number | null = null,
+): PerformancePoint => ({
   date,
   weightKg,
   reps,
@@ -26,18 +33,32 @@ const NOW = new Date("2026-08-28T12:00:00.000Z");
 
 describe("classification", () => {
   it("treats barbell main lifts as main", () => {
-    expect(classifyLift({ name: "Back Squat", equipment: "Barbell", pattern: "Squat" })).toBe("main");
-    expect(classifyLift({ name: "Conventional Deadlift", equipment: "Barbell", pattern: "Hinge" })).toBe("main");
+    expect(classifyLift({ name: "Back Squat", equipment: "Barbell", pattern: "Squat" })).toBe(
+      "main",
+    );
+    expect(
+      classifyLift({ name: "Conventional Deadlift", equipment: "Barbell", pattern: "Hinge" }),
+    ).toBe("main");
   });
 
   it("treats isolation work as accessory and bodyweight as bodyweight", () => {
-    expect(classifyLift({ name: "Cable Lateral Raise", equipment: "Cable", pattern: "Isolation" })).toBe("accessory");
-    expect(classifyLift({ name: "Pull-up", equipment: "Bodyweight", pattern: "Vertical Pull" })).toBe("bodyweight");
+    expect(
+      classifyLift({ name: "Cable Lateral Raise", equipment: "Cable", pattern: "Isolation" }),
+    ).toBe("accessory");
+    expect(
+      classifyLift({ name: "Pull-up", equipment: "Bodyweight", pattern: "Vertical Pull" }),
+    ).toBe("bodyweight");
   });
 
-  it("scales the increment to the equipment", () => {
-    expect(loadIncrementKg("Barbell", "main")).toBe(2.5);
-    expect(loadIncrementKg("Dumbbell")).toBe(2);
+  it("uses pound-native upper/accessory and lower-main increments", () => {
+    expect(
+      loadIncrementLb("Barbell", "main", { name: "Bench Press", pattern: "Horizontal Press" }),
+    ).toBe(5);
+    expect(loadIncrementLb("Barbell", "main", { name: "Back Squat", pattern: "Squat" })).toBe(10);
+    expect(loadIncrementLb("Dumbbell")).toBe(5);
+    expect(
+      loadIncrementKg("Barbell", "main", { name: "Back Squat", pattern: "Squat" }),
+    ).toBeCloseTo(10 / 2.2046226218, 8);
     expect(loadIncrementKg("Bodyweight")).toBe(0);
   });
 });
@@ -74,10 +95,18 @@ describe("stall detection", () => {
 
   it("does not flag rising loads or rising reps", () => {
     expect(
-      detectStall([point("2026-08-10", 95, 5), point("2026-08-17", 100, 5), point("2026-08-24", 102.5, 5)]).stalled,
+      detectStall([
+        point("2026-08-10", 95, 5),
+        point("2026-08-17", 100, 5),
+        point("2026-08-24", 102.5, 5),
+      ]).stalled,
     ).toBe(false);
     expect(
-      detectStall([point("2026-08-10", 100, 5), point("2026-08-17", 100, 6), point("2026-08-24", 100, 7)]).stalled,
+      detectStall([
+        point("2026-08-10", 100, 5),
+        point("2026-08-17", 100, 6),
+        point("2026-08-24", 100, 7),
+      ]).stalled,
     ).toBe(false);
   });
 });
@@ -85,7 +114,13 @@ describe("stall detection", () => {
 describe("suggestWorkingWeight", () => {
   it("returns null without usable history for a loaded movement", () => {
     expect(
-      suggestWorkingWeight({ name: "Back Squat", equipment: "Barbell", targetReps: "5", points: [], now: NOW }),
+      suggestWorkingWeight({
+        name: "Back Squat",
+        equipment: "Barbell",
+        targetReps: "5",
+        points: [],
+        now: NOW,
+      }),
     ).toBeNull();
   });
 
@@ -99,8 +134,9 @@ describe("suggestWorkingWeight", () => {
       now: NOW,
     })!;
     expect(s.rule).toBe("linear");
-    expect(s.weightKg).toBe(125);
+    expect(kgToLb(s.weightKg)).toBeCloseTo(280, 1);
     expect(s.reps).toBe(5);
+    expect(s.reason).not.toMatch(/\bkg\b/i);
   });
 
   it("uses double progression for accessories", () => {
@@ -123,7 +159,7 @@ describe("suggestWorkingWeight", () => {
       now: NOW,
     })!;
     expect(load.rule).toBe("double-progression-load");
-    expect(load.weightKg).toBe(34);
+    expect(kgToLb(load.weightKg)).toBeCloseTo(75, 1);
     expect(load.reps).toBe(8);
   });
 
@@ -144,13 +180,17 @@ describe("suggestWorkingWeight", () => {
       name: "Back Squat",
       equipment: "Barbell",
       targetReps: "5",
-      points: [point("2026-08-07", 100, 5, 9), point("2026-08-14", 100, 5, 9), point("2026-08-21", 100, 5, 9)],
+      points: [
+        point("2026-08-07", 100, 5, 9),
+        point("2026-08-14", 100, 5, 9),
+        point("2026-08-21", 100, 5, 9),
+      ],
       readiness: 30,
       now: NOW,
     })!;
     expect(s.rule).toBe("deload-stall");
     expect(s.deload).toBe(true);
-    expect(s.weightKg).toBe(90);
+    expect(kgToLb(s.weightKg)).toBeCloseTo(200, 1);
     expect(s.readinessPercent).toBe(0);
   });
 
@@ -191,14 +231,30 @@ describe("demo adapter", () => {
       reps: 3,
       weightKg: 150,
       rpe: 8,
-      });
+    });
+    expect(parseDemoHistoryDetail("2026-08-26", "5×3 @ 330.7 lb · RPE 8")).toEqual({
+      date: "2026-08-26",
+      sets: 5,
+      reps: 3,
+      weightKg: 150,
+      rpe: 8,
+    });
+    expect(parseDemoHistoryDetail("2026-08-26", "3×7 @ +55 lbs")).toEqual({
+      date: "2026-08-26",
+      sets: 3,
+      reps: 7,
+      weightKg: 24.95,
+      rpe: null,
+    });
     expect(parseDemoHistoryDetail("2026-08-26", "3×10 bodyweight")).toBeNull();
   });
 
   it("builds a demo context keyed by id and name", () => {
     const context = demoProgressionContext(exercises, 74);
     expect(context.readiness).toBe(74);
-    expect(lookupPoints(context.performance, { exerciseId: "back-squat" }).length).toBeGreaterThan(0);
+    expect(lookupPoints(context.performance, { exerciseId: "back-squat" }).length).toBeGreaterThan(
+      0,
+    );
     expect(lookupPoints(context.performance, { name: "Back Squat" }).length).toBeGreaterThan(0);
     expect(performanceKey("  Back   Squat ")).toBe("back squat");
   });

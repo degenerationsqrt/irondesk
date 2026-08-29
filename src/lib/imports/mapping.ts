@@ -21,12 +21,29 @@ import {
 
 const ALIASES: Record<string, string[]> = {
   externalId: ["id", "external_id", "externalid", "activity_id", "uuid", "record_id", "session_id"],
-  startedAt: ["start_time", "starttime", "started_at", "date", "datetime", "timestamp", "start", "start_date"],
+  startedAt: [
+    "start_time",
+    "starttime",
+    "started_at",
+    "date",
+    "datetime",
+    "timestamp",
+    "start",
+    "start_date",
+  ],
   recordedAt: ["recorded_at", "time", "timestamp", "date", "datetime", "day"],
   timezone: ["timezone", "time_zone", "tz", "zone", "offset"],
   activityType: ["type", "activity_type", "exercise_type", "sport", "activity"],
   name: ["name", "title", "activity_name", "label"],
-  duration: ["duration", "duration_sec", "duration_seconds", "elapsed_time", "moving_time", "duration_min", "minutes"],
+  duration: [
+    "duration",
+    "duration_sec",
+    "duration_seconds",
+    "elapsed_time",
+    "moving_time",
+    "duration_min",
+    "minutes",
+  ],
   distance: ["distance", "distance_m", "distance_km", "distance_meters", "total_distance"],
   calories: ["calories", "kcal", "energy", "active_calories", "total_calories"],
   avgHr: ["avg_hr", "average_heart_rate", "avg_heart_rate", "heart_rate_avg", "average_hr"],
@@ -34,16 +51,31 @@ const ALIASES: Record<string, string[]> = {
   steps: ["steps", "step_count", "total_steps"],
   notes: ["notes", "note", "description", "comment"],
   metricType: ["metric", "metric_type", "type", "record_type"],
-  value: ["value", "amount", "quantity", "count", "weight", "weight_kg"],
+  value: [
+    "value",
+    "amount",
+    "quantity",
+    "count",
+    "weight",
+    "weight_kg",
+    "weight_lb",
+    "bodyweight",
+    "bodyweight_kg",
+    "bodyweight_lb",
+  ],
 };
 
-const norm = (header: string) => header.trim().toLowerCase().replace(/[\s-]+/g, "_");
+const norm = (header: string) =>
+  header
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 
 export function guessMapping(headers: string[], preferred?: ImportMapping): ImportMapping {
-  const base: ImportMapping = preferred ? { ...preferred, fields: { ...preferred.fields } } : { ...DEFAULT_MAPPING, fields: {} };
+  const base: ImportMapping = preferred
+    ? { ...preferred, fields: { ...preferred.fields } }
+    : { ...DEFAULT_MAPPING, fields: {} };
   const normalized = headers.map((h) => ({ header: h, key: norm(h) }));
-
-
 
   const pick = (target: string) => {
     if (base.fields[target]) return;
@@ -55,7 +87,8 @@ export function guessMapping(headers: string[], preferred?: ImportMapping): Impo
   for (const target of Object.keys(ALIASES)) pick(target);
 
   // Decide the record kind from what resolved.
-  const looksLikeMetric = Boolean(base.fields["value"]) && !base.fields["duration"] && !base.fields["distance"];
+  const looksLikeMetric =
+    Boolean(base.fields["value"]) && !base.fields["duration"] && !base.fields["distance"];
   base.recordKind = looksLikeMetric ? "metric" : "activity";
   if (base.recordKind === "metric") {
     delete base.fields["startedAt"];
@@ -72,9 +105,16 @@ export function guessMapping(headers: string[], preferred?: ImportMapping): Impo
   if (/_km|\(km\)|kilomet/.test(distanceHeader)) base.distanceUnit = "km";
   else if (/_mi|mile/.test(distanceHeader)) base.distanceUnit = "mi";
   const valueHeader = norm(base.fields["value"] ?? "");
-  if (/_lb|pound/.test(valueHeader)) base.weightUnit = "lb";
+  if (/(?:^|_)kg(?:$|_)|kilogram/.test(valueHeader)) base.weightUnit = "kg";
+  else if (/(?:^|_)lb(?:$|_)|pound/.test(valueHeader)) base.weightUnit = "lb";
 
-  
+  // A plain `weight` column is enough to identify the metric, but not its
+  // unit. In that case the pounds-first default above remains visible in the
+  // mapping preview and the user can explicitly switch it before committing.
+  if (!preferred && !base.fields["metricType"] && /(?:body)?weight/.test(valueHeader)) {
+    base.fixedMetricType = "bodyweight_kg";
+  }
+
   return base;
 }
 
@@ -118,7 +158,11 @@ function timestamp(
   const value = raw.trim();
   const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
   const offset = tz?.trim() && /^[+-]\d{2}:?\d{2}$/.test(tz.trim()) ? tz.trim() : null;
-  const candidate = zoned ? value : offset ? `${value.replace(" ", "T")}${offset}` : `${value.replace(" ", "T")}Z`;
+  const candidate = zoned
+    ? value
+    : offset
+      ? `${value.replace(" ", "T")}${offset}`
+      : `${value.replace(" ", "T")}Z`;
   const ms = Date.parse(candidate);
   if (!Number.isFinite(ms)) {
     issues.push({ severity: "error", row, message: `Row skipped: unreadable timestamp "${raw}".` });
@@ -191,8 +235,14 @@ export function applyMapping(table: TabularPreview, mapping: ImportMapping): Map
         name: get(row, "name")?.trim() || null,
         startedAt: when.iso,
         sourceTimezone: when.zone,
-        durationSec: rawDuration == null ? null : Math.round(rawDuration * DURATION_FACTOR[mapping.durationUnit]),
-        distanceM: rawDistance == null ? null : Math.round(rawDistance * DISTANCE_FACTOR[mapping.distanceUnit]),
+        durationSec:
+          rawDuration == null
+            ? null
+            : Math.round(rawDuration * DURATION_FACTOR[mapping.durationUnit]),
+        distanceM:
+          rawDistance == null
+            ? null
+            : Math.round(rawDistance * DISTANCE_FACTOR[mapping.distanceUnit]),
         calories: intOf(get(row, "calories")),
         avgHr: intOf(get(row, "avgHr")),
         maxHr: intOf(get(row, "maxHr")),
@@ -218,7 +268,11 @@ export function applyMapping(table: TabularPreview, mapping: ImportMapping): Map
     }
     const value = numberOf(get(row, "value"));
     if (value == null) {
-      issues.push({ severity: "error", row: rowNumber, message: "Row skipped: value is not a number." });
+      issues.push({
+        severity: "error",
+        row: rowNumber,
+        message: "Row skipped: value is not a number.",
+      });
       return;
     }
     const isWeight = metricType === "bodyweight_kg";

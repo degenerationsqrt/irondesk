@@ -23,7 +23,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { applyMapping, guessMapping, mappingIsUsable } from "@/lib/imports/mapping";
-import { UploadError, parseUpload, validateUpload } from "@/lib/imports/parse";
+import { UploadError, assertAllowedFormat, parseUpload, validateUpload } from "@/lib/imports/parse";
+import { importRecordTypeLabel, importRecordValueLabel } from "@/lib/imports/presentation";
+import { importedSourceLabel } from "@/lib/imports/provenance";
 import { importKeys } from "@/lib/imports/queries";
 import * as importRepo from "@/lib/imports/repo";
 import {
@@ -36,12 +38,13 @@ import {
   type MetricType,
   type ParseResult,
   type SourceType,
+  SUPPORTED_EXTENSIONS,
 } from "@/lib/imports/types";
+import type { Units } from "@/lib/irondesk/units";
+import { useUnits } from "@/lib/irondesk/use-units";
 import { cn } from "@/lib/utils";
 
 import { SectionCard } from "./primitives";
-
-const ACCEPT = ".fit,.tcx,.gpx,.csv,.json,.zip";
 
 type Stage = "idle" | "parsing" | "mapping" | "preview" | "committing" | "done";
 
@@ -58,14 +61,17 @@ export function ImportCard({
   eyebrow,
   blurb,
   formats,
+  acceptedFormats,
 }: {
   sourceType: SourceType;
   title: string;
   eyebrow: string;
   blurb: string;
   formats: string;
+  acceptedFormats: readonly FileFormat[];
 }) {
   const queryClient = useQueryClient();
+  const units = useUnits();
   const inputRef = useRef<HTMLInputElement>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [dragging, setDragging] = useState(false);
@@ -74,6 +80,10 @@ export function ImportCard({
   const [result, setResult] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<ImportMapping>(DEFAULT_MAPPING);
   const [job, setJob] = useState<importRepo.ImportJob | null>(null);
+  const accept = useMemo(
+    () => acceptedFormats.flatMap((format) => SUPPORTED_EXTENSIONS[format]).join(","),
+    [acceptedFormats],
+  );
 
   const reset = useCallback(() => {
     setStage("idle");
@@ -85,27 +95,35 @@ export function ImportCard({
     if (inputRef.current) inputRef.current.value = "";
   }, []);
 
-  const handleFile = useCallback(async (file: File) => {
-    setError(null);
-    setJob(null);
-    setStage("parsing");
-    try {
-      const format = validateUpload({ name: file.name, size: file.size, type: file.type });
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const parsed = await parseUpload(file.name, bytes);
-      setLoaded({ name: file.name, size: file.size, bytes, format });
-      setResult(parsed);
-      if (!parsed.recognized && parsed.table) {
-        setMapping(guessMapping(parsed.table.headers));
-        setStage("mapping");
-      } else {
-        setStage("preview");
+  const handleFile = useCallback(
+    async (file: File) => {
+      setError(null);
+      setJob(null);
+      setStage("parsing");
+      try {
+        const format = validateUpload({ name: file.name, size: file.size, type: file.type });
+        assertAllowedFormat(format, acceptedFormats, title);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const parsed = await parseUpload(file.name, bytes, undefined, acceptedFormats);
+        setLoaded({ name: file.name, size: file.size, bytes, format });
+        setResult(parsed);
+        if (!parsed.recognized && parsed.table) {
+          setMapping(guessMapping(parsed.table.headers));
+          setStage("mapping");
+        } else {
+          setStage("preview");
+        }
+      } catch (cause) {
+        setError(
+          cause instanceof UploadError || cause instanceof Error
+            ? cause.message
+            : "The file could not be read.",
+        );
+        setStage("idle");
       }
-    } catch (cause) {
-      setError(cause instanceof UploadError || cause instanceof Error ? cause.message : "The file could not be read.");
-      setStage("idle");
-    }
-  }, []);
+    },
+    [acceptedFormats, title],
+  );
 
   const applyWizard = useCallback(() => {
     if (!result?.table) return;
@@ -123,7 +141,13 @@ export function ImportCard({
       return;
     }
     setError(null);
-    setResult({ ...result, recognized: true, records: mapped.records, issues: mapped.issues, skippedFields: mapped.skippedFields });
+    setResult({
+      ...result,
+      recognized: true,
+      records: mapped.records,
+      issues: mapped.issues,
+      skippedFields: mapped.skippedFields,
+    });
     setStage("preview");
   }, [mapping, result]);
 
@@ -133,7 +157,7 @@ export function ImportCard({
     setError(null);
     try {
       const created = await importRepo.commitImport({
-        sourceType,
+        sourceType: result.detectedSourceType ?? sourceType,
         fileName: loaded.name,
         fileFormat: loaded.format,
         fileSizeBytes: loaded.size,
@@ -142,7 +166,8 @@ export function ImportCard({
       });
       setJob(created);
       setStage("done");
-      for (const key of Object.values(importKeys)) void queryClient.invalidateQueries({ queryKey: key });
+      for (const key of Object.values(importKeys))
+        void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: ["irondesk"] });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The import failed.");
@@ -167,6 +192,10 @@ export function ImportCard({
 
   const errors = result?.issues.filter((issue) => issue.severity === "error") ?? [];
   const warnings = result?.issues.filter((issue) => issue.severity === "warning") ?? [];
+  const effectiveSourceType = result?.detectedSourceType ?? sourceType;
+  const sourceEvidence = result?.records.find((record) => Object.keys(record.raw).length)?.raw;
+  const sourceLabel = importedSourceLabel(effectiveSourceType, sourceEvidence);
+  const archiveOnlyHealth = effectiveSourceType === "health_connect";
 
   return (
     <SectionCard title={title} eyebrow={eyebrow}>
@@ -193,13 +222,18 @@ export function ImportCard({
           <FileUp className="size-5 text-muted-foreground" />
           <p className="text-sm font-medium">Drop a file here</p>
           <p className="text-xs text-muted-foreground">{formats} · 25 MB max</p>
-          <Button size="sm" variant="outline" className="mt-1" onClick={() => inputRef.current?.click()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-1"
+            onClick={() => inputRef.current?.click()}
+          >
             Choose file
           </Button>
           <input
             ref={inputRef}
             type="file"
-            accept={ACCEPT}
+            accept={accept}
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];
@@ -212,7 +246,9 @@ export function ImportCard({
       {(stage === "parsing" || stage === "committing") && (
         <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          {stage === "parsing" ? "Reading and normalizing the file…" : "Writing records to your account…"}
+          {stage === "parsing"
+            ? "Reading and normalizing the file…"
+            : "Writing records to your account…"}
         </p>
       )}
 
@@ -246,8 +282,17 @@ export function ImportCard({
               {result.records.filter((r) => r.kind === "activity").length} activities ·{" "}
               {result.records.filter((r) => r.kind === "metric").length} health metrics
             </p>
+            <p className="mt-1 text-muted-foreground">Source: {sourceLabel}</p>
+            {archiveOnlyHealth && (
+              <p className="mt-1 font-medium text-warning">
+                Evidence archive only — this file does not populate Recovery or Body Metrics. Use
+                live companion sync for those views.
+              </p>
+            )}
             {result.archiveEntries && (
-              <p className="mt-1 text-muted-foreground">Archive entries: {result.archiveEntries.length}</p>
+              <p className="mt-1 text-muted-foreground">
+                Archive entries: {result.archiveEntries.length}
+              </p>
             )}
             {result.skippedFields.length > 0 && (
               <p className="mt-1 text-muted-foreground">
@@ -262,7 +307,7 @@ export function ImportCard({
             ))}
           </div>
 
-          {result.records.length > 0 && <PreviewTable result={result} />}
+          {result.records.length > 0 && <PreviewTable result={result} units={units} />}
 
           {(warnings.length > 0 || errors.length > 0) && (
             <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-border/70 p-3 text-xs">
@@ -279,25 +324,41 @@ export function ImportCard({
                 </p>
               ))}
               {errors.length + warnings.length > 50 && (
-                <p className="text-muted-foreground">…and {errors.length + warnings.length - 50} more.</p>
+                <p className="text-muted-foreground">
+                  …and {errors.length + warnings.length - 50} more.
+                </p>
               )}
             </div>
           )}
 
           {stage === "done" && job ? (
             <div className="flex flex-col gap-2 rounded-lg border border-success/40 bg-success/10 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
-              <p className="flex items-center gap-2 text-success">
-                <CheckCircle2 className="size-4" />
-                Imported {job.importedCount} new · {job.duplicateCount} already in your account
-              </p>
+              <div>
+                <p className="flex items-center gap-2 text-success">
+                  <CheckCircle2 className="size-4" />
+                  {sourceLabel}: {job.importedCount} new · {job.duplicateCount} already in your
+                  account
+                </p>
+                {archiveOnlyHealth && (
+                  <p className="mt-1 text-muted-foreground">
+                    Health evidence archived; Recovery and Body Metrics were not changed.
+                  </p>
+                )}
+              </div>
               <Button size="sm" variant="outline" onClick={reset}>
                 Import another
               </Button>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void commit()} disabled={stage === "committing" || !result.records.length}>
-                {errors.length ? `Import ${result.records.length} valid records` : `Import ${result.records.length} records`}
+              <Button
+                size="sm"
+                onClick={() => void commit()}
+                disabled={stage === "committing" || !result.records.length}
+              >
+                {errors.length
+                  ? `Import ${result.records.length} valid records`
+                  : `Import ${result.records.length} records`}
               </Button>
               <Button size="sm" variant="ghost" onClick={reset} disabled={stage === "committing"}>
                 Cancel
@@ -310,7 +371,7 @@ export function ImportCard({
   );
 }
 
-function PreviewTable({ result }: { result: ParseResult }) {
+function PreviewTable({ result, units }: { result: ParseResult; units: Units }) {
   const rows = result.records.slice(0, 5);
   return (
     <div className="overflow-x-auto rounded-lg border border-border/70">
@@ -325,21 +386,14 @@ function PreviewTable({ result }: { result: ParseResult }) {
         <tbody>
           {rows.map((record, i) => (
             <tr key={i} className="border-t border-border/60">
-              <td className="px-2 py-1.5">{record.kind === "activity" ? record.activityType : record.metricType}</td>
+              <td className="px-2 py-1.5">{importRecordTypeLabel(record)}</td>
               <td className="px-2 py-1.5 text-muted-foreground">
-                {new Date(record.kind === "activity" ? record.startedAt : record.recordedAt).toISOString().slice(0, 16).replace("T", " ")}
+                {new Date(record.kind === "activity" ? record.startedAt : record.recordedAt)
+                  .toISOString()
+                  .slice(0, 16)
+                  .replace("T", " ")}
               </td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {record.kind === "activity"
-                  ? [
-                      record.durationSec ? `${Math.round(record.durationSec / 60)} min` : null,
-                      record.distanceM ? `${(record.distanceM / 1000).toFixed(2)} km` : null,
-                      record.calories ? `${record.calories} kcal` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "—"
-                  : `${record.value} ${record.unit}`}
-              </td>
+              <td className="px-2 py-1.5 tabular-nums">{importRecordValueLabel(record, units)}</td>
             </tr>
           ))}
         </tbody>
@@ -397,7 +451,11 @@ function MappingWizard({
       if (!header) return "";
       const at = index.get(header);
       if (at == null) return "";
-      return sample.map((row) => row[at]).filter(Boolean).slice(0, 2).join(" · ");
+      return sample
+        .map((row) => row[at])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(" · ");
     };
   }, [headers, sample]);
 
@@ -412,13 +470,17 @@ function MappingWizard({
   return (
     <div className="mt-4 space-y-4">
       <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-        These columns were not recognized. Assign them below — nothing is imported until you confirm.
+        These columns were not recognized. Assign them below — nothing is imported until you
+        confirm.
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label className="text-xs">Record kind</Label>
-          <Select value={mapping.recordKind} onValueChange={(value) => set({ recordKind: value as "activity" | "metric" })}>
+          <Select
+            value={mapping.recordKind}
+            onValueChange={(value) => set({ recordKind: value as "activity" | "metric" })}
+          >
             <SelectTrigger className="h-9 text-sm">
               <SelectValue />
             </SelectTrigger>
@@ -432,7 +494,12 @@ function MappingWizard({
           <>
             <div className="space-y-1.5">
               <Label className="text-xs">Duration unit</Label>
-              <Select value={mapping.durationUnit} onValueChange={(value) => set({ durationUnit: value as ImportMapping["durationUnit"] })}>
+              <Select
+                value={mapping.durationUnit}
+                onValueChange={(value) =>
+                  set({ durationUnit: value as ImportMapping["durationUnit"] })
+                }
+              >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -445,7 +512,12 @@ function MappingWizard({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Distance unit</Label>
-              <Select value={mapping.distanceUnit} onValueChange={(value) => set({ distanceUnit: value as ImportMapping["distanceUnit"] })}>
+              <Select
+                value={mapping.distanceUnit}
+                onValueChange={(value) =>
+                  set({ distanceUnit: value as ImportMapping["distanceUnit"] })
+                }
+              >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -461,7 +533,10 @@ function MappingWizard({
           <>
             <div className="space-y-1.5">
               <Label className="text-xs">Metric when no type column</Label>
-              <Select value={mapping.fixedMetricType} onValueChange={(value) => set({ fixedMetricType: value as MetricType })}>
+              <Select
+                value={mapping.fixedMetricType}
+                onValueChange={(value) => set({ fixedMetricType: value as MetricType })}
+              >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -476,7 +551,10 @@ function MappingWizard({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Bodyweight unit in file</Label>
-              <Select value={mapping.weightUnit} onValueChange={(value) => set({ weightUnit: value as ImportMapping["weightUnit"] })}>
+              <Select
+                value={mapping.weightUnit}
+                onValueChange={(value) => set({ weightUnit: value as ImportMapping["weightUnit"] })}
+              >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -495,7 +573,10 @@ function MappingWizard({
           <div key={target} className="grid items-center gap-2 sm:grid-cols-[10rem_minmax(0,1fr)]">
             <Label className="text-xs text-muted-foreground">{LABELS[target] ?? target}</Label>
             <div>
-              <Select value={mapping.fields[target] ?? NONE} onValueChange={(value) => setField(target, value)}>
+              <Select
+                value={mapping.fields[target] ?? NONE}
+                onValueChange={(value) => setField(target, value)}
+              >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue placeholder="Not mapped" />
                 </SelectTrigger>
@@ -509,7 +590,9 @@ function MappingWizard({
                 </SelectContent>
               </Select>
               {previewOf(mapping.fields[target]) && (
-                <p className="mt-1 truncate text-[0.7rem] text-muted-foreground">e.g. {previewOf(mapping.fields[target])}</p>
+                <p className="mt-1 truncate text-[0.7rem] text-muted-foreground">
+                  e.g. {previewOf(mapping.fields[target])}
+                </p>
               )}
             </div>
           </div>
@@ -546,7 +629,12 @@ export function InlineField({
   return (
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
-      <Input value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="h-9 text-sm" />
+      <Input
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 text-sm"
+      />
     </div>
   );
 }
@@ -556,7 +644,12 @@ export function RollbackButton({ jobId, onDone }: { jobId: string; onDone: () =>
   const [busy, setBusy] = useState(false);
   if (!confirming) {
     return (
-      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirming(true)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-destructive"
+        onClick={() => setConfirming(true)}
+      >
         <Trash2 className="mr-1 size-3.5" /> Roll back
       </Button>
     );

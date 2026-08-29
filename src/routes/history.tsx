@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatInstantDate, isWithinLastCalendarDays } from "@/lib/irondesk/dates";
 import { accountQuery, assignedSessionContextsQuery, historyQuery } from "@/lib/irondesk/queries";
-import { fromKg, weightUnit } from "@/lib/irondesk/units";
+import { formatWeightText, fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useModeData, useServiceMode } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 import type { HistorySession } from "@/lib/irondesk/types";
@@ -365,7 +365,7 @@ function HistoryPage() {
                   value={
                     b.weightKg != null
                       ? `${b.sets ?? 0} × ${b.reps ?? 0} @ ${fromKg(b.weightKg, units)} ${weightUnit(units)}`
-                      : b.detail
+                      : formatWeightText(b.detail, units)
                   }
                 />
               ))}

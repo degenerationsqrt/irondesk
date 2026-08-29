@@ -14,7 +14,7 @@ import {
 } from "@/components/irondesk/primitives";
 import { progressQuery } from "@/lib/irondesk/queries";
 import { ProgressEmptyState } from "@/components/irondesk/empty-states";
-import { formatWeight, fromKg, weightUnit } from "@/lib/irondesk/units";
+import { formatWeight, formatWeightText, fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 
@@ -204,7 +204,7 @@ function ProgressPage() {
               value={
                 pr.weightKg != null && pr.reps != null
                   ? `${formatWeight(pr.weightKg, units)} × ${pr.reps}${pr.e1rmKg != null ? ` (e1RM ${formatWeight(pr.e1rmKg, units)})` : ""}`
-                  : pr.detail
+                  : formatWeightText(pr.detail, units)
               }
             />
           ))}

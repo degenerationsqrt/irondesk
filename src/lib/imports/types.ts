@@ -73,6 +73,8 @@ export interface TabularPreview {
 
 export interface ParseResult {
   format: FileFormat;
+  /** Exact source proven by a first-party envelope, when available. */
+  detectedSourceType?: SourceType;
   /** False when the file parsed but the fields are unknown → mapping wizard. */
   recognized: boolean;
   records: NormalizedRecord[];
@@ -103,7 +105,14 @@ export const ACTIVITY_TARGETS = [
   "notes",
 ] as const;
 
-export const METRIC_TARGETS = ["externalId", "recordedAt", "timezone", "metricType", "value", "notes"] as const;
+export const METRIC_TARGETS = [
+  "externalId",
+  "recordedAt",
+  "timezone",
+  "metricType",
+  "value",
+  "notes",
+] as const;
 
 export type ActivityTarget = (typeof ACTIVITY_TARGETS)[number];
 export type MetricTarget = (typeof METRIC_TARGETS)[number];
@@ -124,7 +133,10 @@ export const DEFAULT_MAPPING: ImportMapping = {
   fields: {},
   durationUnit: "seconds",
   distanceUnit: "m",
-  weightUnit: "kg",
+  // The preview is pounds-first for an unlabeled bodyweight column. Explicit
+  // mapping choices and recognized kg/lb header suffixes still take priority,
+  // and applyMapping always writes bodyweight canonically in kilograms.
+  weightUnit: "lb",
   fixedMetricType: "steps",
 };
 

@@ -9,7 +9,7 @@
  * ALWAYS kilograms; presentation converts.
  */
 
-import { estimate1rm } from "./units";
+import { estimate1rm, kgToLb, lbToKg } from "./units";
 
 /* -------------------------------------------------------------------------- */
 /* Inputs                                                                     */
@@ -91,35 +91,61 @@ const MAIN_NAME_HINTS = [
 ];
 
 const BODYWEIGHT_EQUIPMENT = ["bodyweight", "none", "band"];
+const LOWER_MAIN_HINTS = ["squat", "deadlift", "hinge"];
 
 /**
  * Main lifts progress linearly; accessories use double progression. The check
  * is name-first (a "Barbell Back Squat" is a main lift whatever the pattern
  * string says) then pattern, then equipment.
  */
-export function classifyLift(input: Pick<SuggestionInput, "name" | "pattern" | "equipment">): LiftClass {
+export function classifyLift(
+  input: Pick<SuggestionInput, "name" | "pattern" | "equipment">,
+): LiftClass {
   const name = (input.name ?? "").toLowerCase();
   const equipment = (input.equipment ?? "").toLowerCase();
   if (BODYWEIGHT_EQUIPMENT.some((e) => equipment.includes(e))) return "bodyweight";
   if (MAIN_NAME_HINTS.some((hint) => name.includes(hint))) return "main";
   const pattern = (input.pattern ?? "").toLowerCase();
-  if (equipment.includes("barbell") && MAIN_PATTERNS.some((p) => pattern.includes(p))) return "main";
+  if (equipment.includes("barbell") && MAIN_PATTERNS.some((p) => pattern.includes(p)))
+    return "main";
   return "accessory";
 }
 
-/** Smallest honest jump for the equipment in play, canonical kg. */
-export function loadIncrementKg(equipment?: string | null, liftClass: LiftClass = "accessory"): number {
+function isLowerMainLift(movement?: Partial<Pick<SuggestionInput, "name" | "pattern">>): boolean {
+  const description = `${movement?.name ?? ""} ${movement?.pattern ?? ""}`.toLowerCase();
+  return LOWER_MAIN_HINTS.some((hint) => description.includes(hint));
+}
+
+/** Plate-friendly progression step in the pounds-first training model. */
+export function loadIncrementLb(
+  equipment?: string | null,
+  liftClass: LiftClass = "accessory",
+  movement?: Partial<Pick<SuggestionInput, "name" | "pattern">>,
+): number {
   const e = (equipment ?? "").toLowerCase();
   if (BODYWEIGHT_EQUIPMENT.some((x) => e.includes(x))) return 0;
-  if (e.includes("dumbbell")) return 2;
-  if (e.includes("kettlebell")) return 4;
-  if (e.includes("machine") || e.includes("cable") || e.includes("smith")) return 2.5;
-  return liftClass === "main" ? 2.5 : 2.5;
+  return liftClass === "main" && isLowerMainLift(movement) ? 10 : 5;
+}
+
+/** Same progression step expressed in canonical kg for calculations/storage. */
+export function loadIncrementKg(
+  equipment?: string | null,
+  liftClass: LiftClass = "accessory",
+  movement?: Partial<Pick<SuggestionInput, "name" | "pattern">>,
+): number {
+  return lbToKg(loadIncrementLb(equipment, liftClass, movement));
 }
 
 export function roundToIncrement(kg: number, increment: number): number {
   if (increment <= 0) return Math.round(kg * 10) / 10;
   return Math.round(kg / increment) * increment;
+}
+
+/** Quantizes a canonical load on a pound plate boundary, then returns canonical kg. */
+export function roundToPoundIncrementKg(kg: number, incrementLb: number): number {
+  if (incrementLb <= 0) return Math.round(kg * 100) / 100;
+  const roundedLb = Math.round(kgToLb(kg) / incrementLb) * incrementLb;
+  return Math.round(lbToKg(roundedLb) * 100) / 100;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -148,7 +174,10 @@ export function parseTargetReps(target?: string | null): RepTarget {
  * Bounded readiness nudge. Never silent: the caller always renders the label
  * next to the number so the athlete can see exactly why it moved.
  */
-export function readinessAdjustment(readiness?: number | null): { percent: number; label: string | null } {
+export function readinessAdjustment(readiness?: number | null): {
+  percent: number;
+  label: string | null;
+} {
   if (readiness == null || !Number.isFinite(readiness)) return { percent: 0, label: null };
   if (readiness >= 85) return { percent: 2, label: "+2% · high readiness" };
   if (readiness >= 75) return { percent: 0, label: null };
@@ -177,7 +206,9 @@ export function detectStall(points: PerformancePoint[]): StallState {
   const sameLoad = recent.every((p) => Math.abs(p.weightKg - load) < 0.51);
   if (!sameLoad) return { stalled: false, sessions: 1 };
   const bestReps = Math.max(...recent.map((p) => p.reps));
-  const progressed = recent[recent.length - 1]!.reps >= bestReps && recent[recent.length - 1]!.reps > recent[0]!.reps;
+  const progressed =
+    recent[recent.length - 1]!.reps >= bestReps &&
+    recent[recent.length - 1]!.reps > recent[0]!.reps;
   return { stalled: !progressed, sessions: STALL_SESSIONS };
 }
 
@@ -230,7 +261,8 @@ export function suggestWorkingWeight(input: SuggestionInput): WorkingWeightSugge
   }
 
   const last = points[points.length - 1]!;
-  const increment = loadIncrementKg(input.equipment, liftClass);
+  const incrementLb = loadIncrementLb(input.equipment, liftClass, input);
+  const increment = lbToKg(incrementLb);
   const recent = points.slice(-3);
   const basisE1rm = Math.max(...recent.map((p) => estimate1rm(p.weightKg, p.reps)));
   const stall = detectStall(points);
@@ -251,12 +283,12 @@ export function suggestWorkingWeight(input: SuggestionInput): WorkingWeightSugge
     deload = true;
     weight = last.weightKg * 0.9;
     reps = target.low;
-    reason = `Held ${formatKg(last.weightKg)} for ${stall.sessions} sessions without rep progress — hold or deload 10%.`;
+    reason = `Held the same load for ${stall.sessions} sessions without rep progress — hold or deload 10%.`;
   } else if (heavyEffort || cappedRpe) {
     rule = "hold-high-effort";
     weight = last.weightKg;
     reps = Math.max(target.low, last.reps);
-    reason = `Last set went at RPE ${last.rpe} — repeat ${formatKg(last.weightKg)} before adding load.`;
+    reason = `Last set went at RPE ${last.rpe} — repeat the same load before adding weight.`;
   } else if (liftClass === "bodyweight" || increment === 0) {
     rule = "bodyweight";
     weight = last.weightKg;
@@ -266,12 +298,12 @@ export function suggestWorkingWeight(input: SuggestionInput): WorkingWeightSugge
     rule = "linear";
     weight = last.weightKg + increment;
     reps = target.low;
-    reason = `Main lift progressing linearly: ${formatKg(last.weightKg)} → ${formatKg(weight)} for ${target.low} reps.`;
+    reason = `Main lift progressing linearly by one plate-friendly step for ${target.low} reps.`;
   } else if (hitTop) {
     rule = "double-progression-load";
     weight = last.weightKg + increment;
     reps = target.low;
-    reason = `Hit the top of ${target.low}-${target.high} reps — add ${formatKg(increment)} and reset to ${target.low}.`;
+    reason = `Hit the top of ${target.low}-${target.high} reps — add one plate-friendly step and reset to ${target.low}.`;
   } else {
     rule = "double-progression-reps";
     weight = last.weightKg;
@@ -292,8 +324,14 @@ export function suggestWorkingWeight(input: SuggestionInput): WorkingWeightSugge
   const confidence: WorkingWeightSuggestion["confidence"] =
     staleDays != null && staleDays > 45 ? "low" : points.length >= 3 ? "high" : "medium";
 
+  const loadChanged = Math.abs(weight - last.weightKg) >= 0.005;
+  const weightKg =
+    loadChanged && incrementLb > 0
+      ? roundToPoundIncrementKg(weight, incrementLb)
+      : Math.round(weight * 100) / 100;
+
   return {
-    weightKg: Math.max(0, roundToIncrement(weight, increment)),
+    weightKg: Math.max(0, weightKg),
     reps,
     rule,
     reason,
@@ -305,11 +343,6 @@ export function suggestWorkingWeight(input: SuggestionInput): WorkingWeightSugge
     confidence,
     staleDays,
   };
-}
-
-/** Internal formatter — canonical kg, unit-suffixed by the UI when displayed. */
-function formatKg(kg: number): string {
-  return `${Math.round(kg * 10) / 10} kg`;
 }
 
 /* -------------------------------------------------------------------------- */

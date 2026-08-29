@@ -3,8 +3,10 @@
  *
  * Everything here is owner-scoped: the user id always comes from the session,
  * never from client input, and RLS enforces the same rule server side. An
- * import is one `import_jobs` row plus its normalized child rows, so a batch can
- * be rolled back by deleting the job (children cascade).
+ * File imports are one `import_jobs` row plus normalized child rows, so those
+ * batches can be rolled back by deleting the job (children cascade). Live
+ * device-sync jobs also create separately managed Recovery/Body Metrics rows
+ * and are therefore presented as audit history rather than file rollbacks.
  */
 import { supabase } from "@/integrations/supabase/client";
 
@@ -15,14 +17,20 @@ import type { FileFormat, NormalizedRecord, ParseIssue, SourceType } from "./typ
 
 const NORMALIZED_VERSION = 1;
 
+/** Must stay inside the checked-in `import_jobs.status` constraint. */
+export const FILE_IMPORT_INITIAL_JOB_STATUS = "committing" as const;
+
 async function requireUser(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) throw new IronDeskError("You need to be signed in to import data.", "unauthenticated");
+  if (error || !data.user)
+    throw new IronDeskError("You need to be signed in to import data.", "unauthenticated");
   return data.user.id;
 }
 
 export interface ImportJob {
   id: string;
+  /** Present for live connector/device jobs; absent for ordinary file uploads. */
+  dataSourceId: string | null;
   sourceType: string;
   fileName: string | null;
   fileFormat: string;
@@ -47,12 +55,13 @@ export interface CommitInput {
   issues: ParseIssue[];
 }
 
-export interface CommitResult extends ImportJob {}
+export type CommitResult = ImportJob;
 
 /* ------------------------------- helpers ---------------------------------- */
 
 const jobFromRow = (row: Record<string, unknown>): ImportJob => ({
   id: row["id"] as string,
+  dataSourceId: (row["data_source_id"] as string | null) ?? null,
   sourceType: row["source_type"] as string,
   fileName: (row["file_name"] as string | null) ?? null,
   fileFormat: row["file_format"] as string,
@@ -92,7 +101,7 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
       file_name: input.fileName,
       file_size_bytes: input.fileSizeBytes,
       file_format: input.fileFormat,
-      status: "running",
+      status: FILE_IMPORT_INITIAL_JOB_STATUS,
       total_records: hashed.length,
       warning_count: warnings.length,
       failed_count: errors.length,
@@ -183,13 +192,18 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
       .eq("id", jobId)
       .select("*")
       .single();
-    if (finishError || !finished) throw asIronDeskError(finishError, "The import finished but could not be recorded.");
+    if (finishError || !finished)
+      throw asIronDeskError(finishError, "The import finished but could not be recorded.");
     return jobFromRow(finished as unknown as Record<string, unknown>);
   } catch (error) {
     const failure = asIronDeskError(error, "The import failed.");
     await supabase
       .from("import_jobs")
-      .update({ status: "failed", finished_at: new Date().toISOString(), error_message: failure.message })
+      .update({
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error_message: failure.message,
+      })
       .eq("id", jobId);
     throw failure;
   }
@@ -288,25 +302,53 @@ export interface ImportedActivitySummary {
   calories: number | null;
   avgHr: number | null;
   sourceType: string;
+  sourceFileName: string | null;
+  rawMetadata: unknown;
+  importedAt: string;
+  job: ImportedRecordJob | null;
+}
+
+export interface ImportedRecordJob {
+  status: string;
+  finishedAt: string | null;
+  errorMessage: string | null;
+}
+
+function jobFromRelation(value: unknown): ImportedRecordJob | null {
+  const relation = Array.isArray(value) ? value[0] : value;
+  if (!relation || typeof relation !== "object") return null;
+  const row = relation as Record<string, unknown>;
+  if (typeof row["status"] !== "string") return null;
+  return {
+    status: row["status"],
+    finishedAt: typeof row["finished_at"] === "string" ? row["finished_at"] : null,
+    errorMessage: typeof row["error_message"] === "string" ? row["error_message"] : null,
+  };
 }
 
 export async function listImportedActivities(limit = 20): Promise<ImportedActivitySummary[]> {
   const { data, error } = await supabase
     .from("imported_activities")
-    .select("id, activity_type, name, started_at, duration_sec, distance_m, calories, avg_hr, source_type")
+    .select(
+      "id, activity_type, name, started_at, duration_sec, distance_m, calories, avg_hr, source_type, source_file_name, raw_metadata, imported_at, job:import_jobs(status, finished_at, error_message)",
+    )
     .order("started_at", { ascending: false })
     .limit(limit);
   if (error) throw asIronDeskError(error, "Imported activities could not be loaded.");
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    activityType: row.activity_type,
-    name: row.name,
-    startedAt: row.started_at,
-    durationSec: row.duration_sec,
-    distanceM: row.distance_m === null ? null : Number(row.distance_m),
-    calories: row.calories,
-    avgHr: row.avg_hr,
-    sourceType: row.source_type,
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => ({
+    id: row["id"] as string,
+    activityType: row["activity_type"] as string,
+    name: (row["name"] as string | null) ?? null,
+    startedAt: row["started_at"] as string,
+    durationSec: row["duration_sec"] === null ? null : Number(row["duration_sec"]),
+    distanceM: row["distance_m"] === null ? null : Number(row["distance_m"]),
+    calories: row["calories"] === null ? null : Number(row["calories"]),
+    avgHr: row["avg_hr"] === null ? null : Number(row["avg_hr"]),
+    sourceType: row["source_type"] as string,
+    sourceFileName: (row["source_file_name"] as string | null) ?? null,
+    rawMetadata: row["raw_metadata"] ?? null,
+    importedAt: row["imported_at"] as string,
+    job: jobFromRelation(row["job"]),
   }));
 }
 
@@ -317,22 +359,32 @@ export interface ImportedMetricSummary {
   value: number;
   unit: string;
   sourceType: string;
+  sourceFileName: string | null;
+  rawMetadata: unknown;
+  importedAt: string;
+  job: ImportedRecordJob | null;
 }
 
 export async function listHealthMetrics(limit = 20): Promise<ImportedMetricSummary[]> {
   const { data, error } = await supabase
     .from("health_metrics")
-    .select("id, metric_type, recorded_at, value, unit, source_type")
+    .select(
+      "id, metric_type, recorded_at, value, unit, source_type, source_file_name, raw_metadata, imported_at, job:import_jobs(status, finished_at, error_message)",
+    )
     .order("recorded_at", { ascending: false })
     .limit(limit);
   if (error) throw asIronDeskError(error, "Imported health metrics could not be loaded.");
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    metricType: row.metric_type,
-    recordedAt: row.recorded_at,
-    value: Number(row.value),
-    unit: row.unit,
-    sourceType: row.source_type,
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => ({
+    id: row["id"] as string,
+    metricType: row["metric_type"] as string,
+    recordedAt: row["recorded_at"] as string,
+    value: Number(row["value"]),
+    unit: row["unit"] as string,
+    sourceType: row["source_type"] as string,
+    sourceFileName: (row["source_file_name"] as string | null) ?? null,
+    rawMetadata: row["raw_metadata"] ?? null,
+    importedAt: row["imported_at"] as string,
+    job: jobFromRelation(row["job"]),
   }));
 }
 
@@ -366,7 +418,9 @@ export async function createPairingCode(label = "Android phone"): Promise<Pairin
   const userId = await requireUser();
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
-  const code = Array.from(bytes, (byte) => PAIRING_ALPHABET[byte % PAIRING_ALPHABET.length]).join("");
+  const code = Array.from(bytes, (byte) => PAIRING_ALPHABET[byte % PAIRING_ALPHABET.length]).join(
+    "",
+  );
   const expiresAt = new Date(Date.now() + PAIRING_TTL_MINUTES * 60_000).toISOString();
 
   const { error } = await supabase.from("device_pairings").insert({
@@ -385,7 +439,16 @@ export interface LinkedDevice {
   platform: string;
   createdAt: string;
   lastSyncAt: string | null;
-  lastSyncSummary: { imported?: number; duplicates?: number; recoveryDays?: number; bodyweightDays?: number } | null;
+  lastSyncSummary: {
+    jobId?: string;
+    total?: number;
+    imported?: number;
+    duplicates?: number;
+    warnings?: number;
+    failed?: number;
+    recoveryDays?: number;
+    bodyweightDays?: number;
+  } | null;
 }
 
 export async function listLinkedDevices(): Promise<LinkedDevice[]> {

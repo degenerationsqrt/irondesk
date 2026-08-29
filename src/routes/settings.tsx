@@ -13,7 +13,14 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery, equipmentCatalogQuery } from "@/lib/irondesk/queries";
 import * as repo from "@/lib/irondesk/repo";
-import { fromCm, toCm, weightUnit, type Units } from "@/lib/irondesk/units";
+import {
+  DEFAULT_UNITS,
+  fromCm,
+  resolveUnits,
+  toCm,
+  weightUnit,
+  type Units,
+} from "@/lib/irondesk/units";
 import { useIronDeskInvalidate } from "@/lib/irondesk/use-data";
 
 export const Route = createFileRoute("/settings")({
@@ -66,7 +73,7 @@ function SettingsPage() {
   const [timezone, setTimezone] = useState("UTC");
   const [height, setHeight] = useState("");
   const [dob, setDob] = useState("");
-  const [units, setUnits] = useState<Units>("metric");
+  const [units, setUnits] = useState<Units>(DEFAULT_UNITS);
   const [goal, setGoal] = useState("strength");
   const [days, setDays] = useState(4);
   const [calories, setCalories] = useState("");
@@ -85,7 +92,7 @@ function SettingsPage() {
     if (!account) return;
     const p = account.profile;
     const pref = account.preferences;
-    const u: Units = pref?.units === "imperial" ? "imperial" : "metric";
+    const u = resolveUnits(pref?.units);
     setUnits(u);
     setDisplayName(p?.display_name ?? "");
     setTimezone(p?.timezone ?? "UTC");
@@ -191,7 +198,7 @@ function SettingsPage() {
         <PageHeader title="Settings" subtitle="Demo mode — settings are read-only." />
         <SectionCard title="Demo Athlete" eyebrow="Read only">
           <DataRow label="Athlete" value="Demo Athlete" />
-          <DataRow label="Units" value="Metric (kg)" />
+          <DataRow label="Units" value="Imperial (lb)" />
           <DataRow label="Primary goal" value="Strength" />
           <DataRow label="Training days" value="4 / week" />
           <p className="mt-3 text-xs text-muted-foreground">

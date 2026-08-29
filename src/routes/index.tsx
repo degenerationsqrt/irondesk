@@ -32,7 +32,7 @@ import { dashboardQuery } from "@/lib/irondesk/queries";
 import { DashboardEmptyState } from "@/components/irondesk/empty-states";
 import { Button } from "@/components/ui/button";
 import { formatInstantTime } from "@/lib/irondesk/dates";
-import { formatWeight, fromKg, weightUnit } from "@/lib/irondesk/units";
+import { formatWeight, formatWeightText, fromKg, weightUnit } from "@/lib/irondesk/units";
 import { useModeData } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
 import type { ActivitySession } from "@/lib/irondesk/types";
@@ -59,9 +59,11 @@ export const Route = createFileRoute("/")({
 function SessionCard({
   session,
   timeZone,
+  units,
 }: {
   session: ActivitySession;
   timeZone: string | undefined;
+  units: "imperial" | "metric";
 }) {
   const isCardio = session.kind === "cardio";
   return (
@@ -125,7 +127,7 @@ function SessionCard({
 
       {session.notes && (
         <p className="mt-3 border-t border-border pt-2.5 text-xs text-muted-foreground">
-          {session.notes}
+          {formatWeightText(session.notes, units)}
         </p>
       )}
     </div>
@@ -299,7 +301,7 @@ function DashboardPage() {
                 </div>
               </div>
               <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-                {day.strain.interpretation}
+                {formatWeightText(day.strain.interpretation, units)}
               </p>
             </SectionCard>
           )}
@@ -319,6 +321,7 @@ function DashboardPage() {
                 key={`${s.source ?? "session"}-${s.id}`}
                 session={s}
                 timeZone={day.timeZone}
+                units={units}
               />
             ))}
           </SectionCard>
@@ -416,7 +419,9 @@ function DashboardPage() {
                   <TrendingUp className="mt-0.5 size-4 shrink-0 text-success" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-success">{pr.exercise}</p>
-                    <p className="text-xs text-muted-foreground">{pr.detail}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatWeightText(pr.detail, units)}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -530,7 +535,9 @@ function DashboardPage() {
                     right={g.available === false ? "N/A" : g.score}
                     size="sm"
                   />
-                  <p className="mt-1 truncate text-[0.6875rem] text-muted-foreground">{g.note}</p>
+                  <p className="mt-1 truncate text-[0.6875rem] text-muted-foreground">
+                    {formatWeightText(g.note, units)}
+                  </p>
                 </div>
               </div>
             ))}
@@ -551,8 +558,8 @@ function DashboardPage() {
             <InsightCard
               key={s.id}
               index={i + 1}
-              title={s.title}
-              detail={s.detail}
+              title={formatWeightText(s.title, units)}
+              detail={formatWeightText(s.detail, units)}
               severity={s.severity}
             />
           ))}
@@ -562,7 +569,9 @@ function DashboardPage() {
       {/* Key takeaway */}
       <div className="panel border-primary/30 bg-primary/8 p-4 sm:p-5">
         <p className="label-eyebrow text-primary">Key takeaway</p>
-        <p className="mt-1.5 text-base leading-relaxed font-medium sm:text-lg">{day.keyTakeaway}</p>
+        <p className="mt-1.5 text-base leading-relaxed font-medium sm:text-lg">
+          {formatWeightText(day.keyTakeaway, units)}
+        </p>
       </div>
 
       {/* Weekly load + recent progress */}
@@ -601,8 +610,8 @@ function DashboardPage() {
               <StatCard
                 key={p.label}
                 label={p.label}
-                value={p.value}
-                delta={p.delta}
+                value={formatWeightText(p.value, units)}
+                delta={formatWeightText(p.delta, units)}
                 deltaPositive={p.positive}
                 tone={p.positive ? "success" : "danger"}
               />

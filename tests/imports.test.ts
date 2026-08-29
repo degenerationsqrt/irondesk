@@ -12,6 +12,7 @@ import { sessionsToTcx } from "../src/lib/imports/export";
 import { parseJsonTable } from "../src/lib/imports/json";
 import { applyMapping, guessMapping, mappingIsUsable } from "../src/lib/imports/mapping";
 import { UploadError, formatOf, parseUpload, validateUpload } from "../src/lib/imports/parse";
+import { FILE_IMPORT_INITIAL_JOB_STATUS } from "../src/lib/imports/repo";
 import { parseGpx, parseTcx } from "../src/lib/imports/xml";
 import type { NormalizedActivity, NormalizedMetric } from "../src/lib/imports/types";
 import { readZip } from "../src/lib/imports/zip";
@@ -28,12 +29,53 @@ const CSV_ACTIVITIES = [
   "",
 ].join("\n");
 
-const CSV_UNKNOWN = ["session_ref,when_local,kind,mins,km", "x1,2026-05-01 06:30:00,ride,90,34.5"].join("\n");
+const CSV_UNKNOWN = [
+  "session_ref,when_local,kind,mins,km",
+  "x1,2026-05-01 06:30:00,ride,90,34.5",
+].join("\n");
 
 const JSON_METRICS = JSON.stringify({
   records: [
     { external_id: "s1", metric: "steps", timestamp: "2026-05-01T00:00:00Z", value: 11423 },
-    { external_id: "s2", metric: "resting_heart_rate", timestamp: "2026-05-01T05:00:00Z", value: 48 },
+    {
+      external_id: "s2",
+      metric: "resting_heart_rate",
+      timestamp: "2026-05-01T05:00:00Z",
+      value: 48,
+    },
+  ],
+});
+
+const HEALTH_CONNECT_COMPANION_JSON = JSON.stringify({
+  source: "irondesk-health-connect",
+  version: 1,
+  exportedAt: "2026-05-01T09:12:00Z",
+  device: { label: "Pixel 8", timezone: "America/Los_Angeles" },
+  records: [
+    {
+      external_id: "hc:rhr:1",
+      metric: "resting_heart_rate",
+      timestamp: "2026-05-01T05:00:00Z",
+      value: 48,
+      unit: "bpm",
+      source_package: "com.samsung.health",
+      device_manufacturer: "samsung",
+      device_model: "SM-S911B",
+      recording_method: "automatically_recorded",
+    },
+  ],
+  activities: [
+    {
+      external_id: "hc:run:1",
+      activity_type: "running",
+      name: "Morning run",
+      start_time: "2026-05-01T06:30:00Z",
+      duration_sec: 2520,
+      distance_m: 8200,
+      calories: 540,
+      average_heart_rate: 151,
+      source_package: "com.garmin.android.apps.connectmobile",
+    },
   ],
 });
 
@@ -94,12 +136,46 @@ function buildZip(entries: { name: string; data: Uint8Array }[]): Uint8Array {
     const nameBytes = Array.from(enc(entry.name));
     const crc = crc32(entry.data);
     const offset = chunks.length;
-    push(chunks, ...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(crc));
-    push(chunks, ...u32(entry.data.length), ...u32(entry.data.length), ...u16(nameBytes.length), ...u16(0));
+    push(
+      chunks,
+      ...u32(0x04034b50),
+      ...u16(20),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u32(crc),
+    );
+    push(
+      chunks,
+      ...u32(entry.data.length),
+      ...u32(entry.data.length),
+      ...u16(nameBytes.length),
+      ...u16(0),
+    );
     push(chunks, ...nameBytes, ...Array.from(entry.data));
-    push(central, ...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(crc));
+    push(
+      central,
+      ...u32(0x02014b50),
+      ...u16(20),
+      ...u16(20),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u32(crc),
+    );
     push(central, ...u32(entry.data.length), ...u32(entry.data.length), ...u16(nameBytes.length));
-    push(central, ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...nameBytes);
+    push(
+      central,
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u32(0),
+      ...u32(offset),
+      ...nameBytes,
+    );
   }
 
   const centralOffset = chunks.length;
@@ -159,7 +235,13 @@ describe("field mapping", () => {
     const table = parseCsv(CSV_UNKNOWN);
     const mapped = applyMapping(table, {
       recordKind: "activity",
-      fields: { externalId: "session_ref", startedAt: "when_local", activityType: "kind", duration: "mins", distance: "km" },
+      fields: {
+        externalId: "session_ref",
+        startedAt: "when_local",
+        activityType: "kind",
+        duration: "mins",
+        distance: "km",
+      },
       durationUnit: "minutes",
       distanceUnit: "km",
       weightUnit: "kg",
@@ -185,6 +267,36 @@ describe("field mapping", () => {
     expect(metric.unit).toBe("kg");
     expect(metric.value).toBeCloseTo(90.72, 1);
   });
+
+  it("defaults an unlabeled bodyweight column to pounds and stores canonical kilograms", () => {
+    const table = parseCsv("date,weight\n2026-05-01T00:00:00Z,200");
+    const mapping = guessMapping(table.headers);
+
+    expect(mapping).toMatchObject({
+      recordKind: "metric",
+      fixedMetricType: "bodyweight_kg",
+      weightUnit: "lb",
+    });
+
+    const metric = applyMapping(table, mapping).records[0] as NormalizedMetric;
+    expect(metric.unit).toBe("kg");
+    expect(metric.value).toBeCloseTo(90.72, 1);
+  });
+
+  it("honors explicit kg and lb bodyweight header suffixes", () => {
+    const kilograms = parseCsv("date,weight_kg\n2026-05-01T00:00:00Z,82.5");
+    const kgMapping = guessMapping(kilograms.headers);
+    expect(kgMapping.weightUnit).toBe("kg");
+    expect((applyMapping(kilograms, kgMapping).records[0] as NormalizedMetric).value).toBe(82.5);
+
+    const pounds = parseCsv("date,bodyweight_lb\n2026-05-01T00:00:00Z,200");
+    const lbMapping = guessMapping(pounds.headers);
+    expect(lbMapping.weightUnit).toBe("lb");
+    expect((applyMapping(pounds, lbMapping).records[0] as NormalizedMetric).value).toBeCloseTo(
+      90.72,
+      1,
+    );
+  });
 });
 
 describe("JSON parsing", () => {
@@ -201,6 +313,50 @@ describe("JSON parsing", () => {
 
   it("rejects non-object JSON", () => {
     expect(() => parseJsonTable("42")).toThrow();
+  });
+
+  it("recognizes the exact companion envelope and keeps metrics, activities, and provenance", async () => {
+    const result = await parseUpload(
+      "irondesk-health.json",
+      enc(HEALTH_CONNECT_COMPANION_JSON),
+      undefined,
+      ["csv", "json", "zip"],
+    );
+
+    expect(result.detectedSourceType).toBe("health_connect");
+    expect(result.records).toHaveLength(2);
+    expect(result.notes.join(" ")).toMatch(/evidence only/i);
+    expect(result.notes.join(" ")).toMatch(/does not populate Recovery or Body Metrics/i);
+    const metric = result.records.find((record) => record.kind === "metric") as NormalizedMetric;
+    const activity = result.records.find(
+      (record) => record.kind === "activity",
+    ) as NormalizedActivity;
+    expect(metric).toMatchObject({
+      externalId: "hc:rhr:1",
+      metricType: "resting_hr",
+      sourceTimezone: "America/Los_Angeles",
+      raw: {
+        source_package: "com.samsung.health",
+        device_manufacturer: "samsung",
+        device_model: "SM-S911B",
+        recording_method: "automatically_recorded",
+      },
+    });
+    expect(activity).toMatchObject({
+      externalId: "hc:run:1",
+      activityType: "running",
+      durationSec: 2520,
+      distanceM: 8200,
+      calories: 540,
+      avgHr: 151,
+      raw: { source_package: "com.garmin.android.apps.connectmobile" },
+    });
+  });
+
+  it("leaves ordinary JSON on the generic mapping path", async () => {
+    const result = await parseUpload("metrics.json", enc(JSON_METRICS));
+    expect(result.detectedSourceType).toBeUndefined();
+    expect(result.records).toHaveLength(2);
   });
 });
 
@@ -246,6 +402,28 @@ describe("upload validation", () => {
     await expect(parseUpload("fake.zip", enc("not a zip"))).rejects.toThrow(UploadError);
     await expect(parseUpload("fake.fit", enc("0123456789ab"))).rejects.toThrow(UploadError);
   });
+
+  it("rejects a format that does not belong to the selected import source", async () => {
+    await expect(
+      parseUpload("run.fit", enc("not needed"), undefined, ["csv", "json", "zip"]),
+    ).rejects.toThrow(/accepts \.csv, \.json, \.zip/);
+  });
+});
+
+describe("file import job status", () => {
+  const VALID_IMPORT_JOB_STATUSES = [
+    "pending",
+    "committing",
+    "completed",
+    "partial",
+    "failed",
+    "rolled_back",
+  ];
+
+  it("starts in a status allowed by the checked-in database constraint", () => {
+    expect(VALID_IMPORT_JOB_STATUSES).toContain(FILE_IMPORT_INITIAL_JOB_STATUS);
+    expect(FILE_IMPORT_INITIAL_JOB_STATUS).toBe("committing");
+  });
 });
 
 describe("archives", () => {
@@ -287,8 +465,12 @@ describe("dedupe", () => {
     };
     expect(await dedupeHash(record, "garmin_file")).toBe("ext:garmin_file:abc");
     const anon = { ...record, externalId: null };
-    expect(await dedupeHash(anon, "garmin_file")).toBe(await dedupeHash({ ...anon }, "garmin_file"));
-    expect(await dedupeHash(anon, "garmin_file")).not.toBe(await dedupeHash({ ...anon, durationSec: 101 }, "garmin_file"));
+    expect(await dedupeHash(anon, "garmin_file")).toBe(
+      await dedupeHash({ ...anon }, "garmin_file"),
+    );
+    expect(await dedupeHash(anon, "garmin_file")).not.toBe(
+      await dedupeHash({ ...anon, durationSec: 101 }, "garmin_file"),
+    );
   });
 
   it("collapses duplicates inside a single file", async () => {

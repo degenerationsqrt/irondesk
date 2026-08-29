@@ -5,6 +5,8 @@ import {
   formatDayKey,
   formatInstantTime,
   isWithinLastCalendarDays,
+  localDateTimeToInstant,
+  localDateTimeValueForInstant,
   safeTimeZone,
 } from "../src/lib/irondesk/dates";
 
@@ -39,5 +41,27 @@ describe("athlete-local dates", () => {
   it("falls back to UTC for an invalid profile timezone", () => {
     expect(safeTimeZone("Not/AZone")).toBe("UTC");
     expect(dayKeyForInstant("2026-08-29T01:30:00.000Z", "Not/AZone")).toBe("2026-08-29");
+  });
+
+  it("round-trips an athlete-local datetime to the correct instant", () => {
+    expect(localDateTimeToInstant("2026-08-28T18:30", "America/Los_Angeles")).toBe(
+      "2026-08-29T01:30:00.000Z",
+    );
+    expect(localDateTimeValueForInstant("2026-08-29T01:30:00.000Z", "America/Los_Angeles")).toBe(
+      "2026-08-28T18:30",
+    );
+  });
+
+  it("rejects a nonexistent DST time and resolves a repeated time deterministically", () => {
+    expect(localDateTimeToInstant("2026-03-08T02:30", "America/Los_Angeles")).toBeNull();
+    expect(localDateTimeToInstant("2026-11-01T01:30", "America/Los_Angeles")).toBe(
+      "2026-11-01T08:30:00.000Z",
+    );
+  });
+
+  it("converts fixed-offset local datetimes without using the machine timezone", () => {
+    expect(localDateTimeToInstant("2026-08-28T18:30", "UTC-07:00")).toBe(
+      "2026-08-29T01:30:00.000Z",
+    );
   });
 });

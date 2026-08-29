@@ -178,6 +178,8 @@ export interface ActiveWorkout {
   status?: "draft" | "active" | "completed" | "cancelled";
   /** True when the session is persisted in the database. */
   persisted?: boolean;
+  /** Persisted session kind; optional only for the static demo fixture. */
+  kind?: ActivityKind;
   title: string;
   focus: string;
   startedAt: string;
@@ -334,6 +336,20 @@ export interface WorkoutTemplate {
   requiresAcknowledgment?: boolean;
   libraryStartable?: boolean;
   warnings?: SourceWarning[];
+}
+
+export interface PersonalTemplateDraftExercise {
+  exerciseId: string;
+  /** UI hint only; the repository re-reads and persists the canonical name. */
+  name: string;
+  targetSets: number;
+  targetReps: string;
+}
+
+export interface PersonalTemplateDraft {
+  name: string;
+  focus?: string | null;
+  exercises: PersonalTemplateDraftExercise[];
 }
 
 /* -------------------------------------------------------------------------- */
