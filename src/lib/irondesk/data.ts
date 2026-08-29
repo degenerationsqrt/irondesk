@@ -166,7 +166,8 @@ export const dashboardDay: DashboardDay = {
     {
       id: "g1",
       title: "Close the protein gap tonight",
-      detail: "Add 25 g casein or Greek yoghurt before bed to hit 190 g and support squat recovery.",
+      detail:
+        "Add 25 g casein or Greek yoghurt before bed to hit 190 g and support squat recovery.",
       severity: "warn",
     },
     {
@@ -649,7 +650,7 @@ export const progressData: ProgressData = {
     { date: "Aug 12", vo2: 50.4 },
     { date: "Aug 26", vo2: 51.2 },
   ],
-  streak: { current: 23, best: 41, weeksHitTarget: 7 },
+  streak: { currentWeeks: 23, bestWeeks: 41, weeksTracked: 7 },
   prs: [
     { date: "2026-08-26", exercise: "Back Squat", detail: "Est. 1RM 165 kg (+3.5 kg)" },
     { date: "2026-08-26", exercise: "Romanian Deadlift", detail: "8 reps @ 130 kg" },
@@ -665,7 +666,11 @@ export const recoveryData: RecoveryData = {
   status: "Moderate — train, but cap intensity",
   recommendation:
     "Green-light for a moderate session. Keep top sets at RPE 7 and skip failure work. Prioritise a 40-minute zone 2 block instead of intervals.",
-  sleep: { hours: 6.7, efficiencyPercent: 88, note: "Self-reported — 48 min below your 7h 30m floor" },
+  sleep: {
+    hours: 6.7,
+    efficiencyPercent: 88,
+    note: "Self-reported — 48 min below your 7h 30m floor",
+  },
   restingHr: 48,
   hrvMs: null,
   soreness: [
@@ -717,7 +722,8 @@ export const coachData: CoachData = {
     {
       id: "o1",
       title: "Squat velocity is holding at higher load",
-      detail: "Three consecutive weeks of load increases with RPE stable at 8 — you are not yet near your ceiling.",
+      detail:
+        "Three consecutive weeks of load increases with RPE stable at 8 — you are not yet near your ceiling.",
       severity: "good",
     },
     {
@@ -737,13 +743,15 @@ export const coachData: CoachData = {
     {
       id: "r1",
       title: "Acute load 18% above chronic",
-      detail: "Still inside the sweet spot (0.8-1.3) but trending up for a third week. Plan a deload in 10-14 days.",
+      detail:
+        "Still inside the sweet spot (0.8-1.3) but trending up for a third week. Plan a deload in 10-14 days.",
       severity: "warn",
     },
     {
       id: "r2",
       title: "Sleep debt accumulating",
-      detail: "-2h 14m across the last four nights. This is the single strongest predictor of a missed session for you.",
+      detail:
+        "-2h 14m across the last four nights. This is the single strongest predictor of a missed session for you.",
       severity: "risk",
     },
     {
@@ -763,13 +771,15 @@ export const coachData: CoachData = {
     {
       id: "a2",
       title: "Convert one interval session to zone 2",
-      detail: "Swap Monday's rower intervals for 45 minutes steady to pull vigorous minutes back to target.",
+      detail:
+        "Swap Monday's rower intervals for 45 minutes steady to pull vigorous minutes back to target.",
       severity: "info",
     },
     {
       id: "a3",
       title: "Add 2 sets of horizontal pull weekly",
-      detail: "Chest-supported row, 12-15 reps, RPE 8. Rebalances push:pull ratio inside three weeks.",
+      detail:
+        "Chest-supported row, 12-15 reps, RPE 8. Rebalances push:pull ratio inside three weeks.",
       severity: "info",
     },
   ],

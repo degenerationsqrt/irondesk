@@ -7,6 +7,12 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { mcpPlugin } from "@lovable.dev/mcp-js/stacks/tanstack/vite";
 
+// @lovable.dev/mcp-js 0.28.0 compares mixed slash formats in its routesDir
+// containment check on Windows and aborts before tests/build can start. The MCP
+// route sources are committed, so skipping only this developer plugin on
+// Windows keeps local verification working while Lovable/Linux remains unchanged.
+const lovableMcpPlugins = process.platform === "win32" ? [] : [mcpPlugin()];
+
 export default defineConfig({
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
@@ -14,6 +20,6 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    plugins: [mcpPlugin()],
+    plugins: lovableMcpPlugins,
   },
 });

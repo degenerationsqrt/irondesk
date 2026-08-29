@@ -1,6 +1,7 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
 
+import { dayKeyForInstant } from "../../irondesk/dates";
 import { supabaseForUser, unauthenticated } from "../supabase";
 
 export default defineTool({
@@ -18,21 +19,39 @@ export default defineTool({
     stress: z.number().int().optional().describe("Stress rating 1-10."),
     note: z.string().optional().describe("Short free-text note."),
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   handler: async (input, ctx) => {
     if (!ctx.isAuthenticated()) return unauthenticated();
     const userId = ctx.getUserId();
     if (!userId) return unauthenticated();
     const supabase = supabaseForUser(ctx);
 
-    const day = (input.day ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+    let day = input.day?.slice(0, 10);
+    if (!day) {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("timezone")
+        .eq("id", userId)
+        .maybeSingle();
+      if (profileError)
+        return { content: [{ type: "text", text: profileError.message }], isError: true };
+      day = dayKeyForInstant(new Date(), profile?.timezone);
+    }
     const clamp = (v: number | undefined, min: number, max: number) =>
       v === undefined ? undefined : Math.min(Math.max(v, min), max);
 
     const row = {
       user_id: userId,
       day,
-      source: "mcp",
+      // MCP entry is still a user-directed manual check-in. `mcp` is not a
+      // permitted recovery_entries.source value in the checked-in schema.
+      source: "manual",
+      is_sample: false,
       sleep_hours: input.sleep_hours,
       resting_hr: clamp(input.resting_hr, 20, 220),
       hrv_ms: clamp(input.hrv_ms, 1, 400),

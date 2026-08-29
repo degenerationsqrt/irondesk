@@ -31,7 +31,7 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { to: "/", label: "Dashboard", short: "Today", icon: LayoutDashboard },
+  { to: "/", label: "Today", short: "Today", icon: LayoutDashboard },
   { to: "/workout", label: "Workout", short: "Train", icon: Dumbbell },
   { to: "/program", label: "My Program", short: "Program", icon: ClipboardList },
   { to: "/history", label: "History", short: "Log", icon: History },
@@ -110,7 +110,8 @@ function useViewer() {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
-  const goal = account?.preferences?.primary_goal?.replace("_", " ") ?? (demo ? "Sample data" : "Training");
+  const goal =
+    account?.preferences?.primary_goal?.replace("_", " ") ?? (demo ? "Sample data" : "Training");
   return { name, initials: initials || "IA", goal, demo, email: user?.email ?? null };
 }
 
@@ -205,7 +206,6 @@ function Sidebar({ pathname }: { pathname: string }) {
     </aside>
   );
 }
-
 
 function MobileNav({ pathname }: { pathname: string }) {
   const items = navItems.filter((i) => mobilePrimary.includes(i.to));

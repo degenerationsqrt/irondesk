@@ -15,20 +15,23 @@ export interface ZoneSplit {
   percent: number;
 }
 
-export type ActivityKind = "cardio" | "strength" | "mobility" | "conditioning";
+export type ActivityKind = "cardio" | "strength" | "mobility" | "conditioning" | "other";
 
 export interface ActivitySession {
   id: string;
   name: string;
   kind: ActivityKind;
   startedAt: string;
-  durationMin: number;
-  calories: number;
-  avgHr: number;
-  maxHr: number;
-  cardioLoad: number;
-  activeZoneMinutes: number;
+  durationMin: number | null;
+  calories: number | null;
+  avgHr: number | null;
+  maxHr: number | null;
+  cardioLoad: number | null;
+  activeZoneMinutes: number | null;
   zones: ZoneSplit[];
+  /** Provenance for imported/device activity. Omitted for the bundled demo snapshot. */
+  source?: string;
+  sourceLabel?: string;
   notes?: string;
 }
 
@@ -41,7 +44,8 @@ export interface StrengthMetrics {
   totalSets: number;
   totalReps: number;
   tonnageKg: number;
-  topLift: { exercise: string; weightKg: number; reps: number };
+  /** Null until at least one completed weighted set can support the claim. */
+  topLift: { exercise: string; weightKg: number; reps: number } | null;
   e1rmDeltaKg: number;
   prs: { exercise: string; detail: string }[];
 }
@@ -75,10 +79,11 @@ export interface NutritionDay {
 
 export interface EnergyBalance {
   intake: number;
-  bmr: number;
+  /** Null until a defensible resting-energy estimate is available. */
+  bmr: number | null;
   exerciseBurn: number;
-  net: number;
-  status: "deficit" | "maintenance" | "surplus";
+  net: number | null;
+  status: "deficit" | "maintenance" | "surplus" | "unavailable";
 }
 
 export interface GradeLine {
@@ -86,6 +91,8 @@ export interface GradeLine {
   grade: Grade;
   score: number;
   note: string;
+  /** False means source evidence is absent, so the line renders N/A rather than F. */
+  available?: boolean;
 }
 
 export interface Suggestion {
@@ -97,13 +104,14 @@ export interface Suggestion {
 
 export interface DashboardDay {
   date: string;
+  timeZone?: string;
   statusLine: string;
   ironScore: number;
   grade: Grade;
   strain: { total: number; cardioPercent: number; muscularPercent: number; interpretation: string };
   sessions: ActivitySession[];
   hrSeries: HrSample[];
-  avgHr: number;
+  avgHr: number | null;
   zoneTotals: ZoneSplit[];
   strength: StrengthMetrics;
   nutrition: NutritionDay;
@@ -114,6 +122,18 @@ export interface DashboardDay {
   weeklyLoad: { day: string; load: number }[];
   /** Honest reporting of how much real data backs this day (live mode). */
   dataQuality?: { level: "rich" | "partial" | "sparse"; notes: string[] };
+  dataAvailability?: {
+    /** A strength activity exists, even if its provider omitted set/load details. */
+    strength: boolean;
+    /** Completed IronDesk sets exist, so set/repetition output can be rendered. */
+    strengthMetrics: boolean;
+    cardio: boolean;
+    nutrition: boolean;
+    recovery: boolean;
+    heartRateZones: boolean;
+    /** At least one measured load component supports the strain score. */
+    measuredStrain: boolean;
+  };
   recentProgress: { label: string; value: string; delta: string; positive: boolean }[];
 }
 
@@ -172,15 +192,24 @@ export interface HistorySession {
   title: string;
   kind: ActivityKind;
   bodyParts: string[];
-  durationMin: number;
+  durationMin: number | null;
   tonnageKg: number;
   sets: number;
   reps: number;
   avgRpe: number;
   intensity: "light" | "moderate" | "hard" | "peak";
-  calories: number;
+  intensityAvailable?: boolean;
+  calories: number | null;
   prCount: number;
-  blocks: { exercise: string; detail: string }[];
+  blocks: {
+    exercise: string;
+    detail: string;
+    weightKg?: number;
+    sets?: number;
+    reps?: number;
+  }[];
+  source?: string;
+  sourceLabel?: string;
 }
 
 export interface Exercise {
@@ -207,22 +236,34 @@ export interface ProgressData {
   volume: { week: string; tonnage: number }[];
   load: { week: string; acute: number; chronic: number }[];
   cardioFitness: { date: string; vo2: number }[];
-  streak: { current: number; best: number; weeksHitTarget: number };
-  prs: { date: string; exercise: string; detail: string }[];
+  streak: { currentWeeks: number; bestWeeks: number; weeksTracked: number };
+  prs: {
+    date: string;
+    exercise: string;
+    detail: string;
+    weightKg?: number;
+    reps?: number;
+    e1rmKg?: number;
+  }[];
 }
 
 export interface RecoveryData {
-  readiness: number;
+  /** Null when no explicit readiness score was recorded. */
+  readiness: number | null;
   status: string;
   recommendation: string;
-  sleep: { hours: number; efficiencyPercent: number; note: string };
-  restingHr: number;
+  sleep: { hours: number | null; efficiencyPercent: number | null; note: string };
+  restingHr: number | null;
   hrvMs: number | null;
   soreness: { area: string; level: number }[];
-  fatigue: number;
-  stress: number;
+  fatigue: number | null;
+  stress: number | null;
   trend: { date: string; readiness: number }[];
   placeholders: string[];
+  day?: string;
+  source?: string;
+  sourceLabel?: string;
+  dataOrigin?: "manual" | "wearable" | "sample" | "demo";
 }
 
 export interface CoachData {
@@ -343,7 +384,8 @@ export interface Program {
   slots: ProgramSlot[];
 }
 
-export type ScheduledStatus = "planned" | "in_progress" | "completed" | "skipped" | "expired" | "cancelled";
+export type ScheduledStatus =
+  "planned" | "in_progress" | "completed" | "skipped" | "expired" | "cancelled";
 
 export interface ScheduledSlot {
   id: string;
@@ -366,4 +408,3 @@ export interface ProgramEnrollment {
   program: Program;
   schedule: ScheduledSlot[];
 }
-

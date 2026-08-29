@@ -55,7 +55,7 @@ export function RecoveryEmptyState() {
     <EmptyState
       icon={<HeartPulse className="size-8" />}
       title="No recovery entries yet"
-      description="Readiness needs sleep, resting HR and subjective inputs. Wearable sync is not connected — these values are self-reported for now."
+      description="Readiness needs sleep, resting HR and subjective inputs. Add a manual check-in or sync Health Connect evidence; missing values remain unavailable."
       action={startWorkout}
     />
   );

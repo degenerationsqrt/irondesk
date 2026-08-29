@@ -7,7 +7,16 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, CheckCircle2, ClipboardList, Loader2, Pause, Play, Play as PlayIcon, SkipForward } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  Loader2,
+  Pause,
+  Play,
+  Play as PlayIcon,
+  SkipForward,
+} from "lucide-react";
 import { useState } from "react";
 
 import { EmptyState, Pill, ProgressBar, SectionCard } from "@/components/irondesk/primitives";
@@ -46,7 +55,9 @@ export function useEnrollment() {
 function ErrorLine({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{message}</p>
+    <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+      {message}
+    </p>
   );
 }
 
@@ -101,7 +112,10 @@ export function ProgramCatalog({ enrollment }: { enrollment: ProgramEnrollment |
           </p>
         )}
         {catalog && catalog.length === 0 && (
-          <EmptyState title="No assignable programs" description="No active system programs are published yet." />
+          <EmptyState
+            title="No assignable programs"
+            description="No active system programs are published yet."
+          />
         )}
         <div className="grid gap-3 lg:grid-cols-2">
           {(catalog ?? []).map((program) => {
@@ -114,7 +128,9 @@ export function ProgramCatalog({ enrollment }: { enrollment: ProgramEnrollment |
                     {program.environment ? program.environment.toUpperCase() : "PROGRAM"}
                     {program.level ? ` · ${program.level}` : ""}
                   </p>
-                  <h3 className="mt-1 text-base leading-tight font-bold tracking-tight">{program.name}</h3>
+                  <h3 className="mt-1 text-base leading-tight font-bold tracking-tight">
+                    {program.name}
+                  </h3>
                   {program.description && (
                     <p className="mt-1 text-xs text-muted-foreground">{program.description}</p>
                   )}
@@ -122,13 +138,16 @@ export function ProgramCatalog({ enrollment }: { enrollment: ProgramEnrollment |
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Pill>{program.slots.length} workouts</Pill>
                   {program.daysPerWeek && <Pill>{program.daysPerWeek}×/week</Pill>}
-                  <Pill tone={gated ? "warning" : "success"}>{RELEASE_GATE_LABEL[program.releaseGate]}</Pill>
+                  <Pill tone={gated ? "warning" : "success"}>
+                    {RELEASE_GATE_LABEL[program.releaseGate]}
+                  </Pill>
                   {isCurrent && <Pill tone="primary">Assigned</Pill>}
                 </div>
                 {program.warnings.length > 0 && (
                   <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
                     <p className="flex items-center gap-1.5 font-semibold">
-                      <AlertTriangle className="size-3.5" /> {program.warnings.length} source warning
+                      <AlertTriangle className="size-3.5" /> {program.warnings.length} source
+                      warning
                       {program.warnings.length === 1 ? "" : "s"}
                     </p>
                     {program.warnings.slice(0, 2).map((w, i) => (
@@ -161,21 +180,30 @@ export function ProgramCatalog({ enrollment }: { enrollment: ProgramEnrollment |
               <DialogHeader>
                 <DialogTitle className="tracking-tight">Acknowledge before assignment</DialogTitle>
                 <DialogDescription>
-                  {pending.name} is released as {RELEASE_GATE_LABEL[pending.releaseGate].toLowerCase()}. Read the
-                  source notes below, then confirm you accept them.
+                  {pending.name} is released as{" "}
+                  {RELEASE_GATE_LABEL[pending.releaseGate].toLowerCase()}. Read the source notes
+                  below, then confirm you accept them.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-2 text-xs">
                 {pending.warnings.length === 0 ? (
                   <p className="text-muted-foreground">
-                    No specific warnings were recorded for this program, but it is not publicly released.
+                    No specific warnings were recorded for this program, but it is not publicly
+                    released.
                   </p>
                 ) : (
                   pending.warnings.map((w, i) => (
-                    <div key={i} className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
-                      <p className="font-semibold">{w.severity ? w.severity.toUpperCase() : "NOTE"}</p>
+                    <div
+                      key={i}
+                      className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2"
+                    >
+                      <p className="font-semibold">
+                        {w.severity ? w.severity.toUpperCase() : "NOTE"}
+                      </p>
                       <p className="mt-0.5">{w.message}</p>
-                      {w.sourceText && <p className="mt-1 text-muted-foreground">Source: {w.sourceText}</p>}
+                      {w.sourceText && (
+                        <p className="mt-1 text-muted-foreground">Source: {w.sourceText}</p>
+                      )}
                     </div>
                   ))
                 )}
@@ -188,14 +216,22 @@ export function ProgramCatalog({ enrollment }: { enrollment: ProgramEnrollment |
                   className="mt-1 size-4 accent-[var(--color-primary)]"
                 />
                 <span>
-                  I have read these warnings and accept this program as-is. Assigning it will replace my current
-                  assignment.
+                  I have read these warnings and accept this program as-is. Assigning it will
+                  replace my current assignment.
                 </span>
               </label>
               <ErrorLine message={error} />
-              <Button className="w-full" disabled={!ack || busy} onClick={() => void assign(pending, true)}>
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <ClipboardList className="size-4" />} Assign
-                program
+              <Button
+                className="w-full"
+                disabled={!ack || busy}
+                onClick={() => void assign(pending, true)}
+              >
+                {busy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ClipboardList className="size-4" />
+                )}{" "}
+                Assign program
               </Button>
             </>
           )}
@@ -239,11 +275,21 @@ export function ActiveProgramPanel({ enrollment }: { enrollment: ProgramEnrollme
       eyebrow={enrollment.status === "paused" ? "Paused assignment" : "Active assignment"}
       action={
         enrollment.status === "paused" ? (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => programs.resumeEnrollment(enrollment.id))}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void run(() => programs.resumeEnrollment(enrollment.id))}
+          >
             <Play className="size-4" /> Resume
           </Button>
         ) : (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => programs.pauseEnrollment(enrollment.id))}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => void run(() => programs.pauseEnrollment(enrollment.id))}
+          >
             <Pause className="size-4" /> Pause
           </Button>
         )
@@ -253,7 +299,9 @@ export function ActiveProgramPanel({ enrollment }: { enrollment: ProgramEnrollme
         <ErrorLine message={error} />
 
         <div className="flex flex-wrap items-center gap-1.5">
-          <Pill tone={enrollment.status === "active" ? "success" : "warning"}>{enrollment.status}</Pill>
+          <Pill tone={enrollment.status === "active" ? "success" : "warning"}>
+            {enrollment.status}
+          </Pill>
           <Pill>Cycle {enrollment.currentCycle}</Pill>
           <Pill>
             Workout {enrollment.currentPosition} of {slotCount}
@@ -294,8 +342,12 @@ export function ActiveProgramPanel({ enrollment }: { enrollment: ProgramEnrollme
                   )
                 }
               >
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <PlayIcon className="size-4" />} Start assigned
-                workout
+                {busy ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <PlayIcon className="size-4" />
+                )}{" "}
+                Start assigned workout
               </Button>
               <Button
                 variant="secondary"
@@ -344,7 +396,9 @@ export function ActiveProgramPanel({ enrollment }: { enrollment: ProgramEnrollme
                       {SLOT_STATE_LABEL[state]}
                     </Pill>
                   ) : (
-                    <Pill tone={state === "current" || state === "in_progress" ? "primary" : undefined}>
+                    <Pill
+                      tone={state === "current" || state === "in_progress" ? "primary" : undefined}
+                    >
                       {SLOT_STATE_LABEL[state]}
                     </Pill>
                   )}
@@ -437,7 +491,7 @@ export function AssignedWorkoutCard() {
 
   return (
     <SectionCard
-      title="Today's Assigned Workout"
+      title="Next Assigned Workout"
       eyebrow={enrollment.program.name}
       action={
         <Button size="sm" variant="ghost" asChild>
@@ -448,7 +502,9 @@ export function AssignedWorkoutCard() {
       <div className="space-y-3">
         <ErrorLine message={error} />
         <div className="flex flex-wrap items-center gap-1.5">
-          <Pill tone={enrollment.status === "active" ? "success" : "warning"}>{enrollment.status}</Pill>
+          <Pill tone={enrollment.status === "active" ? "success" : "warning"}>
+            {enrollment.status}
+          </Pill>
           <Pill>
             Workout {enrollment.currentPosition} of {progress.slotCount}
           </Pill>
@@ -467,13 +523,19 @@ export function AssignedWorkoutCard() {
         </div>
         <ProgressBar value={progress.percent} />
         {current && (
-          <Button className="w-full sm:w-auto" disabled={busy || enrollment.status !== "active"} onClick={() => void start()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <PlayIcon className="size-4" />} Start assigned
-            workout
+          <Button
+            className="w-full sm:w-auto"
+            disabled={busy || enrollment.status !== "active"}
+            onClick={() => void start()}
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <PlayIcon className="size-4" />}{" "}
+            Start assigned workout
           </Button>
         )}
         {enrollment.status !== "active" && (
-          <p className="text-xs text-muted-foreground">This assignment is paused — resume it in My Program.</p>
+          <p className="text-xs text-muted-foreground">
+            This assignment is paused — resume it in My Program.
+          </p>
         )}
       </div>
     </SectionCard>
