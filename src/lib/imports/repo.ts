@@ -391,12 +391,12 @@ export async function listHealthMetrics(limit = 20): Promise<ImportedMetricSumma
 /* ---------------------------- device pairing ------------------------------ */
 
 /**
- * Android companion pairing.
+ * Purpose-bound companion pairing.
  *
  * The browser generates a one-time code, stores only its SHA-256 hash, and
  * shows the plain code once. The companion app exchanges it at
- * `/api/public/health-connect/pair` for a device token; the code itself is
- * never recoverable from the database.
+ * the matching device endpoint for a token; the code itself is never
+ * recoverable from the database.
  */
 const PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1
 const PAIRING_TTL_MINUTES = 15;
@@ -414,7 +414,10 @@ export interface PairingCode {
   expiresAt: string;
 }
 
-export async function createPairingCode(label = "Android phone"): Promise<PairingCode> {
+export async function createPairingCode(
+  label = "Android phone",
+  platform: "android" | "connect_iq" = "android",
+): Promise<PairingCode> {
   const userId = await requireUser();
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
@@ -427,6 +430,7 @@ export async function createPairingCode(label = "Android phone"): Promise<Pairin
     user_id: userId,
     code_hash: await sha256Hex(code),
     label,
+    platform,
     expires_at: expiresAt,
   });
   if (error) throw asIronDeskError(error, "The pairing code could not be created.");

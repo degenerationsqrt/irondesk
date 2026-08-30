@@ -1,0 +1,7 @@
+<resources xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <string id="AppName">IronDesk</string>
+    <string id="PairingCodeTitle">IronDesk pairing code</string>
+    <string id="PairingCodePrompt">Generate a Garmin code under Connections in IronDesk, then enter it here.</string>
+    <string id="ApiBaseUrlTitle">IronDesk server URL</string>
+    <string id="ApiBaseUrlPrompt">IronDesk production server. Change only when directed by IronDesk support.</string>
+</resources>

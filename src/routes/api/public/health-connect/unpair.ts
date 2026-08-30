@@ -7,7 +7,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { resolveDevice, sha256Hex } from "@/lib/imports/device-sync.server";
+import { DeviceResolutionError, resolveDevice, sha256Hex } from "@/lib/imports/device-sync.server";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -27,7 +27,8 @@ export function rateLimited(key: string): boolean {
   const recent = (hits.get(key) ?? []).filter((at) => now - at < WINDOW_MS);
   recent.push(now);
   hits.set(key, recent);
-  if (hits.size > 500) for (const [k, v] of hits) if (v.every((at) => now - at >= WINDOW_MS)) hits.delete(k);
+  if (hits.size > 500)
+    for (const [k, v] of hits) if (v.every((at) => now - at >= WINDOW_MS)) hits.delete(k);
   return recent.length > MAX_PER_WINDOW;
 }
 
@@ -42,19 +43,39 @@ export const Route = createFileRoute("/api/public/health-connect/unpair")({
         }
 
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-        const device = await resolveDevice(supabaseAdmin, bearer);
+        let device;
+        try {
+          device = await resolveDevice(supabaseAdmin, bearer, "android");
+        } catch (error) {
+          if (error instanceof DeviceResolutionError) {
+            return json({ error: error.message }, 503);
+          }
+          throw error;
+        }
         if (!device) {
-          return new Response(JSON.stringify({ error: "Unknown or already revoked device token." }), {
-            status: 401,
-            headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="irondesk-device"' },
-          });
+          return new Response(
+            JSON.stringify({ error: "Unknown or already revoked device token." }),
+            {
+              status: 401,
+              headers: {
+                "content-type": "application/json",
+                "www-authenticate": 'Bearer realm="irondesk-device"',
+              },
+            },
+          );
         }
 
-        const { error } = await supabaseAdmin.from("device_links").delete().eq("id", device.deviceId);
+        const { error } = await supabaseAdmin
+          .from("device_links")
+          .delete()
+          .eq("id", device.deviceId);
         if (error) return json({ error: "The device could not be unlinked." }, 500);
 
         if (device.dataSourceId) {
-          await supabaseAdmin.from("data_sources").update({ status: "idle" }).eq("id", device.dataSourceId);
+          await supabaseAdmin
+            .from("data_sources")
+            .update({ status: "idle" })
+            .eq("id", device.dataSourceId);
         }
 
         return json({ unlinked: true, device_id: device.deviceId, label: device.label });

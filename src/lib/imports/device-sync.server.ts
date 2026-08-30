@@ -72,11 +72,22 @@ export function hashesEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export const pairingRequestSchema = z.object({
-  code: z.string().min(4).max(40),
-  device_label: z.string().min(1).max(80).default("Android phone"),
-  platform: z.string().max(20).default("android"),
-});
+const pairingCodeSchema = z.string().min(4).max(40);
+
+export const pairingRequestSchema = z
+  .object({
+    code: pairingCodeSchema,
+    device_label: z.string().trim().min(1).max(80).default("Android phone"),
+    platform: z.literal("android").default("android"),
+  })
+  .strict();
+
+export const connectIqPairingRequestSchema = z
+  .object({
+    code: pairingCodeSchema,
+    device_label: z.string().trim().min(1).max(80).default("Garmin watch"),
+  })
+  .strict();
 
 /* --------------------------------- ingest ---------------------------------- */
 
@@ -84,29 +95,107 @@ export interface DeviceIdentity {
   deviceId: string;
   userId: string;
   label: string;
+  platform: string;
   dataSourceId: string | null;
 }
 
+/**
+ * A token lookup could not be completed because the backing service failed.
+ * Routes must not turn this into a 401: Garmin treats 401 as a revoked token
+ * and deliberately clears the otherwise valid local pairing.
+ */
+export class DeviceResolutionError extends Error {
+  constructor() {
+    super("Device authentication is temporarily unavailable.");
+    this.name = "DeviceResolutionError";
+  }
+}
+
 type AdminClient = Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"];
+
+export type PairingPlatform = "android" | "connect_iq";
+
+export type PairingExchangeResult =
+  | { ok: true; token: string; deviceId: string; label: string }
+  | { ok: false; reason: "unavailable" | "failed" };
+
+export function normalizePairingCode(code: string): string {
+  return code.trim().toUpperCase().replace(/[\s-]/g, "");
+}
+
+/**
+ * Atomically consumes a purpose-bound pairing code and creates a device link.
+ * The raw token is returned once and only its SHA-256 digest reaches Supabase.
+ */
+export async function exchangeDevicePairing(
+  admin: AdminClient,
+  input: {
+    code: string;
+    deviceLabel: string;
+    platform: PairingPlatform;
+    dataSourceType: "health_connect" | null;
+  },
+): Promise<PairingExchangeResult> {
+  const token = newDeviceToken();
+  const { data, error } = await admin.rpc("exchange_device_pairing", {
+    _code_hash: await sha256Hex(normalizePairingCode(input.code)),
+    _device_label: input.deviceLabel.trim(),
+    _platform: input.platform,
+    _token_hash: await sha256Hex(token),
+    _data_source_type: input.dataSourceType,
+  });
+  if (error) {
+    if (error.code === "P0002") return { ok: false, reason: "unavailable" };
+    console.error("[device-pairing] exchange failed", {
+      code: error.code,
+      message: error.message,
+      platform: input.platform,
+    });
+    return { ok: false, reason: "failed" };
+  }
+  const row = data?.[0];
+  if (!row) return { ok: false, reason: "failed" };
+  return {
+    ok: true,
+    token,
+    deviceId: row.linked_device_id,
+    label: row.linked_label,
+  };
+}
 
 /** Resolves a bearer device token to its owner. Returns null for anything unknown. */
 export async function resolveDevice(
   admin: AdminClient,
   bearer: string | null,
+  expectedPlatform?: PairingPlatform,
 ): Promise<DeviceIdentity | null> {
   const token = bearer?.replace(/^Bearer\s+/i, "").trim();
   if (!token || token.length < 20 || token.length > 200) return null;
   const hash = await sha256Hex(token);
-  const { data } = await admin
+  const { data, error } = await admin
     .from("device_links")
-    .select("id, user_id, label, data_source_id, token_hash")
+    .select("id, user_id, label, platform, data_source_id, token_hash")
     .eq("token_hash", hash)
     .maybeSingle();
-  if (!data || !hashesEqual(data.token_hash, hash)) return null;
+  if (error) {
+    console.error("[device-auth] token lookup failed", {
+      code: error.code,
+      message: error.message,
+      expectedPlatform,
+    });
+    throw new DeviceResolutionError();
+  }
+  if (
+    !data ||
+    !hashesEqual(data.token_hash, hash) ||
+    (expectedPlatform != null && data.platform !== expectedPlatform)
+  )
+    return null;
   return {
     deviceId: data.id,
     userId: data.user_id,
     label: data.label,
+    platform: data.platform,
     dataSourceId: data.data_source_id,
   };
 }

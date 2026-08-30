@@ -65,7 +65,9 @@ Do not merely create a landing page. Build the actual authenticated-app-style pr
 
 This project was built with [Lovable](https://lovable.dev).
 
-**Live app**: https://iroirondesk.lovable.app
+**Production deployment**: https://irondeskpro.lovable.app
+
+The Garmin Connect IQ companion and secure API are implemented under `connectiq/irondesk` and `src/routes/api/public/connect-iq`. The release package is pinned to the production HTTPS origin above; deploy and verify the accompanying Supabase migration and API routes before pairing a physical watch or submitting to the Connect IQ Store.
 
 ## Build with Lovable
 
