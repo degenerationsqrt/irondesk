@@ -4,111 +4,264 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>IronDesk Health Data & Privacy</title>
+    <meta
+      name="description"
+      content="IronDesk privacy policy for the web app, Android Health Connect integration, and Garmin Connect IQ companion."
+    />
+    <title>IronDesk Privacy Policy</title>
     <style>
       :root {
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #e9edef;
-        background: #0b0f12;
+        background: #07101d;
+      }
+      * {
+        box-sizing: border-box;
       }
       body {
-        max-width: 760px;
+        max-width: 820px;
         margin: 0 auto;
-        padding: 34px 22px 60px;
+        padding: 38px 22px 72px;
         line-height: 1.65;
       }
-      h1, h2 {
+      h1,
+      h2 {
         color: #f7f9fa;
         line-height: 1.2;
       }
       h1 {
-        margin-bottom: 8px;
-        font-size: clamp(28px, 7vw, 44px);
+        margin: 8px 0 10px;
+        font-size: clamp(30px, 7vw, 46px);
       }
       h2 {
-        margin-top: 32px;
-        font-size: 20px;
+        margin-top: 34px;
+        font-size: 21px;
       }
-      p, li {
-        color: #aeb8bf;
+      p,
+      li {
+        color: #b9c4cd;
+      }
+      li + li {
+        margin-top: 8px;
       }
       .eyebrow {
-        color: #55dfb8;
+        color: #5ba8ff;
         font-size: 12px;
         font-weight: 800;
         letter-spacing: 0.13em;
         text-transform: uppercase;
       }
       .summary {
-        margin: 24px 0;
-        padding: 18px;
-        border: 1px solid #28443d;
+        margin: 26px 0;
+        padding: 20px;
+        border: 1px solid #244b78;
         border-radius: 14px;
-        background: #101a18;
+        background: #0d1b2e;
+      }
+      .meta {
+        color: #8fa0ad;
       }
       a {
-        color: #65e2c0;
+        color: #6fb7ff;
       }
-      code {
-        color: #d7e0e4;
+      strong {
+        color: #eef5fa;
       }
     </style>
   </head>
   <body>
-    <div class="eyebrow">IronDesk Android</div>
-    <h1>Health data & privacy</h1>
-    <p>Last updated: July 27, 2026</p>
+    <div class="eyebrow">IronDesk · Web, Android &amp; Garmin</div>
+    <h1>Privacy policy</h1>
+    <p class="meta">Effective and last updated: August 30, 2026</p>
 
     <div class="summary">
-      IronDesk uses Health Connect only after you choose to connect it. Access is read-only and can
-      be revoked at any time from Android Health Connect settings.
+      IronDesk processes fitness and workout information only to provide the features you choose to
+      use. IronDesk does not sell personal or health data, use it for targeted advertising, or give
+      a Garmin watch your IronDesk account password or cloud-session credentials.
     </div>
 
-    <h2>Data IronDesk can read</h2>
+    <h2>1. Scope</h2>
     <p>
-      With your permission, IronDesk reads daily totals or summaries for steps, heart rate, resting
-      heart rate, sleep duration, weight, body-fat percentage, total calories burned, exercise
-      duration, and VO2 max. IronDesk does not request medical-record permissions, exercise routes, raw location,
-      or background health access.
+      This policy covers the IronDesk web and progressive web app, the Android Health Connect
+      integrations, and the IronDesk Garmin Connect IQ companion (together, “IronDesk”). IronDesk
+      is provided by FawazLabs. Garmin, Google, GitHub, Supabase, and Firebase operate their own
+      services under their own privacy terms.
     </p>
 
-    <h2>How the data is used</h2>
-    <p>
-      The data is used to show fitness and recovery trends inside IronDesk. Health Connect exercise
-      time is not converted into a detailed IronDesk workout, which avoids duplicating activities
-      already imported from Garmin FIT or CSV files.
-    </p>
-
-    <h2>Storage and transfer</h2>
-    <p>
-      Daily Health Connect summaries are stored with your other IronDesk data on the device. If you
-      explicitly enable Personal Cloud Sync and sign in, those summaries can be stored in your
-      private Firebase user document so they can appear on your other signed-in devices and the
-      IronDesk website. Raw Health Connect sensor records do not sync to Firebase.
-    </p>
-    <p>
-      IronDesk does not sell health data, use it for advertising, or share it with Crew members.
-      Firebase processes opt-in cloud data as IronDesk's service provider.
-    </p>
-
-    <h2>Your controls</h2>
+    <h2>2. Information IronDesk processes</h2>
     <ul>
-      <li>Use <strong>Manage Access</strong> in IronDesk Settings to grant or revoke Health Connect permissions.</li>
-      <li>Turn off foreground auto-sync without revoking Health Connect access.</li>
-      <li>Use <strong>Remove imported summaries</strong> to delete Health Connect summaries and derived Health Connect bodyweight entries from IronDesk.</li>
-      <li>Pause Personal Cloud Sync separately at any time.</li>
+      <li>
+        <strong>Account and settings data:</strong> an account identifier, email address, profile
+        name, optional height and date of birth, training goals and preferences, units, equipment,
+        program state, nutrition targets, and connection settings when you choose to sign in or
+        enable cloud features.
+      </li>
+      <li>
+        <strong>Workout data:</strong> workout plans and sessions, exercise names, sets, weight,
+        repetitions, RPE, rest time, completion state, timestamps, generated-program state, and
+        derived totals or trends.
+      </li>
+      <li>
+        <strong>Body, cardio, recovery, and nutrition data:</strong> information you choose to enter,
+        connect, or import, such as bodyweight and body-fat measurements; cardio activity, distance,
+        duration, calories, heart-rate summaries, and zones; sleep and sleep efficiency, resting
+        heart rate, HRV, soreness, fatigue, stress, readiness, and notes; and meals, calories,
+        macronutrients, and hydration.
+      </li>
+      <li>
+        <strong>Imported files and records:</strong> when you choose to import an activity or health
+        file, current IronDesk workflows read the source file locally and may store normalized
+        activity or metric records in your account together with import metadata such as the source
+        file name, size, format, warnings, and source provenance. Current workflows do not retain
+        the original source-file contents.
+      </li>
+      <li>
+        <strong>Garmin Connect IQ data:</strong> a one-time pairing code, a device label and linked
+        device identifier, token and synchronization metadata, the active workout sent to the
+        watch, confirmed set changes, offline event identifiers, completion timestamps, and
+        optional average and maximum heart-rate summaries when available.
+      </li>
+      <li>
+        <strong>Garmin activity files:</strong> the watch app can create and save a strength-training
+        FIT activity, which may include heart-rate information, on the Garmin device. Garmin may
+        synchronize that activity to Garmin Connect according to your Garmin settings and Garmin's
+        privacy terms.
+      </li>
+      <li>
+        <strong>Health Connect data:</strong> depending on the Android component and permissions you
+        enable, IronDesk may read daily aggregates for steps, heart rate, resting heart rate, sleep,
+        weight, body-fat percentage, calories, exercise duration, and VO2 max, or selected
+        record-level data for sleep, resting heart rate, HRV, weight, active calories, distance, and
+        exercise sessions. Record-level data may include timestamps and source-app or source-device
+        provenance; exercise sessions may additionally include an activity title and notes. The main
+        Android app can also write a completed
+        IronDesk exercise session to Health Connect only when you separately enable that permission.
+        IronDesk does not request background-health access, medical records, exercise routes, or raw
+        location.
+      </li>
+      <li>
+        <strong>Operational data:</strong> service providers may process ordinary request and
+        security information needed to deliver the service, prevent abuse, diagnose failures, and
+        protect accounts.
+      </li>
+    </ul>
+
+    <h2>3. How IronDesk uses information</h2>
+    <p>IronDesk uses this information to:</p>
+    <ul>
+      <li>display, record, synchronize, and reconcile your workouts and completed sets;</li>
+      <li>create a Garmin strength activity and show rest-timer and workout status;</li>
+      <li>show fitness, recovery, readiness, and training trends;</li>
+      <li>process imports and create exports that you request;</li>
+      <li>share the limited Crew information described below when you choose to join a Crew;</li>
+      <li>prevent duplicate or stale offline watch updates;</li>
+      <li>maintain linked-device security, investigate errors, and provide support; and</li>
+      <li>comply with applicable legal obligations.</li>
+    </ul>
+
+    <h2>4. Garmin permissions and watch storage</h2>
+    <p>The Connect IQ companion requests only the permissions needed for its disclosed workflow:</p>
+    <ul>
+      <li>
+        <strong>Communications</strong> to exchange a one-time pairing code for a revocable device
+        token, download the active workout, and upload confirmed set and workout-completion events
+        over HTTPS;
+      </li>
+      <li><strong>Fit</strong> to create, lap, stop, save, recover, or discard the Garmin strength activity; and</li>
+      <li><strong>Sensor</strong> to read live heart-rate samples while an activity is recording.</li>
     </ul>
     <p>
-      A synchronized deletion marker prevents an older cloud copy from automatically restoring
-      removed Health Connect summaries. Data remains until you remove it, clear local app data, or
-      request deletion of the associated hosted account data.
+      The watch stores a revocable device token, an active-workout cache, a recovery checkpoint, and
+      a bounded offline synchronization queue. The raw device token is returned to the watch during
+      pairing; IronDesk stores a one-way hash on the server. The watch does not store your IronDesk
+      password, Supabase session, or service-role credential.
+    </p>
+    <p>
+      Connect IQ synchronization data is sent to the HTTPS server origin configured in the IronDesk
+      watch-app settings. FawazLabs controls that data only when the configured origin is an official
+      FawazLabs-operated IronDesk service; another origin is governed by its operator's privacy
+      practices. When an official IronDesk service is used, only optional average and maximum
+      heart-rate summaries are sent to that service at workout completion. Live samples and any
+      heart-rate information stored in the FIT activity remain subject to Garmin's device and
+      Garmin Connect handling.
     </p>
 
-    <h2>Questions and deletion requests</h2>
+    <h2>5. Storage, service providers, and sharing</h2>
     <p>
-      Open a request through the
-      <a href="https://github.com/degenerationsqrt/irondesk/issues">IronDesk GitHub Issues page</a>.
-      Do not include private health measurements in a public issue.
+      Depending on the IronDesk features you enable, information may be stored locally on your
+      browser, Android device, or Garmin watch and may be processed by IronDesk's service and platform
+      providers. Supabase provides account, database, and Connect IQ synchronization services.
+      Firebase may process opt-in Personal Cloud Sync or Crew information. Garmin provides the
+      Connect IQ distribution, device settings, and Garmin activity ecosystem. GitHub hosts this
+      public policy page and the public issue tracker.
+    </p>
+    <p>
+      If you choose to join a Crew, IronDesk shares your display name, best estimated one-repetition
+      maximum values for supported lifts, weekly session count and training volume, and personal
+      record feed entries containing the exercise and estimated one-repetition maximum with other
+      members of that Crew. IronDesk does not share your full workout or set-by-set history,
+      nutrition data, recovery notes, or Health Connect records with Crew members.
+    </p>
+    <p>
+      IronDesk does not sell personal or health data or use it for targeted advertising. Information
+      may be disclosed to service providers acting for IronDesk, when you direct IronDesk to share
+      it, or when disclosure is required to protect users, enforce rights, or comply with law.
+    </p>
+
+    <h2>6. Retention and deletion</h2>
+    <p>
+      Local data remains until you remove it, clear application data, or uninstall the relevant app.
+      Workout records remain until removed through an available product control or an
+      operator-fulfilled deletion request. Device-link and replay-protection records are retained as
+      needed to synchronize safely and prevent duplicate updates. Unlinking a Garmin watch in
+      IronDesk Connections revokes the device and removes records tied to that link. Unlinking does
+      not automatically erase workout history already added to your IronDesk account or an activity
+      already saved in Garmin.
+    </p>
+    <p>
+      IronDesk does not currently provide fully self-service account deletion. To request access,
+      correction, or deletion of hosted account, device-link, workout, recovery, nutrition, or
+      health data, contact FawazLabs at
+      <a href="mailto:fawazdevlabs@gmail.com">fawazdevlabs@gmail.com</a>. You may also open a
+      non-private support request on the
+      <a href="https://github.com/degenerationsqrt/irondesk/issues">IronDesk GitHub Issues page</a>,
+      but do not post private health information in a public issue.
+    </p>
+
+    <h2>7. Your choices</h2>
+    <ul>
+      <li>Pairing the Garmin companion and enabling Health Connect are optional.</li>
+      <li>You can unlink a Garmin watch in IronDesk Connections.</li>
+      <li>
+        Clearing the watch app's data or uninstalling it removes the credential stored on that
+        watch, but does not by itself remove the server-side device link.
+      </li>
+      <li>You can manage or revoke Health Connect permissions in Android settings.</li>
+      <li>You can pause optional cloud synchronization and remove imported summaries.</li>
+      <li>You can clear local data, uninstall the app, or request deletion of hosted data.</li>
+    </ul>
+
+    <h2>8. Security</h2>
+    <p>
+      IronDesk uses HTTPS for Connect IQ communications, purpose-bound one-time pairing codes,
+      revocable random device tokens, hashed server-side token storage, access controls, and
+      replay-resistant event identifiers. No service can guarantee absolute security, so you should
+      protect access to your devices and accounts and promptly unlink a lost watch.
+    </p>
+
+    <h2>9. Policy changes</h2>
+    <p>
+      This policy may be updated when IronDesk's features, providers, or legal obligations change.
+      The effective date above identifies the current version. Material changes will be presented
+      through an appropriate IronDesk or Store notice when required.
+    </p>
+
+    <h2>10. Contact</h2>
+    <p>
+      IronDesk is provided by FawazLabs. For privacy, access, correction, or deletion requests,
+      email <a href="mailto:fawazdevlabs@gmail.com">fawazdevlabs@gmail.com</a>. Do not include
+      passwords, pairing codes, device tokens, or detailed health measurements in the first
+      message.
     </p>
   </body>
 </html>
