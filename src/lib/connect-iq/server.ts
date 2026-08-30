@@ -378,7 +378,8 @@ export async function applyConnectIqEvent(
     _event_type: event.type,
     _request_hash: await connectIqEventHash(event),
     _session_id: event.session_id,
-    _set_id: event.type === "set.updated" ? event.set_id : null,
+    // Live generated types mark _set_id non-null, but the SQL function accepts NULL.
+    _set_id: (event.type === "set.updated" ? event.set_id : null) as string,
     _occurred_at: event.occurred_at,
     _payload: event.payload,
   });
