@@ -160,6 +160,73 @@ export type Database = {
         }
         Relationships: []
       }
+      connect_iq_event_receipts: {
+        Row: {
+          created_at: string
+          device_id: string
+          event_id: string
+          event_type: string
+          id: string
+          occurred_at: string
+          payload: Json
+          request_hash: string
+          response: Json
+          session_id: string
+          set_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          event_id: string
+          event_type: string
+          id?: string
+          occurred_at: string
+          payload?: Json
+          request_hash: string
+          response?: Json
+          session_id: string
+          set_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          occurred_at?: string
+          payload?: Json
+          request_hash?: string
+          response?: Json
+          session_id?: string
+          set_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "connect_iq_event_receipts_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "device_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connect_iq_event_receipts_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "workout_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "connect_iq_event_receipts_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "workout_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       device_links: {
         Row: {
           created_at: string
@@ -212,6 +279,7 @@ export type Database = {
           expires_at: string
           id: string
           label: string
+          platform: string
           user_id: string
         }
         Insert: {
@@ -221,6 +289,7 @@ export type Database = {
           expires_at: string
           id?: string
           label?: string
+          platform?: string
           user_id: string
         }
         Update: {
@@ -230,6 +299,7 @@ export type Database = {
           expires_at?: string
           id?: string
           label?: string
+          platform?: string
           user_id?: string
         }
         Relationships: []
@@ -1563,9 +1633,37 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_connect_iq_event: {
+        Args: {
+          _device_id: string
+          _event_id: string
+          _event_type: string
+          _occurred_at: string
+          _payload: Json
+          _request_hash: string
+          _session_id: string
+          _set_id: string | null
+          _user_id: string
+        }
+        Returns: Json
+      }
       bootstrap_current_user: {
         Args: { _display_name?: string }
         Returns: undefined
+      }
+      exchange_device_pairing: {
+        Args: {
+          _code_hash: string
+          _data_source_type?: string | null
+          _device_label: string
+          _platform: string
+          _token_hash: string
+        }
+        Returns: {
+          linked_device_id: string
+          linked_label: string
+          linked_user_id: string
+        }[]
       }
       enroll_in_program: {
         Args: {
