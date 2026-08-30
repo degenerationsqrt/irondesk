@@ -60,6 +60,7 @@ The watch stores a revocable device token, the active workout cache, a recovery 
 
 The development manifest currently compiles these products:
 
+- `fenix6xpro`
 - `fenix7`
 - `fenix847mm`
 - `epix2`
