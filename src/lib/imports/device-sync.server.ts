@@ -142,7 +142,8 @@ export async function exchangeDevicePairing(
     _device_label: input.deviceLabel.trim(),
     _platform: input.platform,
     _token_hash: await sha256Hex(token),
-    _data_source_type: input.dataSourceType,
+    // Live generated types mark this non-null, but the SQL function accepts NULL.
+    _data_source_type: input.dataSourceType as string,
   });
   if (error) {
     if (error.code === "P0002") return { ok: false, reason: "unavailable" };
