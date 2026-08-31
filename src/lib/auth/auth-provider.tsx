@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { clearQueuedWorkoutMutationsForUser } from "@/lib/irondesk/workout-mutation-queue";
 
 const DEMO_KEY = "irondesk.demo";
 
@@ -132,9 +133,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    const userId = session?.user.id ?? null;
     await supabase.auth.signOut();
+    if (userId) clearQueuedWorkoutMutationsForUser(userId);
     setSession(null);
-  }, []);
+  }, [session?.user.id]);
 
   const deleteAccount = useCallback(
     async ({ password, confirmation }: { password: string; confirmation: string }) => {
@@ -169,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // cached access token as well; a local sign-out error is harmless because
       // the account has already been removed and the React state is cleared.
       await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      clearQueuedWorkoutMutationsForUser(current.user.id);
       bootstrapped.current = null;
       window.localStorage.removeItem(DEMO_KEY);
       setDemo(false);

@@ -26,10 +26,7 @@ import {
   ProgressBar,
   SectionCard,
 } from "@/components/irondesk/primitives";
-import {
-  MethodExecutionCard,
-  TrainingMethodSelector,
-} from "@/components/irondesk/method-selector";
+import { MethodExecutionCard, TrainingMethodSelector } from "@/components/irondesk/method-selector";
 import { AssignedWorkoutCard } from "@/components/irondesk/program-panels";
 
 import { TemplateLibrary } from "@/components/irondesk/template-library";
@@ -74,7 +71,6 @@ import {
   methodSetPlan,
   replaceCircuitStation,
   restSecondsForCompletedSet,
-
   parseMethodConfig,
   parseMethodSegmentConfig,
   planBlackBlockResult,
@@ -102,6 +98,12 @@ import type {
   WorkoutExercise,
   WorkoutTemplate,
 } from "@/lib/irondesk/types";
+import {
+  createClientWorkoutRecordId,
+  type WorkoutMutation,
+  type WorkoutMutationCommitResult,
+} from "@/lib/irondesk/workout-mutation-outbox";
+import { useWorkoutMutationQueue } from "@/lib/irondesk/use-workout-mutation-queue";
 import {
   defaultSetWeightKg,
   formatLoadGuidance,
@@ -149,7 +151,14 @@ function uid() {
   return `local-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-type SaveState = "saved" | "saving" | "error";
+type SaveState = "saved" | "saving" | "queued" | "error";
+
+class DeferredWorkoutMutationError extends Error {
+  constructor() {
+    super("That change is safely queued. Reconnect before applying the rest of this method block.");
+    this.name = "DeferredWorkoutMutationError";
+  }
+}
 const previewCardioSave = async () => undefined;
 
 function WorkoutPage() {
@@ -382,10 +391,12 @@ function WorkoutConsole({
   const progression = useQuery(progressionQuery(mode)).data;
   const sessionHistory = useQuery(historyQuery(mode)).data;
   const specializationWindows = useQuery(specializationWindowsQuery(mode)).data ?? [];
+  const mutationQueue = useWorkoutMutationQueue();
+  const commitWorkoutMutation = mutationQueue.commit;
+  const queueIsDurable = mutationQueue.durable;
 
   /** The current IronDesk Black window — active or suspended, both are current. */
   const openBlackWindow = currentBlackWindow(specializationWindows);
-
 
   /**
    * Method eligibility is earned: experience and consistency are derived from
@@ -407,25 +418,19 @@ function WorkoutConsole({
     for (const ex of initial.exercises) if (ex.trainingMethodId) map[ex.id] = ex.trainingMethodId;
     return map;
   });
-  const [methodConfigByExercise, setMethodConfigByExercise] = useState<Record<string, MethodConfig>>(
-    () => {
-      const map: Record<string, MethodConfig> = {};
-      for (const ex of initial.exercises)
-        map[ex.id] = parseMethodConfig(ex.trainingMethodConfig ?? {});
-      return map;
-    },
-  );
+  const [methodConfigByExercise, setMethodConfigByExercise] = useState<
+    Record<string, MethodConfig>
+  >(() => {
+    const map: Record<string, MethodConfig> = {};
+    for (const ex of initial.exercises)
+      map[ex.id] = parseMethodConfig(ex.trainingMethodConfig ?? {});
+    return map;
+  });
   const [methodPickerFor, setMethodPickerFor] = useState<string | null>(null);
   const [methodNotice, setMethodNotice] = useState<string | null>(null);
   const methodFor = (exId: string) => methodByExercise[exId] ?? "double-progression";
   const configFor = (exId: string) => methodConfigByExercise[exId] ?? {};
-  const stackedMethodIds = useMemo(
-    () => Object.values(methodByExercise),
-    [methodByExercise],
-  );
-
-
-
+  const stackedMethodIds = useMemo(() => Object.values(methodByExercise), [methodByExercise]);
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>(initial.exercises);
   const [notes, setNotes] = useState(initial.notes);
@@ -447,6 +452,12 @@ function WorkoutConsole({
   );
   const pending = useRef(0);
   const busySets = useRef<Set<string>>(new Set());
+  const lastAppliedAt = useRef<string | null>(mutationQueue.lastAppliedAt);
+  const terminalMutationQueued = mutationQueue.items.some(
+    (item) =>
+      (item.mutation.kind === "session.finish" || item.mutation.kind === "session.cancel") &&
+      item.mutation.sessionId === initial.id,
+  );
 
   /** Runs a write in live mode and tracks saving/saved/error for the UI. */
   const persist = useCallback(
@@ -469,6 +480,74 @@ function WorkoutConsole({
     [live],
   );
 
+  /**
+   * Persists the operation before attempting the network write. Connectivity
+   * failures stay in the user-scoped outbox; validation/RLS conflicts pause
+   * and require an explicit retry or discard.
+   */
+  const persistMutation = useCallback(
+    async (
+      mutation: WorkoutMutation,
+      options?: { requireAcknowledgment?: boolean },
+    ): Promise<WorkoutMutationCommitResult> => {
+      if (!live) return { itemId: "demo", status: "applied" };
+      setSaveState("saving");
+      const result = await commitWorkoutMutation(mutation);
+      if (result.status === "applied") {
+        setSaveError(null);
+        if (pending.current === 0) setSaveState("saved");
+        return result;
+      }
+      if (result.status === "queued") {
+        setSaveError(
+          queueIsDurable
+            ? "Connection interrupted. Your change is safely queued on this device."
+            : "Connection interrupted. This change is kept only while this page stays open.",
+        );
+        setSaveState("queued");
+        if (options?.requireAcknowledgment) throw new DeferredWorkoutMutationError();
+        return result;
+      }
+      setSaveError("A queued change needs your attention.");
+      setSaveState("error");
+      if (options?.requireAcknowledgment)
+        throw new Error("That change could not be saved. Review the queued-change warning.");
+      return result;
+    },
+    [commitWorkoutMutation, live, queueIsDurable],
+  );
+
+  useEffect(() => {
+    if (!live) return;
+    if (mutationQueue.blockedCount > 0) {
+      setSaveError(mutationQueue.lastError ?? "A queued change needs your attention.");
+      setSaveState("error");
+    } else if (mutationQueue.pendingCount > 0) {
+      setSaveError(
+        mutationQueue.durable
+          ? "Connection interrupted. Your changes are safely queued on this device."
+          : "Connection interrupted. Changes are kept only while this page stays open.",
+      );
+      setSaveState("queued");
+    } else if (pending.current === 0) {
+      setSaveError(null);
+      setSaveState("saved");
+    }
+  }, [
+    live,
+    mutationQueue.blockedCount,
+    mutationQueue.durable,
+    mutationQueue.lastError,
+    mutationQueue.pendingCount,
+  ]);
+
+  useEffect(() => {
+    if (mutationQueue.lastAppliedAt && mutationQueue.lastAppliedAt !== lastAppliedAt.current) {
+      lastAppliedAt.current = mutationQueue.lastAppliedAt;
+      invalidate();
+    }
+  }, [invalidate, mutationQueue.lastAppliedAt]);
+
   useEffect(() => {
     if (!running || summary) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -489,10 +568,10 @@ function WorkoutConsole({
   useEffect(() => {
     if (!live || notes === initial.notes) return;
     const t = setTimeout(() => {
-      void persist(() => repo.updateSessionMeta(initial.id, { notes }));
+      void persistMutation({ kind: "session.meta", sessionId: initial.id, patch: { notes } });
     }, 700);
     return () => clearTimeout(t);
-  }, [notes, live, initial.id, initial.notes, persist]);
+  }, [notes, live, initial.id, initial.notes, persistMutation]);
 
   const totals = useMemo(() => {
     const done = exercises.flatMap((e) => e.sets.filter((s) => s.done));
@@ -567,7 +646,6 @@ function WorkoutConsole({
         source: "library" as const,
       }));
     return [...fromSession, ...fromLibrary];
-
   }, [exercises, library]);
 
   /**
@@ -649,9 +727,12 @@ function WorkoutConsole({
     setMethodConfigByExercise((prev) => ({ ...prev, [exId]: config }));
     setMethodPickerFor(null);
     if (live && !exId.startsWith("local-")) {
-      void persist(() =>
-        repo.setSessionExerciseMethod({ sessionExerciseId: exId, methodId, config }),
-      );
+      void persistMutation({
+        kind: "exercise.method",
+        sessionExerciseId: exId,
+        methodId,
+        config,
+      });
     }
   };
 
@@ -707,8 +788,7 @@ function WorkoutConsole({
         ...(current.stationNames ? { stationNames: current.stationNames } : {}),
       });
       const firstEmpty = slots.stationIds.findIndex((id) => !id);
-      const target =
-        slotIndex ?? (firstEmpty > 0 ? firstEmpty : Math.max(1, slots.total - 1));
+      const target = slotIndex ?? (firstEmpty > 0 ? firstEmpty : Math.max(1, slots.total - 1));
       const result = replaceCircuitStation({
         methodId,
         primary,
@@ -735,9 +815,12 @@ function WorkoutConsole({
 
     setMethodConfigByExercise((prev) => ({ ...prev, [exId]: next }));
     if (live && !exId.startsWith("local-")) {
-      void persist(() =>
-        repo.setSessionExerciseMethod({ sessionExerciseId: exId, methodId, config: next }),
-      );
+      void persistMutation({
+        kind: "exercise.method",
+        sessionExerciseId: exId,
+        methodId,
+        config: next,
+      });
     }
   };
 
@@ -806,26 +889,37 @@ function WorkoutConsole({
         patchLocal(exId, target.id, patch);
         if (live && !target.id.startsWith("local-")) {
           try {
-            await persist(
-              () =>
-                repo.updateSet(target.id, {
+            await persistMutation(
+              {
+                kind: "set.update",
+                setId: target.id,
+                patch: {
                   ...(patch.weightKg !== undefined ? { weightKg: patch.weightKg } : {}),
                   ...(patch.reps !== undefined ? { reps: patch.reps } : {}),
                   methodSegment: patch.methodSegment ?? null,
                   methodSegmentConfig: parseMethodSegmentConfig(patch.methodSegmentConfig),
-                }),
-              { rethrow: true },
+                },
+              },
+              { requireAcknowledgment: true },
             );
           } catch (caught) {
-            patchLocal(exId, target.id, target);
+            if (!(caught instanceof DeferredWorkoutMutationError)) {
+              patchLocal(exId, target.id, target);
+            }
             throw caught;
           }
         }
       } else {
-        await addSetWithValues(exId, row.weightKg, row.reps, {
-          id: row.segment ?? null,
-          config: segmentConfig,
-        }, { strict: true });
+        await addSetWithValues(
+          exId,
+          row.weightKg,
+          row.reps,
+          {
+            id: row.segment ?? null,
+            config: segmentConfig,
+          },
+          { strict: true },
+        );
       }
     }
   };
@@ -848,14 +942,18 @@ function WorkoutConsole({
           exercises.find((e) => e.name.toLowerCase() === p.exerciseName.toLowerCase());
         return match ? { exerciseId: match.id, prescription: p } : null;
       })
-      .filter((t): t is { exerciseId: string; prescription: BlackExercisePrescription } => t !== null);
+      .filter(
+        (t): t is { exerciseId: string; prescription: BlackExercisePrescription } => t !== null,
+      );
     if (!targets.length) {
       setMethodNotice("None of this Black block's movements are in the current workout yet.");
       return;
     }
 
     if (live && targets.some((target) => target.exerciseId.startsWith("local-"))) {
-      setMethodNotice("Wait for every Black movement to finish saving, then apply the block again.");
+      setMethodNotice(
+        "Wait for every Black movement to finish saving, then apply the block again.",
+      );
       return;
     }
 
@@ -910,14 +1008,14 @@ function WorkoutConsole({
           if (!exercise) throw new Error("A Black movement is no longer in this workout.");
           const config = buildConfigFor(exercise, "irondesk-black");
           if (live) {
-            await persist(
-              () =>
-                repo.setSessionExerciseMethod({
-                  sessionExerciseId: target.exerciseId,
-                  methodId: "irondesk-black",
-                  config,
-                }),
-              { rethrow: true },
+            await persistMutation(
+              {
+                kind: "exercise.method",
+                sessionExerciseId: target.exerciseId,
+                methodId: "irondesk-black",
+                config,
+              },
+              { requireAcknowledgment: true },
             );
           }
           setMethodByExercise((previous) => ({
@@ -1000,10 +1098,11 @@ function WorkoutConsole({
       await writePlanToSets(exId, plan);
       setMethodNotice(plan.explanation);
     } catch (caught) {
-      setMethodNotice(caught instanceof Error ? caught.message : "That method could not be applied.");
+      setMethodNotice(
+        caught instanceof Error ? caught.message : "That method could not be applied.",
+      );
     }
   };
-
 
   /* -------------------------------------------------- IronDesk Black window */
 
@@ -1039,7 +1138,9 @@ function WorkoutConsole({
     }
 
     if (!live) {
-      setMethodNotice("Specialization windows are stored on your account — switch out of demo mode.");
+      setMethodNotice(
+        "Specialization windows are stored on your account — switch out of demo mode.",
+      );
       return;
     }
     await persist(async () => {
@@ -1092,8 +1193,6 @@ function WorkoutConsole({
     setMethodNotice(blackState?.exitRecommendation ?? "Specialization window closed.");
   };
 
-
-
   const patchLocal = (exId: string, setId: string, patch: Partial<SetEntry>) =>
     setExercises((prev) =>
       prev.map((e) =>
@@ -1106,8 +1205,10 @@ function WorkoutConsole({
   const editSet = (exId: string, setId: string, patch: Partial<SetEntry>) => {
     patchLocal(exId, setId, patch);
     if (setId.startsWith("local-")) return;
-    void persist(() =>
-      repo.updateSet(setId, {
+    void persistMutation({
+      kind: "set.update",
+      setId,
+      patch: {
         ...(patch.weightKg !== undefined ? { weightKg: patch.weightKg } : {}),
         ...(patch.reps !== undefined ? { reps: patch.reps } : {}),
         ...(patch.rpe !== undefined ? { rpe: patch.rpe } : {}),
@@ -1115,8 +1216,8 @@ function WorkoutConsole({
         ...(patch.methodSegmentConfig !== undefined
           ? { methodSegmentConfig: parseMethodSegmentConfig(patch.methodSegmentConfig) }
           : {}),
-      }),
-    );
+      },
+    });
   };
 
   const toggleSet = (exId: string, setId: string) => {
@@ -1138,15 +1239,18 @@ function WorkoutConsole({
     if (setId.startsWith("local-")) return;
     const restSeconds =
       next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
-    void persist(() =>
-      repo.updateSet(setId, {
+    void persistMutation({
+      kind: "set.update",
+      setId,
+      patch: {
         completed: next,
+        completedAt: next ? new Date().toISOString() : null,
         weightKg: set.weightKg,
         reps: set.reps,
         rpe: set.rpe,
         ...(restSeconds ? { restSeconds } : {}),
-      }),
-    );
+      },
+    });
   };
 
   const addSetWithValues = async (
@@ -1166,7 +1270,8 @@ function WorkoutConsole({
     const last = ex?.sets[ex.sets.length - 1];
     const suggestion = suggestions[exId];
     const draft: SetEntry = {
-      id: uid(),
+      id: live ? createClientWorkoutRecordId() : uid(),
+      setNumber: Math.max(0, ...(ex?.sets.map((set) => set.setNumber ?? 0) ?? [])) + 1,
       weightKg: weightKg ?? last?.weightKg ?? suggestion?.weightKg ?? defaultSetWeightKg(units),
       reps: reps ?? last?.reps ?? suggestion?.reps ?? 8,
       rpe: last?.rpe ?? 7,
@@ -1179,34 +1284,24 @@ function WorkoutConsole({
     );
     try {
       if (live && !exId.startsWith("local-")) {
-        await persist(
-          async () => {
-            const id = await repo.addSet(exId, {
+        await persistMutation(
+          {
+            kind: "set.add",
+            recordId: draft.id,
+            sessionExerciseId: exId,
+            setNumber: draft.setNumber ?? 1,
+            input: {
               weightKg: draft.weightKg,
               reps: draft.reps,
               rpe: draft.rpe,
               ...(segment
                 ? { methodSegment: segment.id, methodSegmentConfig: segment.config }
                 : {}),
-            });
-            setExercises((prev) =>
-              prev.map((e) =>
-                e.id === exId
-                  ? { ...e, sets: e.sets.map((s) => (s.id === draft.id ? { ...s, id } : s)) }
-                  : e,
-              ),
-            );
+            },
           },
-          options?.strict ? { rethrow: true } : undefined,
+          options?.strict ? { requireAcknowledgment: true } : undefined,
         );
       }
-    } catch (caught) {
-      setExercises((prev) =>
-        prev.map((e) =>
-          e.id === exId ? { ...e, sets: e.sets.filter((set) => set.id !== draft.id) } : e,
-        ),
-      );
-      throw caught;
     } finally {
       busySets.current.delete(exId);
     }
@@ -1214,13 +1309,11 @@ function WorkoutConsole({
 
   const addSet = (exId: string) => addSetWithValues(exId);
 
-
-
   const removeSet = (exId: string, setId: string) => {
     setExercises((prev) =>
       prev.map((e) => (e.id === exId ? { ...e, sets: e.sets.filter((s) => s.id !== setId) } : e)),
     );
-    if (!setId.startsWith("local-")) void persist(() => repo.deleteSet(setId));
+    if (!setId.startsWith("local-")) void persistMutation({ kind: "set.delete", setId });
   };
 
   const addExercise = async (item: {
@@ -1229,7 +1322,8 @@ function WorkoutConsole({
     muscle: string;
     equipment: string;
   }) => {
-    const localId = uid();
+    const localId = live ? createClientWorkoutRecordId() : uid();
+    const position = Math.max(-1, ...exercises.map((exercise) => exercise.position ?? -1)) + 1;
     setExercises((prev) => [
       ...prev,
       {
@@ -1239,25 +1333,30 @@ function WorkoutConsole({
         equipment: item.equipment,
         targetSets: 3,
         targetReps: "8-10",
+        position,
         previous: "No prior data",
         sets: [],
       },
     ]);
     if (!live) return;
-    await persist(async () => {
-      const id = await repo.addSessionExercise(initial.id, {
+    await persistMutation({
+      kind: "exercise.add",
+      recordId: localId,
+      sessionId: initial.id,
+      position,
+      input: {
         exerciseId: item.id,
         name: item.name,
         muscle: item.muscle,
         equipment: item.equipment,
-      });
-      setExercises((prev) => prev.map((e) => (e.id === localId ? { ...e, id } : e)));
+      },
     });
   };
 
   const removeExercise = (exId: string) => {
     setExercises((prev) => prev.filter((e) => e.id !== exId));
-    if (!exId.startsWith("local-")) void persist(() => repo.removeSessionExercise(exId));
+    if (!exId.startsWith("local-"))
+      void persistMutation({ kind: "exercise.delete", sessionExerciseId: exId });
   };
 
   const substitute = (
@@ -1279,14 +1378,16 @@ function WorkoutConsole({
     );
     setSubFor(null);
     if (!exId.startsWith("local-")) {
-      void persist(() =>
-        repo.substituteSessionExercise(exId, {
+      void persistMutation({
+        kind: "exercise.substitute",
+        sessionExerciseId: exId,
+        replacement: {
           exerciseId: item.id,
           name: item.name,
           muscle: item.muscle,
           equipment: item.equipment,
-        }),
-      );
+        },
+      });
     }
   };
 
@@ -1306,9 +1407,16 @@ function WorkoutConsole({
       return;
     }
     try {
-      const result = await repo.finishWorkout(initial.id);
-      setSummary(result);
-      invalidate();
+      const committed = await persistMutation({
+        kind: "session.finish",
+        sessionId: initial.id,
+        completedAt: new Date().toISOString(),
+      });
+      if (committed.status === "applied") {
+        const result = await repo.getWorkoutSummary(initial.id);
+        setSummary(result);
+        invalidate();
+      }
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : "Could not finish the session.");
       setSaveState("error");
@@ -1318,7 +1426,11 @@ function WorkoutConsole({
   const cancel = async () => {
     setConfirming(null);
     if (live) {
-      await persist(() => repo.cancelWorkout(initial.id));
+      await persistMutation({
+        kind: "session.cancel",
+        sessionId: initial.id,
+        completedAt: new Date().toISOString(),
+      });
       invalidate();
     }
   };
@@ -1375,15 +1487,20 @@ function WorkoutConsole({
         subtitle={`${initial.focus} · live session`}
         action={
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={() => setConfirming("cancel")}>
+            <Button
+              variant="ghost"
+              disabled={terminalMutationQueued}
+              onClick={() => setConfirming("cancel")}
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
+              disabled={terminalMutationQueued}
               onClick={() => setConfirming("finish")}
               className="font-semibold"
             >
-              Finish
+              {terminalMutationQueued ? "Finalizing…" : "Finish"}
             </Button>
           </div>
         }
@@ -1448,11 +1565,49 @@ function WorkoutConsole({
               <Check className="size-3.5" /> All changes saved
             </span>
           )}
-          {saveState === "error" && (
-            <span className="flex items-center gap-1.5 text-danger">
-              <CloudOff className="size-3.5" /> {saveError ?? "Unsaved changes"} — edits kept
-              locally, retry any change.
+          {saveState === "queued" && (
+            <span className="flex items-center gap-1.5 text-warning">
+              <CloudOff className="size-3.5" /> {mutationQueue.pendingCount} change
+              {mutationQueue.pendingCount === 1 ? "" : "s"}{" "}
+              {mutationQueue.durable
+                ? "safely queued on this device — IronDesk will retry after reconnecting, including after a reload."
+                : "kept only in this open page because local storage is unavailable — do not close or reload before reconnecting."}
             </span>
+          )}
+          {saveState === "error" && (
+            <div className="flex flex-wrap items-center gap-2 text-danger">
+              <span className="flex items-center gap-1.5">
+                <CloudOff className="size-3.5" /> {saveError ?? "A queued change needs attention."}
+              </span>
+              {mutationQueue.blockedCount > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="font-semibold underline underline-offset-2"
+                    onClick={() => void mutationQueue.retryBlocked()}
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    className="font-semibold underline underline-offset-2"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Discard the blocked change and every later queued workout change? The workout will reload from the last server-saved state.",
+                        )
+                      )
+                        return;
+                      mutationQueue.discardBlocked();
+                      invalidate();
+                      window.location.reload();
+                    }}
+                  >
+                    Discard blocked and later changes
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1513,7 +1668,8 @@ function WorkoutConsole({
             }`}
           >
             <p className="numeric text-sm font-bold text-foreground">
-              {openBlackWindow.targetRegion} · {openBlackWindow.startedOn} → {openBlackWindow.endsOn}
+              {openBlackWindow.targetRegion} · {openBlackWindow.startedOn} →{" "}
+              {openBlackWindow.endsOn}
             </p>
             <p className={blackState?.status === "suspended" ? "text-warning" : undefined}>
               {blackState?.reason}
@@ -1761,9 +1917,7 @@ function WorkoutConsole({
                 const doubleLine = doubleState
                   ? `${fromKg(setWeightKg, units)} ${unit} • target ${
                       target.low === target.high ? target.low : `${target.low}-${target.high}`
-                    }${
-                      loggedReps ? ` • last: ${loggedReps}` : ""
-                    } — ${doubleState.explanation}`
+                    }${loggedReps ? ` • last: ${loggedReps}` : ""} — ${doubleState.explanation}`
                   : null;
                 const readinessNote =
                   suggestion && suggestion.readinessPercent !== 0
@@ -1824,15 +1978,14 @@ function WorkoutConsole({
                           : null
                       }
                       onApply={plan ? () => void applyMethodToSets(ex.id) : undefined}
-                      onChange={() =>
-                        setMethodPickerFor(methodPickerFor === ex.id ? null : ex.id)
-                      }
+                      onChange={() => setMethodPickerFor(methodPickerFor === ex.id ? null : ex.id)}
                     />
                     {(() => {
                       const candidates = replacementCandidatesFor(ex, method.id);
                       if (!candidates.length) return null;
                       const chosen = new Set(
-                        config.stationIds ?? (config.partnerExerciseId ? [config.partnerExerciseId] : []),
+                        config.stationIds ??
+                          (config.partnerExerciseId ? [config.partnerExerciseId] : []),
                       );
                       return (
                         <div className="mb-3 rounded-lg border border-border bg-surface-2/40 p-3">
@@ -1846,9 +1999,7 @@ function WorkoutConsole({
                               <button
                                 key={candidate.id}
                                 type="button"
-                                onClick={() =>
-                                  replaceMethodPartner(ex.id, method.id, candidate)
-                                }
+                                onClick={() => replaceMethodPartner(ex.id, method.id, candidate)}
                                 className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
                                   chosen.has(candidate.id)
                                     ? "border-primary/60 bg-primary/10 text-foreground"
@@ -1878,8 +2029,6 @@ function WorkoutConsole({
                   </>
                 );
               })()}
-
-
 
               {subFor === ex.id && (
                 <div className="mb-3 rounded-lg border border-primary/30 bg-primary/8 p-3">
@@ -1929,66 +2078,68 @@ function WorkoutConsole({
                         .join(" · ")
                     : null;
                   return (
-                  <div key={s.id} className="space-y-1">
-                  {segmentLine ? (
-                    <p
-                      className={`numeric px-1 text-[0.625rem] font-semibold uppercase tracking-wide ${
-                        segment.methodId === "irondesk-black" ? "text-danger" : "text-primary"
-                      }`}
-                    >
-                      {segmentLine}
-                    </p>
-                  ) : null}
-                  <div
-                    className={`grid grid-cols-[1.5rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem_1.5rem] items-center gap-2 rounded-lg border p-1.5 ${
-                      s.done ? "border-success/35 bg-success/8" : "border-border bg-surface-2/40"
-                    }`}
-                  >
-                    <span className="numeric text-center text-sm font-bold text-muted-foreground">
-                      {i + 1}
-                    </span>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      value={fromKg(s.weightKg, units)}
-                      onChange={(e) =>
-                        editSet(ex.id, s.id, { weightKg: toKg(Number(e.target.value), units) })
-                      }
-                      className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={s.reps}
-                      onChange={(e) => editSet(ex.id, s.id, { reps: Number(e.target.value) })}
-                      className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.5"
-                      value={s.rpe}
-                      onChange={(e) => editSet(ex.id, s.id, { rpe: Number(e.target.value) })}
-                      className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                    />
-                    <Button
-                      size="icon"
-                      variant={s.done ? "default" : "secondary"}
-                      className="size-10"
-                      onClick={() => toggleSet(ex.id, s.id)}
-                      aria-label="Toggle set complete"
-                    >
-                      <Check className="size-4" />
-                    </Button>
-                    <button
-                      onClick={() => removeSet(ex.id, s.id)}
-                      className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-danger"
-                      aria-label="Remove set"
-                    >
-                      <Minus className="size-4" />
-                    </button>
-                  </div>
-                  </div>
+                    <div key={s.id} className="space-y-1">
+                      {segmentLine ? (
+                        <p
+                          className={`numeric px-1 text-[0.625rem] font-semibold uppercase tracking-wide ${
+                            segment.methodId === "irondesk-black" ? "text-danger" : "text-primary"
+                          }`}
+                        >
+                          {segmentLine}
+                        </p>
+                      ) : null}
+                      <div
+                        className={`grid grid-cols-[1.5rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem_1.5rem] items-center gap-2 rounded-lg border p-1.5 ${
+                          s.done
+                            ? "border-success/35 bg-success/8"
+                            : "border-border bg-surface-2/40"
+                        }`}
+                      >
+                        <span className="numeric text-center text-sm font-bold text-muted-foreground">
+                          {i + 1}
+                        </span>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          value={fromKg(s.weightKg, units)}
+                          onChange={(e) =>
+                            editSet(ex.id, s.id, { weightKg: toKg(Number(e.target.value), units) })
+                          }
+                          className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          value={s.reps}
+                          onChange={(e) => editSet(ex.id, s.id, { reps: Number(e.target.value) })}
+                          className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.5"
+                          value={s.rpe}
+                          onChange={(e) => editSet(ex.id, s.id, { rpe: Number(e.target.value) })}
+                          className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                        <Button
+                          size="icon"
+                          variant={s.done ? "default" : "secondary"}
+                          className="size-10"
+                          onClick={() => toggleSet(ex.id, s.id)}
+                          aria-label="Toggle set complete"
+                        >
+                          <Check className="size-4" />
+                        </Button>
+                        <button
+                          onClick={() => removeSet(ex.id, s.id)}
+                          className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-danger"
+                          aria-label="Remove set"
+                        >
+                          <Minus className="size-4" />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>

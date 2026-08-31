@@ -113,6 +113,24 @@ async function requireUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Prevents a persisted mutation from crossing an account switch boundary. */
+export async function assertAuthenticatedUser(expectedUserId: string): Promise<void> {
+  // This is a local account-switch guard, not an authorization decision.
+  // getSession() reads the persisted browser session without requiring a
+  // network round trip; every database mutation is still authorized by RLS.
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw asIronDeskError(error);
+  const currentUserId = data.session?.user.id;
+  if (!currentUserId)
+    throw new IronDeskError("Your session expired. Sign in again.", "unauthenticated");
+  if (currentUserId !== expectedUserId) {
+    throw new IronDeskError(
+      "This queued change belongs to a different signed-in account.",
+      "unauthenticated",
+    );
+  }
+}
+
 function unwrap<T>(res: { data: T | null; error: { message: string } | null }): T {
   if (res.error) throw asIronDeskError(new Error(res.error.message));
   if (res.data == null) throw new IronDeskError("No data returned.", "not_found");
@@ -869,15 +887,26 @@ export async function addSessionExercise(
     targetSets?: number | null;
     targetReps?: string | null;
   },
+  identity?: { id: string; position: number },
 ): Promise<string> {
-  const existing = await supabase
-    .from("session_exercises")
-    .select("position")
-    .eq("session_id", sessionId);
-  const nextPosition = (existing.data ?? []).reduce((max, r) => Math.max(max, r.position), -1) + 1;
+  let nextPosition = identity?.position;
+  if (nextPosition === undefined) {
+    const existing = await supabase
+      .from("session_exercises")
+      .select("position")
+      .eq("session_id", sessionId);
+    if (existing.error)
+      throw asPostgrestIronDeskError(
+        existing.error,
+        "session-exercise-position",
+        "IronDesk could not prepare that exercise.",
+      );
+    nextPosition = (existing.data ?? []).reduce((max, row) => Math.max(max, row.position), -1) + 1;
+  }
   const res = await supabase
     .from("session_exercises")
     .insert({
+      ...(identity ? { id: identity.id } : {}),
       session_id: sessionId,
       exercise_id: input.exerciseId ?? null,
       exercise_name: input.name,
@@ -889,12 +918,36 @@ export async function addSessionExercise(
     })
     .select("id")
     .single();
-  return unwrap(res).id;
+  if (!res.error && res.data) return res.data.id;
+  if (res.error?.code === "23505" && identity) {
+    const confirmed = await supabase
+      .from("session_exercises")
+      .select("id")
+      .eq("id", identity.id)
+      .maybeSingle();
+    if (confirmed.error)
+      throw asPostgrestIronDeskError(
+        confirmed.error,
+        "session-exercise-insert-confirm",
+        "IronDesk could not confirm that exercise was saved.",
+      );
+    if (confirmed.data) return confirmed.data.id;
+  }
+  throw asPostgrestIronDeskError(
+    res.error,
+    "session-exercise-insert",
+    "IronDesk could not add that exercise.",
+  );
 }
 
 export async function removeSessionExercise(sessionExerciseId: string): Promise<void> {
   const { error } = await supabase.from("session_exercises").delete().eq("id", sessionExerciseId);
-  if (error) throw asIronDeskError(new Error(error.message));
+  if (error)
+    throw asPostgrestIronDeskError(
+      error,
+      "session-exercise-delete",
+      "IronDesk could not remove that exercise.",
+    );
 }
 
 export async function reorderSessionExercises(orderedIds: string[]): Promise<void> {
@@ -920,8 +973,16 @@ export async function substituteSessionExercise(
     .select("exercise_id, original_exercise_id")
     .eq("id", sessionExerciseId)
     .maybeSingle();
+  if (current.error)
+    throw asPostgrestIronDeskError(
+      current.error,
+      "session-exercise-substitute-read",
+      "IronDesk could not prepare that substitution.",
+    );
+  if (!current.data)
+    throw new IronDeskError("That exercise is no longer in this workout.", "not_found");
   const original = current.data?.original_exercise_id ?? current.data?.exercise_id ?? null;
-  const { error } = await supabase
+  const updated = await supabase
     .from("session_exercises")
     .update({
       exercise_id: replacement.exerciseId,
@@ -930,8 +991,17 @@ export async function substituteSessionExercise(
       primary_muscle: replacement.muscle ?? null,
       equipment: replacement.equipment ?? null,
     })
-    .eq("id", sessionExerciseId);
-  if (error) throw asIronDeskError(new Error(error.message));
+    .eq("id", sessionExerciseId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "session-exercise-substitute",
+      "IronDesk could not save that substitution.",
+    );
+  if (!updated.data)
+    throw new IronDeskError("That exercise is no longer in this workout.", "not_found");
 }
 
 export async function addSet(
@@ -945,15 +1015,26 @@ export async function addSet(
     methodSegment?: string | null;
     methodSegmentConfig?: MethodSegmentConfig | null;
   },
+  identity?: { id: string; setNumber: number },
 ): Promise<string> {
-  const existing = await supabase
-    .from("workout_sets")
-    .select("set_number")
-    .eq("session_exercise_id", sessionExerciseId);
-  const nextNumber = (existing.data ?? []).reduce((max, r) => Math.max(max, r.set_number), 0) + 1;
+  let nextNumber = identity?.setNumber;
+  if (nextNumber === undefined) {
+    const existing = await supabase
+      .from("workout_sets")
+      .select("set_number")
+      .eq("session_exercise_id", sessionExerciseId);
+    if (existing.error)
+      throw asPostgrestIronDeskError(
+        existing.error,
+        "workout-set-number",
+        "IronDesk could not prepare that set.",
+      );
+    nextNumber = (existing.data ?? []).reduce((max, row) => Math.max(max, row.set_number), 0) + 1;
+  }
   const res = await supabase
     .from("workout_sets")
     .insert({
+      ...(identity ? { id: identity.id } : {}),
       session_exercise_id: sessionExerciseId,
       set_number: nextNumber,
       weight_kg: input.weightKg ?? null,
@@ -966,13 +1047,28 @@ export async function addSet(
     })
     .select("id")
     .single();
-  if (res.error) {
-    // Unique (session_exercise_id, set_number) guards against duplicate taps.
-    if (res.error.message.includes("duplicate"))
-      throw new IronDeskError("That set was already added.", "conflict");
-    throw asIronDeskError(new Error(res.error.message));
+  if (!res.error && res.data) return res.data.id;
+  if (res.error?.code === "23505" && identity) {
+    const confirmed = await supabase
+      .from("workout_sets")
+      .select("id")
+      .eq("id", identity.id)
+      .maybeSingle();
+    if (confirmed.error)
+      throw asPostgrestIronDeskError(
+        confirmed.error,
+        "workout-set-insert-confirm",
+        "IronDesk could not confirm that set was saved.",
+      );
+    if (confirmed.data) return confirmed.data.id;
   }
-  return res.data.id;
+  if (res.error?.code === "23505")
+    throw new IronDeskError("That set number is already in this workout.", "conflict");
+  throw asPostgrestIronDeskError(
+    res.error,
+    "workout-set-insert",
+    "IronDesk could not add that set.",
+  );
 }
 
 export async function updateSet(
@@ -982,6 +1078,7 @@ export async function updateSet(
     reps?: number | null;
     rpe?: number | null;
     completed?: boolean;
+    completedAt?: string | null;
     isWarmup?: boolean;
     restSeconds?: number | null;
     notes?: string | null;
@@ -1004,7 +1101,9 @@ export async function updateSet(
   if (patch.notes !== undefined) payload["notes"] = patch.notes;
   if (patch.completed !== undefined) {
     payload["completed"] = patch.completed;
-    payload["completed_at"] = patch.completed ? new Date().toISOString() : null;
+    payload["completed_at"] = patch.completed
+      ? (patch.completedAt ?? new Date().toISOString())
+      : null;
   }
   if (!Object.keys(payload).length) return;
   const updated = await supabase
@@ -1013,14 +1112,24 @@ export async function updateSet(
     .eq("id", setId)
     .select("id")
     .maybeSingle();
-  if (updated.error) throw asIronDeskError(new Error(updated.error.message));
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "workout-set-update",
+      "IronDesk could not save that set.",
+    );
   if (!updated.data)
     throw new IronDeskError("That set could not be verified after saving.", "conflict");
 }
 
 export async function deleteSet(setId: string): Promise<void> {
   const { error } = await supabase.from("workout_sets").delete().eq("id", setId);
-  if (error) throw asIronDeskError(new Error(error.message));
+  if (error)
+    throw asPostgrestIronDeskError(
+      error,
+      "workout-set-delete",
+      "IronDesk could not remove that set.",
+    );
 }
 
 export async function updateSessionMeta(
@@ -1038,8 +1147,19 @@ export async function updateSessionMeta(
   if (patch.notes !== undefined) payload["notes"] = patch.notes;
   if (patch.perceivedEffort !== undefined) payload["perceived_effort"] = patch.perceivedEffort;
   if (!Object.keys(payload).length) return;
-  const { error } = await supabase.from("workout_sessions").update(payload).eq("id", sessionId);
-  if (error) throw asIronDeskError(new Error(error.message));
+  const updated = await supabase
+    .from("workout_sessions")
+    .update(payload)
+    .eq("id", sessionId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "workout-session-meta-update",
+      "IronDesk could not save those workout details.",
+    );
+  if (!updated.data) throw new IronDeskError("That workout is no longer available.", "not_found");
 }
 
 export interface WorkoutSummary {
@@ -1052,13 +1172,26 @@ export interface WorkoutSummary {
   avgRpe: number;
 }
 
-export async function finishWorkout(sessionId: string): Promise<WorkoutSummary> {
-  const { error } = await supabase
+export async function markWorkoutFinished(
+  sessionId: string,
+  completedAt = new Date().toISOString(),
+): Promise<void> {
+  const updated = await supabase
     .from("workout_sessions")
-    .update({ status: "completed", completed_at: new Date().toISOString() })
-    .eq("id", sessionId);
-  if (error) throw asIronDeskError(new Error(error.message));
+    .update({ status: "completed", completed_at: completedAt })
+    .eq("id", sessionId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "workout-session-finish",
+      "IronDesk could not finish that workout.",
+    );
+  if (!updated.data) throw new IronDeskError("That workout is no longer available.", "not_found");
+}
 
+export async function getWorkoutSummary(sessionId: string): Promise<WorkoutSummary> {
   const res = await supabase
     .from("workout_sessions")
     .select(FULL_SESSION_SELECT)
@@ -1078,12 +1211,28 @@ export async function finishWorkout(sessionId: string): Promise<WorkoutSummary> 
   };
 }
 
-export async function cancelWorkout(sessionId: string): Promise<void> {
-  const { error } = await supabase
+export async function finishWorkout(sessionId: string): Promise<WorkoutSummary> {
+  await markWorkoutFinished(sessionId);
+  return getWorkoutSummary(sessionId);
+}
+
+export async function cancelWorkout(
+  sessionId: string,
+  completedAt = new Date().toISOString(),
+): Promise<void> {
+  const updated = await supabase
     .from("workout_sessions")
-    .update({ status: "cancelled", completed_at: new Date().toISOString() })
-    .eq("id", sessionId);
-  if (error) throw asIronDeskError(new Error(error.message));
+    .update({ status: "cancelled", completed_at: completedAt })
+    .eq("id", sessionId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "workout-session-cancel",
+      "IronDesk could not cancel that workout.",
+    );
+  if (!updated.data) throw new IronDeskError("That workout is no longer available.", "not_found");
 }
 
 // --------------------------------------------------------------------- coach
@@ -2198,12 +2347,14 @@ export async function setSessionExerciseMethod(input: {
     .eq("id", input.sessionExerciseId)
     .select("id")
     .maybeSingle();
-  if (updated.error) throw asIronDeskError(new Error(updated.error.message));
-  if (!updated.data)
-    throw new IronDeskError(
-      "That exercise method could not be verified after saving.",
-      "conflict",
+  if (updated.error)
+    throw asPostgrestIronDeskError(
+      updated.error,
+      "session-exercise-method-update",
+      "IronDesk could not save that training method.",
     );
+  if (!updated.data)
+    throw new IronDeskError("That exercise method could not be verified after saving.", "conflict");
 }
 
 /* --------------------------------------- IronDesk Black specialization blocks */

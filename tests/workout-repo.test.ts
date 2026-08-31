@@ -2,17 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
+  getSession: vi.fn(),
   getUser: vi.fn(),
 }));
 
 vi.mock("../src/integrations/supabase/client", () => ({
   supabase: {
-    auth: { getUser: mocks.getUser },
+    auth: { getSession: mocks.getSession, getUser: mocks.getUser },
     from: mocks.from,
   },
 }));
 
 import {
+  addSet,
+  assertAuthenticatedUser,
   createPersonalWorkoutTemplate,
   deletePersonalWorkoutTemplate,
   isTemplateVisibleInLibrary,
@@ -20,10 +23,77 @@ import {
   startWorkoutFromTemplate,
 } from "../src/lib/irondesk/repo";
 
+describe("idempotent workout row inserts", () => {
+  it("confirms a response-lost set insert by the same client-generated primary key", async () => {
+    const insertSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { code: "23505", message: "duplicate key value violates unique constraint" },
+    });
+    const insertSelect = vi.fn(() => ({ single: insertSingle }));
+    const insert = vi.fn(() => ({ select: insertSelect }));
+    const confirmMaybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "00000000-0000-4000-a000-000000000010" },
+      error: null,
+    });
+    const confirmEq = vi.fn(() => ({ maybeSingle: confirmMaybeSingle }));
+    const confirmSelect = vi.fn(() => ({ eq: confirmEq }));
+    let calls = 0;
+    mocks.from.mockImplementation((table: string) => {
+      expect(table).toBe("workout_sets");
+      calls += 1;
+      return calls === 1 ? { insert } : { select: confirmSelect };
+    });
+
+    await expect(
+      addSet(
+        "session-exercise-1",
+        { weightKg: 100, reps: 5, rpe: 8 },
+        { id: "00000000-0000-4000-a000-000000000010", setNumber: 2 },
+      ),
+    ).resolves.toBe("00000000-0000-4000-a000-000000000010");
+    expect(insert).toHaveBeenCalledWith({
+      id: "00000000-0000-4000-a000-000000000010",
+      session_exercise_id: "session-exercise-1",
+      set_number: 2,
+      weight_kg: 100,
+      reps: 5,
+      rpe: 8,
+      is_warmup: false,
+      method_segment: null,
+      method_segment_config: {},
+    });
+    expect(confirmEq).toHaveBeenCalledWith("id", "00000000-0000-4000-a000-000000000010");
+  });
+});
+
 beforeEach(() => {
   mocks.from.mockReset();
+  mocks.getSession.mockReset();
   mocks.getUser.mockReset();
+  mocks.getSession.mockResolvedValue({
+    data: { session: { user: { id: "user-1" } } },
+    error: null,
+  });
   mocks.getUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+});
+
+describe("queued mutation account guard", () => {
+  it("checks the locally persisted session without a server getUser request", async () => {
+    await expect(assertAuthenticatedUser("user-1")).resolves.toBeUndefined();
+    expect(mocks.getSession).toHaveBeenCalledOnce();
+    expect(mocks.getUser).not.toHaveBeenCalled();
+  });
+
+  it("blocks a replay after the browser switches to another account", async () => {
+    mocks.getSession.mockResolvedValue({
+      data: { session: { user: { id: "user-2" } } },
+      error: null,
+    });
+    await expect(assertAuthenticatedUser("user-1")).rejects.toMatchObject({
+      code: "unauthenticated",
+      message: "This queued change belongs to a different signed-in account.",
+    });
+  });
 });
 
 describe("manual cardio repository write", () => {

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#050a12" />
+    <meta name="color-scheme" content="dark" />
+    <title>IronDesk is offline</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #050a12;
+        color: #f3f7ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem
+          max(1.25rem, env(safe-area-inset-bottom));
+        background:
+          radial-gradient(circle at 50% 0%, rgb(27 111 255 / 22%), transparent 42%), #050a12;
+      }
+
+      main {
+        width: min(100%, 30rem);
+        padding: 1.5rem;
+        border: 1px solid rgb(255 255 255 / 12%);
+        border-radius: 1rem;
+        background: rgb(18 24 36 / 94%);
+        box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 45%);
+        text-align: center;
+      }
+
+      img {
+        width: 5rem;
+        height: 5rem;
+        border-radius: 1rem;
+      }
+
+      .eyebrow {
+        margin: 1rem 0 0;
+        color: #65a8ff;
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0.5rem 0 0;
+        font-size: clamp(1.75rem, 7vw, 2.5rem);
+        line-height: 1;
+      }
+
+      p {
+        margin: 0.85rem auto 0;
+        max-width: 24rem;
+        color: #aab5c7;
+        line-height: 1.55;
+      }
+
+      button {
+        width: 100%;
+        margin-top: 1.25rem;
+        border: 0;
+        border-radius: 0.7rem;
+        padding: 0.8rem 1rem;
+        background: #2584ff;
+        color: #03101f;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button:focus-visible {
+        outline: 3px solid #8bc2ff;
+        outline-offset: 3px;
+      }
+
+      #network-status {
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/irondesk-192.png" width="80" height="80" alt="" />
+      <p class="eyebrow">IronDesk</p>
+      <h1>You’re offline</h1>
+      <p>
+        This page was not already open, so IronDesk cannot load it without a connection. Reconnect
+        and try again. An open workout screen may remain visible, but do not assume unsynced changes
+        are saved unless IronDesk confirms them.
+      </p>
+      <button type="button" id="retry">Try again</button>
+      <p id="network-status" role="status" aria-live="polite">Waiting for a connection…</p>
+    </main>
+    <script>
+      const status = document.getElementById("network-status");
+      const retry = document.getElementById("retry");
+
+      const refreshStatus = () => {
+        const online = navigator.onLine;
+        status.textContent = online ? "A connection is available. Try again." : "Waiting for a connection…";
+        retry.disabled = !online;
+      };
+
+      const retryAfterReconnect = () => {
+        status.textContent = "Connection restored. Retrying…";
+        retry.disabled = false;
+        window.location.reload();
+      };
+
+      retry.addEventListener("click", () => window.location.reload());
+      window.addEventListener("online", retryAfterReconnect);
+      window.addEventListener("offline", refreshStatus);
+      refreshStatus();
+    </script>
+  </body>
+</html>

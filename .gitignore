@@ -16,6 +16,10 @@ dist-ssr
 .nitro
 *.local
 
+# Local browser QA artifacts
+.playwright-cli/
+output/playwright/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

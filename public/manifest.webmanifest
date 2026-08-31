@@ -1,0 +1,61 @@
+{
+  "id": "/",
+  "name": "IronDesk",
+  "short_name": "IronDesk",
+  "description": "Plan, perform, and review strength, conditioning, recovery, and nutrition in one training workspace.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#050a12",
+  "theme_color": "#050a12",
+  "categories": ["fitness", "health", "sports"],
+  "icons": [
+    {
+      "src": "/icons/irondesk-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/irondesk-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/irondesk-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today",
+      "short_name": "Today",
+      "description": "Open today's IronDesk training view.",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icons/irondesk-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Start workout",
+      "short_name": "Workout",
+      "description": "Open the IronDesk workout screen.",
+      "url": "/workout",
+      "icons": [
+        {
+          "src": "/icons/irondesk-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
