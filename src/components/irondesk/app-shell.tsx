@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { PwaInstallButton } from "@/components/irondesk/pwa-manager";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery } from "@/lib/irondesk/queries";
 
@@ -251,6 +252,7 @@ function TopBar({ pathname }: { pathname: string }) {
           </h1>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <PwaInstallButton />
           {demo && (
             <span className="inline-flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/12 px-2 py-1 text-[0.6875rem] font-bold tracking-widest text-warning">
               <span className="size-1.5 rounded-full bg-warning" />
