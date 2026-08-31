@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="IronDesk">
-  <rect width="64" height="64" rx="12" fill="#0d0d0f"/>
-  <path d="M12 12h6v40h-6zM46 12h6v40h-6z" fill="#e11d2a"/>
-  <path d="M22 20h8v24h-8zM34 20h4c7 0 12 5 12 12s-5 12-12 12h-4zm8 7v10c3 0 5-2 5-5s-2-5-5-5z" fill="#f4f4f5"/>
-  <path d="M22 48h28v4H22z" fill="#d9a441"/>
-</svg>
