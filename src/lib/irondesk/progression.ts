@@ -372,3 +372,187 @@ export function lookupPoints(
   }
   return [];
 }
+
+/* -------------------------------------------------------------------------- */
+/* A. Double progression state                                                */
+/* -------------------------------------------------------------------------- */
+
+export interface DoubleProgressionState {
+  action: "increase" | "hold";
+  /** Load to run next session, canonical kg. */
+  nextWeightKg: number;
+  /** Reps to chase next session. */
+  nextReps: number;
+  /** Sets that reached the top of the range at the required quality. */
+  setsAtTop: number;
+  totalSets: number;
+  explanation: string;
+}
+
+export interface LoggedSet {
+  reps: number;
+  /** RIR when logged; null when unknown. */
+  rir?: number | null;
+  /** Set was performed with acceptable technique. Defaults to true. */
+  cleanForm?: boolean;
+}
+
+/**
+ * Double progression: hold the load until EVERY working set reaches the top of
+ * the range at the required RIR with clean form, then add one increment and
+ * return to the low end.
+ */
+export function doubleProgressionState(input: {
+  weightKg: number;
+  sets: readonly LoggedSet[];
+  target: RepTarget;
+  incrementKg: number;
+  /** Highest RIR that still counts as a qualifying set. Default 2. */
+  requiredRir?: number;
+  /** Prescribed set count, used for guidance before any set is logged. */
+  plannedSets?: number;
+}): DoubleProgressionState {
+  const requiredRir = input.requiredRir ?? 2;
+  const qualifying = input.sets.filter(
+    (s) =>
+      s.reps >= input.target.high &&
+      (s.cleanForm ?? true) &&
+      (s.rir == null || s.rir <= requiredRir),
+  );
+  const totalSets = input.sets.length;
+  const setsAtTop = qualifying.length;
+  const allTop = totalSets > 0 && setsAtTop === totalSets;
+
+  if (allTop) {
+    const nextWeightKg = Math.round((input.weightKg + input.incrementKg) * 100) / 100;
+    return {
+      action: "increase",
+      nextWeightKg,
+      nextReps: input.target.low,
+      setsAtTop,
+      totalSets,
+      explanation: `All ${totalSets} sets hit ${input.target.high} reps — add one increment and reset to ${input.target.low} reps.`,
+    };
+  }
+
+  return {
+    action: "hold",
+    nextWeightKg: Math.round(input.weightKg * 100) / 100,
+    nextReps: Math.min(input.target.high, Math.max(input.target.low, maxReps(input.sets) + 1)),
+    setsAtTop,
+    totalSets,
+    explanation: `Hold this load until all ${totalSets || input.plannedSets || 1} sets reach ${input.target.high} reps; then increase.`,
+  };
+}
+
+function maxReps(sets: readonly LoggedSet[]): number {
+  return sets.length ? Math.max(...sets.map((s) => s.reps)) : 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* B. Heavy + backoff                                                         */
+/* -------------------------------------------------------------------------- */
+
+export interface HeavyBackoffPlan {
+  topSet: { weightKg: number; reps: number; targetRir: number };
+  backoffSets: { weightKg: number; reps: number }[];
+  /** Percentage reduction applied to the top-set load. */
+  reductionPercent: number;
+  explanation: string;
+}
+
+const BACKOFF_MIN_PERCENT = 10;
+const BACKOFF_MAX_PERCENT = 25;
+
+/**
+ * Heavy top set at 4-7 reps and RIR 1-2, then backoff sets in a higher rep
+ * range at a bounded percentage reduction from the top-set load.
+ */
+export function heavyBackoffPlan(input: {
+  topSetWeightKg: number;
+  topSetReps?: number;
+  backoffSets?: number;
+  backoffReps?: number;
+  reductionPercent?: number;
+  incrementLb?: number;
+}): HeavyBackoffPlan {
+  const topReps = Math.min(7, Math.max(4, input.topSetReps ?? 5));
+  const backoffReps = Math.min(15, Math.max(8, input.backoffReps ?? 10));
+  const count = Math.min(4, Math.max(1, input.backoffSets ?? 2));
+  const reduction = Math.min(
+    BACKOFF_MAX_PERCENT,
+    Math.max(BACKOFF_MIN_PERCENT, input.reductionPercent ?? 15),
+  );
+  const raw = input.topSetWeightKg * (1 - reduction / 100);
+  const weightKg =
+    input.incrementLb && input.incrementLb > 0
+      ? roundToPoundIncrementKg(raw, input.incrementLb)
+      : Math.round(raw * 100) / 100;
+
+  return {
+    topSet: { weightKg: Math.round(input.topSetWeightKg * 100) / 100, reps: topReps, targetRir: 1 },
+    backoffSets: Array.from({ length: count }, () => ({ weightKg, reps: backoffReps })),
+    reductionPercent: reduction,
+    explanation: `Top set ${topReps} reps at RIR 1-2, then ${count} backoff set${count > 1 ? "s" : ""} of ${backoffReps} at −${reduction}%.`,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* C. Volume progression                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface VolumeProgressionResult {
+  action: "add" | "hold" | "reduce";
+  recommendedWeeklySets: number;
+  explanation: string;
+}
+
+/** Per-muscle weekly hard-set ceiling before returns clearly diminish. */
+export const WEEKLY_SET_CEILING = 22;
+
+/**
+ * Volume only rises after a stable week, and stops at a ceiling. Declining
+ * performance or poor readiness pulls sets back instead of adding them.
+ */
+export function volumeProgression(input: {
+  currentWeeklySets: number;
+  /** Consecutive weeks where performance held or improved. */
+  stableWeeks: number;
+  /** Reps/load trend across the last two weeks. */
+  performanceTrend: "up" | "flat" | "down";
+  averageReadiness?: number | null;
+  ceiling?: number;
+}): VolumeProgressionResult {
+  const ceiling = input.ceiling ?? WEEKLY_SET_CEILING;
+  const readiness = input.averageReadiness;
+
+  if (input.performanceTrend === "down" || (readiness != null && readiness < 50)) {
+    const reduced = Math.max(4, Math.round(input.currentWeeklySets * 0.75));
+    return {
+      action: "reduce",
+      recommendedWeeklySets: reduced,
+      explanation:
+        "Performance or recovery is trending down — cut weekly sets by about a quarter before adding again.",
+    };
+  }
+  if (input.currentWeeklySets >= ceiling) {
+    return {
+      action: "hold",
+      recommendedWeeklySets: ceiling,
+      explanation: `Already at the ${ceiling}-set weekly ceiling for this muscle — hold and progress load instead.`,
+    };
+  }
+  if (input.stableWeeks < 1 || input.performanceTrend === "flat") {
+    return {
+      action: "hold",
+      recommendedWeeklySets: input.currentWeeklySets,
+      explanation: "Hold this volume for one more stable week before adding sets.",
+    };
+  }
+  const next = Math.min(ceiling, input.currentWeeklySets + (input.currentWeeklySets < 12 ? 2 : 1));
+  return {
+    action: "add",
+    recommendedWeeklySets: next,
+    explanation: `Stable week logged — add ${next - input.currentWeeklySets} set${next - input.currentWeeklySets > 1 ? "s" : ""} for this muscle.`,
+  };
+}

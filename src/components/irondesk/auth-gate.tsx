@@ -10,8 +10,9 @@ import { accountQuery } from "@/lib/irondesk/queries";
 /** Routes rendered outside the app shell and outside the auth gate. */
 /** OAuth consent handles its own session redirect, so it renders outside the gate. */
 const CONSENT_PATH = "/.lovable/oauth/consent";
-const PUBLIC_PATHS = ["/auth", CONSENT_PATH];
-const BARE_PATHS = ["/auth", "/onboarding", CONSENT_PATH];
+const PUBLIC_INFO_PATHS = ["/privacy", "/account-deletion", "/health-connect"];
+const PUBLIC_PATHS = ["/auth", CONSENT_PATH, ...PUBLIC_INFO_PATHS];
+const BARE_PATHS = ["/auth", "/onboarding", CONSENT_PATH, ...PUBLIC_INFO_PATHS];
 
 function Splash({ label }: { label: string }) {
   return (
@@ -44,7 +45,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     enabled: Boolean(user) && ready,
   });
 
-  const needsOnboarding = Boolean(user) && Boolean(account) && !account?.profile?.onboarding_completed;
+  const needsOnboarding =
+    Boolean(user) && Boolean(account) && !account?.profile?.onboarding_completed;
 
   useEffect(() => {
     if (!ready) return;
@@ -52,7 +54,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       void navigate({ to: "/auth", search: { redirect: pathname }, replace: true });
       return;
     }
-    if (user && needsOnboarding && pathname !== "/onboarding") {
+    if (
+      user &&
+      needsOnboarding &&
+      pathname !== "/onboarding" &&
+      !PUBLIC_INFO_PATHS.includes(pathname)
+    ) {
       void navigate({ to: "/onboarding", replace: true });
       return;
     }

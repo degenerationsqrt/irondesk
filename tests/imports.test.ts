@@ -1,23 +1,41 @@
 /**
  * Import-pipeline tests.
  *
- * Every fixture here is synthetic and written inline — no third-party export
- * file is used, and nothing in these tests touches the network or the database.
+ * Every fixture here is synthetic and maintained with the tests — no third-party
+ * export file is used, and nothing touches the network or the database.
  */
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { parseCsv } from "../src/lib/imports/csv";
 import { dedupeHash, withHashes } from "../src/lib/imports/dedupe";
 import { sessionsToTcx } from "../src/lib/imports/export";
 import { parseJsonTable } from "../src/lib/imports/json";
-import { applyMapping, guessMapping, mappingIsUsable } from "../src/lib/imports/mapping";
-import { UploadError, formatOf, parseUpload, validateUpload } from "../src/lib/imports/parse";
+import {
+  applyMapping,
+  compatibleSavedImportMapping,
+  guessMapping,
+  mappingIsUsable,
+  parseSavedImportMapping,
+} from "../src/lib/imports/mapping";
+import {
+  UploadError,
+  formatOf,
+  needsFieldMappingReview,
+  parseUpload,
+  validateUpload,
+} from "../src/lib/imports/parse";
 import { FILE_IMPORT_INITIAL_JOB_STATUS } from "../src/lib/imports/repo";
 import { parseGpx, parseTcx } from "../src/lib/imports/xml";
 import type { NormalizedActivity, NormalizedMetric } from "../src/lib/imports/types";
 import { readZip } from "../src/lib/imports/zip";
 
 const enc = (text: string) => new TextEncoder().encode(text);
+const GENERIC_ACTIVITY_CLOCK_DURATION = readFileSync(
+  new URL("./fixtures/generic-activity-clock-duration.csv", import.meta.url),
+  "utf8",
+);
 
 /* ----------------------------- fixtures ----------------------------------- */
 
@@ -296,6 +314,178 @@ describe("field mapping", () => {
       90.72,
       1,
     );
+  });
+
+  it("maps activity Time as a clock duration and honors a per-cell mile suffix", async () => {
+    const result = await parseUpload(
+      "generic-activity-clock-duration.csv",
+      enc(GENERIC_ACTIVITY_CLOCK_DURATION),
+    );
+    const mapping = guessMapping(result.table!.headers);
+    const activity = result.records[0] as NormalizedActivity;
+
+    expect(mapping).toMatchObject({
+      recordKind: "activity",
+      fields: {
+        startedAt: "Date",
+        duration: "Time",
+        distance: "Distance",
+      },
+    });
+    expect(result.recognized).toBe(true);
+    expect(result.skippedFields).toEqual([]);
+    expect(needsFieldMappingReview(result)).toBe(false);
+    expect(activity).toMatchObject({
+      externalId: "900002",
+      activityType: "running",
+      name: "Morning Run",
+      durationSec: 1_725,
+      distanceM: 4_989,
+      calories: 505,
+      avgHr: 148,
+      maxHr: 177,
+    });
+  });
+
+  it("supports MM:SS and HH:MM:SS duration values", () => {
+    const table = parseCsv(
+      [
+        "date,duration,distance",
+        "2026-07-21T07:30:00Z,28:45,5 km",
+        "2026-07-22T07:30:00Z,01:02:03,1 mi",
+      ].join("\n"),
+    );
+    const mapped = applyMapping(table, guessMapping(table.headers));
+
+    expect((mapped.records[0] as NormalizedActivity).durationSec).toBe(1_725);
+    expect((mapped.records[0] as NormalizedActivity).distanceM).toBe(5_000);
+    expect((mapped.records[1] as NormalizedActivity).durationSec).toBe(3_723);
+    expect((mapped.records[1] as NormalizedActivity).distanceM).toBe(1_609);
+  });
+
+  it("uses per-cell m, km and mi units and warns instead of guessing unknown units", () => {
+    const table = parseCsv(
+      [
+        "date,distance",
+        '"2026-07-21T07:30:00Z","1,609 m"',
+        "2026-07-22T07:30:00Z,3.1 km",
+        "2026-07-23T07:30:00Z,3.1 mi",
+        "2026-07-24T07:30:00Z,5000 yd",
+      ].join("\n"),
+    );
+    const mapped = applyMapping(table, guessMapping(table.headers));
+
+    expect((mapped.records[0] as NormalizedActivity).distanceM).toBe(1_609);
+    expect((mapped.records[1] as NormalizedActivity).distanceM).toBe(3_100);
+    expect((mapped.records[2] as NormalizedActivity).distanceM).toBe(4_989);
+    expect((mapped.records[3] as NormalizedActivity).distanceM).toBeNull();
+    expect(mapped.issues).toContainEqual(
+      expect.objectContaining({
+        severity: "warning",
+        row: 5,
+        field: "distance",
+        message: expect.stringMatching(/unknown unit "yd"/i),
+      }),
+    );
+  });
+
+  it("preserves Time as the recorded timestamp for metric files", () => {
+    const table = parseCsv("Time,Weight\n2026-07-21T07:30:00Z,200");
+    const mapping = guessMapping(table.headers);
+
+    expect(mapping.recordKind).toBe("metric");
+    expect(mapping.fields).toMatchObject({ recordedAt: "Time", value: "Weight" });
+    expect(mapping.fields["duration"]).toBeUndefined();
+    expect((applyMapping(table, mapping).records[0] as NormalizedMetric).recordedAt).toBe(
+      "2026-07-21T07:30:00.000Z",
+    );
+  });
+
+  it("previews a recognized file while disclosing harmless skipped metadata", async () => {
+    const result = await parseUpload(
+      "partial.csv",
+      enc("date,duration,shoe_color\n2026-07-21T07:30:00Z,30,blue"),
+    );
+
+    expect(result.recognized).toBe(true);
+    expect(result.skippedFields).toEqual(["shoe_color"]);
+    expect(needsFieldMappingReview(result)).toBe(false);
+  });
+
+  it("requires field review when essential columns are unusable or ambiguous", async () => {
+    const unusable = await parseUpload("unknown.csv", enc(CSV_UNKNOWN));
+    const ambiguous = await parseUpload(
+      "ambiguous.csv",
+      enc("date,timestamp,value\n2026-07-21T07:30:00Z,2026-07-21T08:30:00Z,200"),
+    );
+
+    expect(unusable.recognized).toBe(false);
+    expect(needsFieldMappingReview(unusable)).toBe(true);
+    expect(ambiguous.recognized).toBe(false);
+    expect(needsFieldMappingReview(ambiguous)).toBe(true);
+    expect(ambiguous.issues[0]?.message).toMatch(/more than one column/i);
+  });
+
+  it("accepts a reviewed essential choice for an otherwise ambiguous file", async () => {
+    const result = await parseUpload(
+      "ambiguous.csv",
+      enc("date,timestamp,value\n2026-07-21T07:30:00Z,2026-07-21T08:30:00Z,200"),
+      {
+        recordKind: "metric",
+        fields: { recordedAt: "timestamp", value: "value" },
+        durationUnit: "seconds",
+        distanceUnit: "m",
+        weightUnit: "lb",
+        fixedMetricType: "bodyweight_kg",
+      },
+    );
+
+    expect(result.recognized).toBe(true);
+    expect(needsFieldMappingReview(result)).toBe(false);
+    expect((result.records[0] as NormalizedMetric).recordedAt).toBe("2026-07-21T08:30:00.000Z");
+  });
+});
+
+describe("saved field mappings", () => {
+  const mapping = {
+    recordKind: "activity" as const,
+    fields: { startedAt: "start_time", duration: "duration_min", notes: "notes" },
+    durationUnit: "minutes" as const,
+    distanceUnit: "mi" as const,
+    weightUnit: "lb" as const,
+    fixedMetricType: "steps" as const,
+  };
+  const saved = {
+    fileFormat: "csv",
+    recordKind: "activity",
+    mapping,
+  };
+
+  it("runtime-validates a saved mapping before exposing it for reuse", () => {
+    expect(parseSavedImportMapping(saved)).toEqual(mapping);
+    expect(
+      compatibleSavedImportMapping(saved, ["start_time", "duration_min", "notes"], "csv"),
+    ).toEqual(mapping);
+
+    expect(
+      parseSavedImportMapping({
+        ...saved,
+        mapping: { ...mapping, distanceUnit: "yards" },
+      }),
+    ).toBeNull();
+    expect(
+      parseSavedImportMapping({
+        ...saved,
+        recordKind: "metric",
+      }),
+    ).toBeNull();
+  });
+
+  it("never offers a saved mapping when any referenced header or the format changed", () => {
+    expect(compatibleSavedImportMapping(saved, ["start_time", "duration_min"], "csv")).toBeNull();
+    expect(
+      compatibleSavedImportMapping(saved, ["start_time", "duration_min", "notes"], "json"),
+    ).toBeNull();
   });
 });
 

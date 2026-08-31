@@ -147,6 +147,10 @@ export interface SetEntry {
   isWarmup?: boolean;
   restSeconds?: number | null;
   notes?: string | null;
+  /** Executable method segment this row belongs to, e.g. "drop-1". */
+  methodSegment?: string | null;
+  /** Persisted per-segment guidance (rest, tempo, stop rule). */
+  methodSegmentConfig?: Record<string, unknown> | null;
 }
 
 export interface WorkoutExercise {
@@ -171,6 +175,10 @@ export interface WorkoutExercise {
   sourceLoadUnit?: "kg" | "lb" | null;
   isDropSet?: boolean;
   isHeavy?: boolean;
+  /** Persisted training-method selection (additive). */
+  trainingMethodId?: string | null;
+  /** Persisted, validated method configuration blob. */
+  trainingMethodConfig?: unknown;
 }
 
 export interface ActiveWorkout {
@@ -305,6 +313,9 @@ export interface TemplateExercise {
   isDropSet: boolean;
   isHeavy: boolean;
   notes: string | null;
+  /** Method inherited by sessions started from this template. */
+  trainingMethodId?: string | null;
+  trainingMethodConfig?: Record<string, unknown> | null;
 }
 
 export interface WorkoutTemplate {
@@ -344,6 +355,9 @@ export interface PersonalTemplateDraftExercise {
   name: string;
   targetSets: number;
   targetReps: string;
+  /** Optional training method persisted on the template exercise. */
+  trainingMethodId?: string | null;
+  trainingMethodConfig?: Record<string, unknown> | null;
 }
 
 export interface PersonalTemplateDraft {

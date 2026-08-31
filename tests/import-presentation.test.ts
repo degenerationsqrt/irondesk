@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { parseCsv } from "@/lib/imports/csv";
+import { applyMapping, guessMapping } from "@/lib/imports/mapping";
 import { importRecordTypeLabel, importRecordValueLabel } from "@/lib/imports/presentation";
 import type { NormalizedActivity, NormalizedMetric } from "@/lib/imports/types";
 
@@ -43,5 +45,20 @@ describe("import preview presentation", () => {
   it("shows imported distance in miles for imperial and kilometers for metric", () => {
     expect(importRecordValueLabel(run, "imperial")).toBe("30 min · 3.11 mi · 350 kcal");
     expect(importRecordValueLabel(run, "metric")).toBe("30 min · 5.00 km · 350 kcal");
+  });
+
+  it("presents a clock-duration activity with a per-cell mile distance correctly", () => {
+    const table = parseCsv(
+      [
+        "Activity ID,Activity Type,Date,Title,Distance,Calories,Time,Avg HR,Max HR",
+        "900002,Running,2026-07-21 07:30:00,Morning Run,3.10 mi,505,00:28:45,148,177",
+      ].join("\n"),
+    );
+    const activity = applyMapping(table, guessMapping(table.headers))
+      .records[0] as NormalizedActivity;
+
+    expect(importRecordTypeLabel(activity)).toBe("running");
+    expect(importRecordValueLabel(activity, "imperial")).toBe("29 min · 3.10 mi · 505 kcal");
+    expect(importRecordValueLabel(activity, "metric")).toBe("29 min · 4.99 km · 505 kcal");
   });
 });

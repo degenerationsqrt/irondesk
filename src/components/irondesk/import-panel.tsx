@@ -22,8 +22,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { applyMapping, guessMapping, mappingIsUsable } from "@/lib/imports/mapping";
-import { UploadError, assertAllowedFormat, parseUpload, validateUpload } from "@/lib/imports/parse";
+import {
+  applyMapping,
+  compatibleSavedImportMapping,
+  guessMapping,
+  mappingIsUsable,
+} from "@/lib/imports/mapping";
+import {
+  UploadError,
+  assertAllowedFormat,
+  needsFieldMappingReview,
+  parseUpload,
+  validateUpload,
+} from "@/lib/imports/parse";
 import { importRecordTypeLabel, importRecordValueLabel } from "@/lib/imports/presentation";
 import { importedSourceLabel } from "@/lib/imports/provenance";
 import { importKeys } from "@/lib/imports/queries";
@@ -55,6 +66,14 @@ interface Loaded {
   format: FileFormat;
 }
 
+const NO_SAVED_MAPPING = "__no_saved_mapping__";
+
+const mappingNameFromFile = (fileName: string) =>
+  fileName
+    .replace(/\.[^.]+$/, "")
+    .trim()
+    .slice(0, 120) || "Custom import";
+
 export function ImportCard({
   sourceType,
   title,
@@ -62,6 +81,7 @@ export function ImportCard({
   blurb,
   formats,
   acceptedFormats,
+  savedMappings,
 }: {
   sourceType: SourceType;
   title: string;
@@ -69,6 +89,7 @@ export function ImportCard({
   blurb: string;
   formats: string;
   acceptedFormats: readonly FileFormat[];
+  savedMappings: readonly importRepo.SavedMapping[];
 }) {
   const queryClient = useQueryClient();
   const units = useUnits();
@@ -79,6 +100,12 @@ export function ImportCard({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<ImportMapping>(DEFAULT_MAPPING);
+  const [mappingCanReturn, setMappingCanReturn] = useState(false);
+  const [mappingName, setMappingName] = useState("Custom import");
+  const [selectedSavedMappingId, setSelectedSavedMappingId] = useState(NO_SAVED_MAPPING);
+  const [activeSavedMappingId, setActiveSavedMappingId] = useState<string | null>(null);
+  const [mappingNotice, setMappingNotice] = useState<string | null>(null);
+  const [savingMapping, setSavingMapping] = useState(false);
   const [job, setJob] = useState<importRepo.ImportJob | null>(null);
   const accept = useMemo(
     () => acceptedFormats.flatMap((format) => SUPPORTED_EXTENSIONS[format]).join(","),
@@ -92,6 +119,12 @@ export function ImportCard({
     setResult(null);
     setJob(null);
     setMapping(DEFAULT_MAPPING);
+    setMappingCanReturn(false);
+    setMappingName("Custom import");
+    setSelectedSavedMappingId(NO_SAVED_MAPPING);
+    setActiveSavedMappingId(null);
+    setMappingNotice(null);
+    setSavingMapping(false);
     if (inputRef.current) inputRef.current.value = "";
   }, []);
 
@@ -99,6 +132,10 @@ export function ImportCard({
     async (file: File) => {
       setError(null);
       setJob(null);
+      setMappingName(mappingNameFromFile(file.name));
+      setSelectedSavedMappingId(NO_SAVED_MAPPING);
+      setActiveSavedMappingId(null);
+      setMappingNotice(null);
       setStage("parsing");
       try {
         const format = validateUpload({ name: file.name, size: file.size, type: file.type });
@@ -107,8 +144,9 @@ export function ImportCard({
         const parsed = await parseUpload(file.name, bytes, undefined, acceptedFormats);
         setLoaded({ name: file.name, size: file.size, bytes, format });
         setResult(parsed);
-        if (!parsed.recognized && parsed.table) {
-          setMapping(guessMapping(parsed.table.headers));
+        if (parsed.table) setMapping(guessMapping(parsed.table.headers));
+        if (needsFieldMappingReview(parsed)) {
+          setMappingCanReturn(false);
           setStage("mapping");
         } else {
           setStage("preview");
@@ -125,31 +163,147 @@ export function ImportCard({
     [acceptedFormats, title],
   );
 
+  const previewWithMapping = useCallback(
+    (nextMapping: ImportMapping): boolean => {
+      if (!result?.table) return false;
+      if (!mappingIsUsable(nextMapping)) {
+        setError(
+          nextMapping.recordKind === "activity"
+            ? "Map the start time column before importing."
+            : "Map the timestamp and value columns before importing.",
+        );
+        return false;
+      }
+      const mapped = applyMapping(result.table, nextMapping);
+      if (!mapped.records.length) {
+        setError("That mapping produced no usable rows. Check the columns and try again.");
+        return false;
+      }
+      setError(null);
+      setResult({
+        ...result,
+        recognized: true,
+        records: mapped.records,
+        issues: mapped.issues,
+        skippedFields: mapped.skippedFields,
+      });
+      setMappingCanReturn(false);
+      setStage("preview");
+      return true;
+    },
+    [result],
+  );
+
   const applyWizard = useCallback(() => {
+    setMappingNotice(null);
+    previewWithMapping(mapping);
+  }, [mapping, previewWithMapping]);
+
+  const reviewMapping = useCallback(() => {
     if (!result?.table) return;
-    if (!mappingIsUsable(mapping)) {
-      setError(
-        mapping.recordKind === "activity"
-          ? "Map the start time column before importing."
-          : "Map the timestamp and value columns before importing.",
-      );
-      return;
-    }
-    const mapped = applyMapping(result.table, mapping);
-    if (!mapped.records.length) {
-      setError("That mapping produced no usable rows. Check the columns and try again.");
+    setError(null);
+    setMappingNotice(null);
+    setMappingCanReturn(true);
+    setStage("mapping");
+  }, [result]);
+
+  const leaveMapping = useCallback(() => {
+    if (!mappingCanReturn) {
+      reset();
       return;
     }
     setError(null);
-    setResult({
-      ...result,
-      recognized: true,
-      records: mapped.records,
-      issues: mapped.issues,
-      skippedFields: mapped.skippedFields,
-    });
+    setMappingCanReturn(false);
     setStage("preview");
-  }, [mapping, result]);
+  }, [mappingCanReturn, reset]);
+
+  const compatibleSavedMappings = useMemo(() => {
+    if (!loaded || !result?.table) return [];
+    const headers = result.table.headers;
+    return savedMappings.filter(
+      (saved) => compatibleSavedImportMapping(saved, headers, loaded.format) !== null,
+    );
+  }, [loaded, result, savedMappings]);
+
+  const sameFormatSavedMappingCount = useMemo(() => {
+    if (!loaded || (loaded.format !== "csv" && loaded.format !== "json")) return 0;
+    return savedMappings.filter((saved) => saved.fileFormat === loaded.format).length;
+  }, [loaded, savedMappings]);
+
+  const applySavedMapping = useCallback(() => {
+    if (!loaded || !result?.table || selectedSavedMappingId === NO_SAVED_MAPPING) return;
+    setMappingNotice(null);
+    const saved = savedMappings.find((candidate) => candidate.id === selectedSavedMappingId);
+    const resolved = saved
+      ? compatibleSavedImportMapping(saved, result.table.headers, loaded.format)
+      : null;
+    if (!saved || !resolved) {
+      setError(
+        "That saved mapping was not applied because its file type or referenced headers no longer match this file.",
+      );
+      return;
+    }
+
+    setMapping(resolved);
+    setActiveSavedMappingId(saved.id);
+    setMappingName(saved.sourceLabel);
+    if (previewWithMapping(resolved)) {
+      setMappingNotice(
+        `Applied "${saved.sourceLabel}" after verifying every referenced column is present.`,
+      );
+    }
+  }, [loaded, previewWithMapping, result, savedMappings, selectedSavedMappingId]);
+
+  const saveCurrentMapping = useCallback(async () => {
+    if (!loaded || (loaded.format !== "csv" && loaded.format !== "json")) return;
+    if (!mappingIsUsable(mapping)) {
+      setError(
+        mapping.recordKind === "activity"
+          ? "Map the start time column before saving this layout."
+          : "Map the timestamp and value columns before saving this layout.",
+      );
+      return;
+    }
+
+    const trimmedName = mappingName.trim();
+    const duplicate = savedMappings.find(
+      (saved) =>
+        saved.id !== activeSavedMappingId &&
+        saved.fileFormat === loaded.format &&
+        saved.sourceLabel === trimmedName,
+    );
+    if (duplicate) {
+      setError(
+        `A saved ${loaded.format.toUpperCase()} mapping already uses "${trimmedName}". Apply that mapping first if you want to update it.`,
+      );
+      return;
+    }
+
+    setSavingMapping(true);
+    setError(null);
+    setMappingNotice(null);
+    try {
+      const savedId = await importRepo.saveMapping({
+        ...(activeSavedMappingId ? { id: activeSavedMappingId } : {}),
+        sourceLabel: trimmedName,
+        fileFormat: loaded.format,
+        recordKind: mapping.recordKind,
+        mapping,
+      });
+      setActiveSavedMappingId(savedId);
+      setMappingName(trimmedName);
+      setMappingNotice(
+        activeSavedMappingId
+          ? `Updated saved mapping "${trimmedName}". It will only be offered for files with all referenced columns.`
+          : `Saved mapping "${trimmedName}". It will only be offered for files with all referenced columns.`,
+      );
+      void queryClient.invalidateQueries({ queryKey: importKeys.mappings });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The mapping could not be saved.");
+    } finally {
+      setSavingMapping(false);
+    }
+  }, [activeSavedMappingId, loaded, mapping, mappingName, queryClient, savedMappings]);
 
   const commit = useCallback(async () => {
     if (!result || !loaded) return;
@@ -174,21 +328,6 @@ export function ImportCard({
       setStage("preview");
     }
   }, [loaded, queryClient, result, sourceType]);
-
-  const saveMappingForLater = useCallback(async () => {
-    if (!loaded) return;
-    try {
-      await importRepo.saveMapping({
-        sourceLabel: loaded.name.replace(/\.[^.]+$/, ""),
-        fileFormat: loaded.format,
-        recordKind: mapping.recordKind,
-        mapping,
-      });
-      void queryClient.invalidateQueries({ queryKey: importKeys.mappings });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The mapping could not be saved.");
-    }
-  }, [loaded, mapping, queryClient]);
 
   const errors = result?.issues.filter((issue) => issue.severity === "error") ?? [];
   const warnings = result?.issues.filter((issue) => issue.severity === "warning") ?? [];
@@ -259,15 +398,38 @@ export function ImportCard({
         </p>
       )}
 
+      {mappingNotice && (
+        <p className="mt-3 flex items-start gap-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-xs text-success">
+          <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />
+          <span>{mappingNotice}</span>
+        </p>
+      )}
+
+      {result?.table && loaded && (stage === "mapping" || stage === "preview") && (
+        <SavedMappingChooser
+          compatibleMappings={compatibleSavedMappings}
+          unavailableCount={sameFormatSavedMappingCount - compatibleSavedMappings.length}
+          selectedId={selectedSavedMappingId}
+          onSelectedIdChange={setSelectedSavedMappingId}
+          onApply={applySavedMapping}
+        />
+      )}
+
       {stage === "mapping" && result?.table && (
         <MappingWizard
           headers={result.table.headers}
           mapping={mapping}
           onChange={setMapping}
-          onCancel={reset}
+          onCancel={leaveMapping}
           onApply={applyWizard}
-          onSave={saveMappingForLater}
           sample={result.table.rows.slice(0, 3)}
+          canReturn={mappingCanReturn}
+          mappingName={mappingName}
+          onMappingNameChange={setMappingName}
+          canSave={loaded?.format === "csv" || loaded?.format === "json"}
+          isUpdatingSavedMapping={activeSavedMappingId !== null}
+          savingMapping={savingMapping}
+          onSave={saveCurrentMapping}
         />
       )}
 
@@ -295,8 +457,8 @@ export function ImportCard({
               </p>
             )}
             {result.skippedFields.length > 0 && (
-              <p className="mt-1 text-muted-foreground">
-                Not stored: {result.skippedFields.slice(0, 8).join(", ")}
+              <p className="mt-1 font-medium text-warning">
+                Not stored (skipped): {result.skippedFields.slice(0, 8).join(", ")}
                 {result.skippedFields.length > 8 ? "…" : ""}
               </p>
             )}
@@ -360,6 +522,16 @@ export function ImportCard({
                   ? `Import ${result.records.length} valid records`
                   : `Import ${result.records.length} records`}
               </Button>
+              {result.table && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={reviewMapping}
+                  disabled={stage === "committing"}
+                >
+                  Review / edit field mapping
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={reset} disabled={stage === "committing"}>
                 Cancel
               </Button>
@@ -368,6 +540,66 @@ export function ImportCard({
         </div>
       )}
     </SectionCard>
+  );
+}
+
+function SavedMappingChooser({
+  compatibleMappings,
+  unavailableCount,
+  selectedId,
+  onSelectedIdChange,
+  onApply,
+}: {
+  compatibleMappings: readonly importRepo.SavedMapping[];
+  unavailableCount: number;
+  selectedId: string;
+  onSelectedIdChange: (id: string) => void;
+  onApply: () => void;
+}) {
+  const selectedIsAvailable = compatibleMappings.some((mapping) => mapping.id === selectedId);
+  const value = selectedIsAvailable ? selectedId : NO_SAVED_MAPPING;
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 p-3">
+      <p className="text-xs font-semibold text-foreground">Use a saved column layout</p>
+      {compatibleMappings.length ? (
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <Select value={value} onValueChange={onSelectedIdChange}>
+            <SelectTrigger className="h-9 min-w-0 flex-1 text-sm" aria-label="Saved field mapping">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_SAVED_MAPPING} disabled>
+                Choose a compatible mapping
+              </SelectItem>
+              {compatibleMappings.map((mapping) => (
+                <SelectItem key={mapping.id} value={mapping.id}>
+                  {mapping.sourceLabel} ({mapping.recordKind})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" disabled={!selectedIsAvailable} onClick={onApply}>
+            Apply saved mapping
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">
+          No saved mapping matches this file type and every referenced column.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">
+        Saved mappings are never applied automatically. IronDesk checks the file type and exact
+        column names again when you press Apply.
+      </p>
+      {unavailableCount > 0 && (
+        <p className="mt-1 text-xs text-warning">
+          {unavailableCount} saved mapping{unavailableCount === 1 ? " is" : "s are"} hidden because
+          {unavailableCount === 1 ? " its" : " their"} referenced columns are missing or the saved
+          data is invalid.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -434,6 +666,12 @@ function MappingWizard({
   onChange,
   onApply,
   onCancel,
+  canReturn,
+  mappingName,
+  onMappingNameChange,
+  canSave,
+  isUpdatingSavedMapping,
+  savingMapping,
   onSave,
 }: {
   headers: string[];
@@ -442,9 +680,19 @@ function MappingWizard({
   onChange: (mapping: ImportMapping) => void;
   onApply: () => void;
   onCancel: () => void;
+  canReturn: boolean;
+  mappingName: string;
+  onMappingNameChange: (name: string) => void;
+  canSave: boolean;
+  isUpdatingSavedMapping: boolean;
+  savingMapping: boolean;
   onSave: () => void | Promise<void>;
 }) {
   const targets = mapping.recordKind === "activity" ? ACTIVITY_TARGETS : METRIC_TARGETS;
+  const unmappedHeaders = useMemo(() => {
+    const mapped = new Set(Object.values(mapping.fields).filter(Boolean));
+    return headers.filter((header) => !mapped.has(header));
+  }, [headers, mapping.fields]);
   const previewOf = useMemo(() => {
     const index = new Map(headers.map((h, i) => [h, i]));
     return (header: string | undefined) => {
@@ -470,8 +718,15 @@ function MappingWizard({
   return (
     <div className="mt-4 space-y-4">
       <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-        These columns were not recognized. Assign them below — nothing is imported until you
-        confirm.
+        {canReturn
+          ? "Review or change the mapping below, then preview the normalized records again."
+          : "Review the proposed mapping below — nothing is imported until you confirm it."}
+        {unmappedHeaders.length > 0 && (
+          <span className="mt-1 block">
+            Currently unmapped: {unmappedHeaders.slice(0, 8).join(", ")}
+            {unmappedHeaders.length > 8 ? "…" : ""}
+          </span>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -493,7 +748,7 @@ function MappingWizard({
         {mapping.recordKind === "activity" ? (
           <>
             <div className="space-y-1.5">
-              <Label className="text-xs">Duration unit</Label>
+              <Label className="text-xs">Unit for plain-number durations</Label>
               <Select
                 value={mapping.durationUnit}
                 onValueChange={(value) =>
@@ -511,7 +766,7 @@ function MappingWizard({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Distance unit</Label>
+              <Label className="text-xs">Unit for distances without a suffix</Label>
               <Select
                 value={mapping.distanceUnit}
                 onValueChange={(value) =>
@@ -599,15 +854,56 @@ function MappingWizard({
         ))}
       </div>
 
+      {mapping.recordKind === "activity" && (
+        <p className="text-xs text-muted-foreground">
+          Clock durations such as 28:45 or 01:02:03 are detected automatically. A distance ending in
+          mi, km or m overrides the unit selected above.
+        </p>
+      )}
+
+      {canSave && (
+        <div className="rounded-lg border border-border/70 bg-muted/20 p-3">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="mapping-name" className="text-xs">
+                Mapping name
+              </Label>
+              <Input
+                id="mapping-name"
+                value={mappingName}
+                maxLength={120}
+                onChange={(event) => onMappingNameChange(event.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={savingMapping || !mappingIsUsable(mapping) || !mappingName.trim()}
+              onClick={() => void onSave()}
+            >
+              {savingMapping ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : isUpdatingSavedMapping ? (
+                "Update saved mapping"
+              ) : (
+                "Save mapping"
+              )}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            This stores the reviewed column layout only; it does not import the file. IronDesk will
+            offer it again only when the file type and every referenced column still match.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button size="sm" onClick={onApply}>
           Preview normalized records
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void onSave()}>
-          Save mapping for later
-        </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
+          {canReturn ? "Back to preview" : "Cancel import"}
         </Button>
       </div>
     </div>

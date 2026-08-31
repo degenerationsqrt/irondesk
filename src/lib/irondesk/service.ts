@@ -9,6 +9,7 @@ import {
 } from "./data";
 import { LEGACY_TEMPLATES } from "./legacy-templates";
 import { demoProgressionContext, type ProgressionContext } from "./progression-source";
+import type { BlackWindow } from "./method-composition";
 import * as repo from "./repo";
 import type {
   ActiveWorkout,
@@ -49,6 +50,8 @@ export interface IronDeskService {
   getWorkoutTemplate(id: string): Promise<WorkoutTemplate | null>;
   /** Completed working sets + readiness feeding working-weight suggestions. */
   getProgression(): Promise<ProgressionContext>;
+  /** Open/past IronDesk Black specialization windows (live only). */
+  getSpecializationWindows(): Promise<BlackWindow[]>;
 }
 
 const ok = <T>(value: T): Promise<T> => Promise.resolve(value);
@@ -68,6 +71,8 @@ export const demoService: IronDeskService = {
   getWorkoutTemplates: () => ok(LEGACY_TEMPLATES),
   getWorkoutTemplate: (id) => ok(LEGACY_TEMPLATES.find((t) => t.id === id) ?? null),
   getProgression: () => ok(demoProgressionContext(exercises, recoveryData.readiness)),
+  // Demo mode is read-only: no account, so no specialization windows.
+  getSpecializationWindows: () => ok([]),
 };
 
 export const liveService: IronDeskService = {
@@ -85,6 +90,7 @@ export const liveService: IronDeskService = {
   getWorkoutTemplates: () => repo.getWorkoutTemplates(),
   getWorkoutTemplate: (id) => repo.getWorkoutTemplate(id),
   getProgression: () => repo.getProgressionContext(),
+  getSpecializationWindows: () => repo.listSpecializationWindows(),
 };
 
 export function serviceFor(mode: ServiceMode): IronDeskService {
@@ -107,4 +113,5 @@ export const queryKeys = {
   templates: (mode: string) => ["irondesk", mode, "templates"] as const,
   template: (mode: string, id: string) => ["irondesk", mode, "template", id] as const,
   progression: (mode: string) => ["irondesk", mode, "progression"] as const,
+  specializationWindows: (mode: string) => ["irondesk", mode, "specialization-windows"] as const,
 };

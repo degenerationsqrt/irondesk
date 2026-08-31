@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { IronDeskError, asIronDeskError } from "@/lib/irondesk/errors";
 
 import { withHashes } from "./dedupe";
+import { parseSavedImportMapping } from "./mapping";
 import type { FileFormat, NormalizedRecord, ParseIssue, SourceType } from "./types";
 
 const NORMALIZED_VERSION = 1;
@@ -269,20 +270,56 @@ export async function listSavedMappings(): Promise<SavedMapping[]> {
 }
 
 export async function saveMapping(input: {
+  id?: string;
   sourceLabel: string;
-  fileFormat: string;
-  recordKind: string;
+  fileFormat: "csv" | "json";
+  recordKind: "activity" | "metric";
   mapping: unknown;
-}): Promise<void> {
+}): Promise<string> {
   const userId = await requireUser();
-  const { error } = await supabase.from("saved_import_mappings").insert({
+  const sourceLabel = input.sourceLabel.trim();
+  if (!sourceLabel || sourceLabel.length > 120) {
+    throw new IronDeskError("Mapping names must be between 1 and 120 characters.", "validation");
+  }
+  const mapping = parseSavedImportMapping({
+    fileFormat: input.fileFormat,
+    recordKind: input.recordKind,
+    mapping: input.mapping,
+  });
+  if (!mapping) {
+    throw new IronDeskError(
+      "The field mapping is incomplete or contains unsupported values.",
+      "validation",
+    );
+  }
+  const payload = {
     user_id: userId,
-    source_label: input.sourceLabel,
+    source_label: sourceLabel,
     file_format: input.fileFormat,
     record_kind: input.recordKind,
-    mapping: input.mapping as never,
-  });
+    mapping: mapping as never,
+  };
+
+  if (input.id) {
+    const { data, error } = await supabase
+      .from("saved_import_mappings")
+      .update(payload)
+      .eq("id", input.id)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+    if (error) throw asIronDeskError(error, "The field mapping could not be updated.");
+    if (!data) throw new IronDeskError("That saved mapping is no longer available.", "not_found");
+    return data.id;
+  }
+
+  const { data, error } = await supabase
+    .from("saved_import_mappings")
+    .insert(payload)
+    .select("id")
+    .single();
   if (error) throw asIronDeskError(error, "The field mapping could not be saved.");
+  return data.id;
 }
 
 export async function deleteMapping(id: string): Promise<void> {

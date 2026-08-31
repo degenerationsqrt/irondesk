@@ -1,12 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { PageHeader } from "@/components/irondesk/app-shell";
 import { DataRow, Pill, SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -54,7 +64,7 @@ const GOALS = [
 ];
 
 function SettingsPage() {
-  const { mode, demo, user } = useAuth();
+  const { mode, demo, user, deleteAccount } = useAuth();
   const invalidate = useIronDeskInvalidate();
   const { data: account } = useQuery({ ...accountQuery, enabled: mode === "live" });
   const { data: catalog } = useQuery({ ...equipmentCatalogQuery, enabled: mode === "live" });
@@ -87,6 +97,11 @@ function SettingsPage() {
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [sampleState, setSampleState] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!account) return;
@@ -190,6 +205,20 @@ function SettingsPage() {
       setHeight(String(fromCm(toCm(Number(height), units), next)));
     }
     setUnits(next);
+  };
+
+  const permanentlyDeleteAccount = async () => {
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount({ password: deletePassword, confirmation: deleteConfirmation });
+      window.location.assign("/auth");
+    } catch (caught) {
+      setDeleteError(
+        caught instanceof Error ? caught.message : "IronDesk could not delete the account.",
+      );
+      setDeleteBusy(false);
+    }
   };
 
   if (demo) {
@@ -431,12 +460,98 @@ function SettingsPage() {
             <DataRow label="File imports (FIT / TCX / GPX / CSV / JSON / ZIP)" value="Available" />
             <DataRow label="Garmin-compatible export" value="TCX v2" />
             <DataRow label="Device sync" value="Manage in Connections" />
-            <DataRow label="Account deletion" value="Not implemented yet" />
+            <DataRow label="Account deletion" value="Self-service available" />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
             Use Connections &amp; Imports to review device-sync access, imported activities and file
-            imports. Account deletion is not implemented yet.
+            imports. Review the{" "}
+            <Link to="/privacy" className="text-primary hover:underline">
+              privacy policy
+            </Link>{" "}
+            or the public{" "}
+            <Link to="/account-deletion" className="text-primary hover:underline">
+              account-deletion guide
+            </Link>
+            .
           </p>
+          <div className="mt-4 border-t border-danger/30 pt-4">
+            <p className="text-sm font-semibold text-danger">Danger zone</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Permanently removes your IronDesk account, training records, imports, health-derived
+              records and linked-device credentials. This cannot be undone and does not delete the
+              source records held by Health Connect on your phone.
+            </p>
+            <AlertDialog
+              open={deleteOpen}
+              onOpenChange={(open) => {
+                if (deleteBusy) return;
+                setDeleteOpen(open);
+                if (!open) {
+                  setDeletePassword("");
+                  setDeleteConfirmation("");
+                  setDeleteError(null);
+                }
+              }}
+            >
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="mt-3">
+                  <Trash2 className="size-4" /> Delete my account
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Permanently delete your IronDesk account?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This deletes the signed-in account and its IronDesk data. Enter your current
+                    password and type DELETE exactly. There is no recovery or undo.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="delete-password">Current password</Label>
+                    <Input
+                      id="delete-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={deletePassword}
+                      onChange={(event) => setDeletePassword(event.target.value)}
+                      disabled={deleteBusy}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="delete-confirmation">Type DELETE to confirm</Label>
+                    <Input
+                      id="delete-confirmation"
+                      autoComplete="off"
+                      value={deleteConfirmation}
+                      onChange={(event) => setDeleteConfirmation(event.target.value)}
+                      disabled={deleteBusy}
+                    />
+                  </div>
+                  {deleteError && (
+                    <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+                      {deleteError}
+                    </p>
+                  )}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleteBusy}>Keep my account</AlertDialogCancel>
+                  <Button
+                    variant="destructive"
+                    onClick={() => void permanentlyDeleteAccount()}
+                    disabled={deleteBusy || !deletePassword || deleteConfirmation !== "DELETE"}
+                  >
+                    {deleteBusy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}{" "}
+                    Delete permanently
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
         </SectionCard>
       </div>
     </div>

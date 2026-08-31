@@ -17,6 +17,7 @@ import {
   deletePersonalWorkoutTemplate,
   isTemplateVisibleInLibrary,
   logCardioSession,
+  startWorkoutFromTemplate,
 } from "../src/lib/irondesk/repo";
 
 beforeEach(() => {
@@ -158,6 +159,44 @@ describe("personal workout template repository writes", () => {
     expect(finalizeQuery.eq).toHaveBeenCalledWith("release_gate", "coach_review");
     expect(finalizeQuery.eq).toHaveBeenCalledWith("library_startable", false);
     expect(finalizeQuery.select).toHaveBeenCalledWith("id");
+  });
+
+  it("refuses an ineligible or unsafe method before creating a personal template", async () => {
+    const libraryEq = vi.fn().mockResolvedValue({
+      data: [{ id: "exercise-1", name: "Back Squat", equipment: "Barbell" }],
+      error: null,
+    });
+    const libraryIn = vi.fn(() => ({ eq: libraryEq }));
+    const librarySelect = vi.fn(() => ({ in: libraryIn }));
+    mocks.from.mockImplementation((table: string) => {
+      if (table === "exercises") return { select: librarySelect };
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    await expect(
+      createPersonalWorkoutTemplate(
+        {
+          name: "Unsafe method",
+          exercises: [
+            {
+              exerciseId: "exercise-1",
+              name: "Back Squat",
+              targetSets: 3,
+              targetReps: "8",
+              trainingMethodId: "drop-sets",
+            },
+          ],
+        },
+        {
+          experience: "expert",
+          monthsTraining: 36,
+          sessionsLast28Days: 14,
+          averageReadiness: 80,
+          specializationWindowOpen: false,
+        },
+      ),
+    ).rejects.toThrow(/Back Squat:.*not permitted/i);
+    expect(mocks.from).toHaveBeenCalledTimes(1);
   });
 
   it("deletes the new personal parent when child creation fails", async () => {
@@ -325,5 +364,222 @@ describe("personal workout template repository writes", () => {
       "IronDesk Originals cannot be deleted",
     );
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("deletes an explicitly verified owner-scoped personal template", async () => {
+    const existingMaybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "personal-1", user_id: "user-1", is_system: false },
+      error: null,
+    });
+    const existingQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: existingMaybeSingle,
+    };
+    existingQuery.select.mockReturnValue(existingQuery);
+    existingQuery.eq.mockReturnValue(existingQuery);
+
+    const removedSelect = vi.fn().mockResolvedValue({
+      data: [{ id: "personal-1" }],
+      error: null,
+    });
+    const removedQuery = { eq: vi.fn(), select: removedSelect };
+    removedQuery.eq.mockReturnValue(removedQuery);
+    const remove = vi.fn(() => removedQuery);
+    let calls = 0;
+    mocks.from.mockImplementation((table: string) => {
+      expect(table).toBe("workout_templates");
+      calls += 1;
+      return calls === 1 ? existingQuery : { delete: remove };
+    });
+
+    await expect(deletePersonalWorkoutTemplate("personal-1")).resolves.toBeUndefined();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(removedQuery.eq).toHaveBeenCalledWith("id", "personal-1");
+    expect(removedQuery.eq).toHaveBeenCalledWith("user_id", "user-1");
+    expect(removedQuery.eq).toHaveBeenCalledWith("is_system", false);
+    expect(removedSelect).toHaveBeenCalledWith("id");
+  });
+
+  it("preserves structured PostgREST diagnostics when an owner delete fails", async () => {
+    const existingMaybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "personal-2", user_id: "user-1", is_system: false },
+      error: null,
+    });
+    const existingQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: existingMaybeSingle,
+    };
+    existingQuery.select.mockReturnValue(existingQuery);
+    existingQuery.eq.mockReturnValue(existingQuery);
+
+    const removedSelect = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "42501",
+        message: "permission denied for table workout_templates",
+        details: "RLS rejected the delete",
+        hint: "Check the active session and project",
+      },
+    });
+    const removedQuery = { eq: vi.fn(), select: removedSelect };
+    removedQuery.eq.mockReturnValue(removedQuery);
+    let calls = 0;
+    mocks.from.mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? existingQuery : { delete: vi.fn(() => removedQuery) };
+    });
+
+    await expect(deletePersonalWorkoutTemplate("personal-2")).rejects.toMatchObject({
+      code: "database",
+      message:
+        "IronDesk could not delete that personal workout. Reference: workout-template-delete/42501.",
+      diagnostic: {
+        operation: "workout-template-delete",
+        code: "42501",
+        details: "RLS rejected the delete",
+        hint: "Check the active session and project",
+      },
+    });
+  });
+
+  it("reports a conflict when a verified owner delete affects zero rows", async () => {
+    const existingMaybeSingle = vi.fn().mockResolvedValue({
+      data: { id: "personal-3", user_id: "user-1", is_system: false },
+      error: null,
+    });
+    const existingQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: existingMaybeSingle,
+    };
+    existingQuery.select.mockReturnValue(existingQuery);
+    existingQuery.eq.mockReturnValue(existingQuery);
+
+    const removedSelect = vi.fn().mockResolvedValue({ data: [], error: null });
+    const removedQuery = { eq: vi.fn(), select: removedSelect };
+    removedQuery.eq.mockReturnValue(removedQuery);
+    let calls = 0;
+    mocks.from.mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? existingQuery : { delete: vi.fn(() => removedQuery) };
+    });
+
+    await expect(deletePersonalWorkoutTemplate("personal-3")).rejects.toMatchObject({
+      code: "conflict",
+      message: "That personal workout was not deleted. Refresh and try again.",
+    });
+  });
+});
+
+describe("method-aware template start", () => {
+  it("preflights the canonical movement and hydrates the selected method into the session", async () => {
+    const activeReturns = vi.fn().mockResolvedValue({ data: [], error: null });
+    const activeLimit = vi.fn(() => ({ returns: activeReturns }));
+    const activeOrder = vi.fn(() => ({ limit: activeLimit }));
+    const activeIn = vi.fn(() => ({ order: activeOrder }));
+    const activeSelect = vi.fn(() => ({ in: activeIn }));
+
+    const templateRow = {
+      id: "template-method",
+      user_id: "user-1",
+      name: "Cable intensity",
+      focus: "Chest",
+      notes: null,
+      is_system: false,
+      source_key: null,
+      source_name: null,
+      source_version: 1,
+      environment: "gym",
+      workout_type: "pump",
+      category: "strength",
+      level: null,
+      estimated_minutes: 30,
+      tags: ["custom"],
+      sort_order: 1,
+      legacy_day_id: null,
+      release_gate: "public",
+      requires_acknowledgment: false,
+      library_startable: true,
+      warnings: [],
+      template_exercises: [
+        {
+          id: "te-1",
+          exercise_id: "exercise-1",
+          exercise_name: "Cable Fly",
+          position: 0,
+          target_sets: 3,
+          target_reps: "10",
+          target_rpe: null,
+          rest_seconds: 60,
+          load_guidance: null,
+          source_load_unit: null,
+          is_drop_set: false,
+          is_heavy: false,
+          notes: null,
+          training_method_id: "drop-sets",
+          training_method_config: { drops: 2, dropPercent: 20 },
+        },
+      ],
+    };
+    const templateReturns = vi.fn().mockResolvedValue({ data: templateRow, error: null });
+    const templateMaybeSingle = vi.fn(() => ({ returns: templateReturns }));
+    const templateEq = vi.fn(() => ({ maybeSingle: templateMaybeSingle }));
+    const templateSelect = vi.fn(() => ({ eq: templateEq }));
+
+    const exerciseIn = vi.fn().mockResolvedValue({
+      data: [
+        {
+          id: "exercise-1",
+          name: "Cable Fly",
+          primary_muscle: "Chest",
+          equipment: "Cable",
+        },
+      ],
+      error: null,
+    });
+    const exerciseSelect = vi.fn(() => ({ in: exerciseIn }));
+
+    const sessionSingle = vi.fn().mockResolvedValue({ data: { id: "session-1" }, error: null });
+    const sessionInsertSelect = vi.fn(() => ({ single: sessionSingle }));
+    const sessionInsert = vi.fn(() => ({ select: sessionInsertSelect }));
+    const exerciseRowsSelect = vi
+      .fn()
+      .mockResolvedValue({ data: [{ id: "session-exercise-1", position: 0 }], error: null });
+    const sessionExerciseInsert = vi.fn(() => ({ select: exerciseRowsSelect }));
+    const setInsert = vi.fn().mockResolvedValue({ data: null, error: null });
+    let workoutSessionCalls = 0;
+
+    mocks.from.mockImplementation((table: string) => {
+      if (table === "workout_sessions") {
+        workoutSessionCalls += 1;
+        return workoutSessionCalls === 1 ? { select: activeSelect } : { insert: sessionInsert };
+      }
+      if (table === "workout_templates") return { select: templateSelect };
+      if (table === "exercises") return { select: exerciseSelect };
+      if (table === "session_exercises") return { insert: sessionExerciseInsert };
+      if (table === "workout_sets") return { insert: setInsert };
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    await expect(
+      startWorkoutFromTemplate("template-method", {
+        experience: "advanced",
+        monthsTraining: 36,
+        sessionsLast28Days: 14,
+        averageReadiness: 80,
+        specializationWindowOpen: false,
+      }),
+    ).resolves.toBe("session-1");
+
+    expect(sessionExerciseInsert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        exercise_name: "Cable Fly",
+        training_method_id: "drop-sets",
+        training_method_config: { drops: 2, dropPercent: 20 },
+      }),
+    ]);
+    expect(setInsert).toHaveBeenCalledTimes(1);
   });
 });

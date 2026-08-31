@@ -1,5 +1,13 @@
 import type { Session, User } from "@supabase/supabase-js";
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { supabase } from "@/integrations/supabase/client";
 
@@ -17,8 +25,13 @@ export interface AuthContextValue {
   enterDemo: () => void;
   exitDemo: () => void;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, displayName: string) => Promise<{ needsConfirmation: boolean }>;
+  signUp: (
+    email: string,
+    password: string,
+    displayName: string,
+  ) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  deleteAccount: (input: { password: string; confirmation: string }) => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
 }
 
@@ -27,12 +40,20 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 /** Maps Supabase auth errors to copy the athlete can act on. */
 export function friendlyAuthError(message: string): string {
   const m = message.toLowerCase();
-  if (m.includes("invalid login credentials")) return "That email and password combination doesn't match an account.";
-  if (m.includes("email not confirmed")) return "Confirm your email address first — check your inbox for the IronDesk link.";
-  if (m.includes("already registered") || m.includes("already been registered") || m.includes("user already exists"))
+  if (m.includes("invalid login credentials"))
+    return "That email and password combination doesn't match an account.";
+  if (m.includes("email not confirmed"))
+    return "Confirm your email address first — check your inbox for the IronDesk link.";
+  if (
+    m.includes("already registered") ||
+    m.includes("already been registered") ||
+    m.includes("user already exists")
+  )
     return "An account already exists for that email. Sign in instead.";
-  if (m.includes("password should be at least")) return "Use at least 6 characters for your password.";
-  if (m.includes("rate limit") || m.includes("too many")) return "Too many attempts. Wait a minute and try again.";
+  if (m.includes("password should be at least"))
+    return "Use at least 6 characters for your password.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Too many attempts. Wait a minute and try again.";
   if (m.includes("session") && m.includes("missing")) return "Your session expired. Sign in again.";
   return message;
 }
@@ -66,7 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user || bootstrapped.current === user.id) return;
     bootstrapped.current = user.id;
     const displayName =
-      (user.user_metadata?.["display_name"] as string | undefined) ?? user.email?.split("@")[0] ?? "Athlete";
+      (user.user_metadata?.["display_name"] as string | undefined) ??
+      user.email?.split("@")[0] ??
+      "Athlete";
     void supabase.rpc("bootstrap_current_user", { _display_name: displayName });
   }, [session?.user]);
 
@@ -113,6 +136,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   }, []);
 
+  const deleteAccount = useCallback(
+    async ({ password, confirmation }: { password: string; confirmation: string }) => {
+      const { data, error } = await supabase.auth.getSession();
+      const current = data.session;
+      if (error || !current?.access_token || !current.user.email) {
+        throw new Error("Your session expired. Sign in again before deleting your account.");
+      }
+
+      const response = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${current.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          email: current.user.email,
+          password,
+          confirmation,
+        }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+        throw new Error(
+          typeof payload?.error === "string"
+            ? payload.error
+            : "IronDesk could not delete the account. Try again.",
+        );
+      }
+
+      // Auth deletion removes refresh sessions server-side. Clear this browser's
+      // cached access token as well; a local sign-out error is harmless because
+      // the account has already been removed and the React state is cleared.
+      await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      bootstrapped.current = null;
+      window.localStorage.removeItem(DEMO_KEY);
+      setDemo(false);
+      setSession(null);
+    },
+    [],
+  );
+
   const requestPasswordReset = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: `${window.location.origin}/auth`,
@@ -136,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
         signOut,
+        deleteAccount,
         requestPasswordReset,
       }}
     >

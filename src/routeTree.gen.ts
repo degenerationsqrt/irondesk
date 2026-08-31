@@ -10,13 +10,16 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountDeletionRouteImport } from './routes/account-deletion'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as CoachRouteImport } from './routes/coach'
 import { Route as ConnectionsRouteImport } from './routes/connections'
+import { Route as HealthConnectRouteImport } from './routes/health-connect'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ProgramRouteImport } from './routes/program'
 import { Route as ProgressRouteImport } from './routes/progress'
 import { Route as RecoveryRouteImport } from './routes/recovery'
@@ -28,6 +31,7 @@ import { Route as ExercisesIndexRouteImport } from './routes/exercises/index'
 import { Route as ExercisesExerciseIdRouteImport } from './routes/exercises/$exerciseId'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as Char91DotmcpChar93InvokeToolToolRouteImport } from './routes/[.mcp]/invoke-tool/$tool'
+import { Route as ApiAccountDeleteRouteImport } from './routes/api/account/delete'
 import { Route as ApiPublicHealthConnectIngestRouteImport } from './routes/api/public/health-connect/ingest'
 import { Route as ApiPublicHealthConnectPairRouteImport } from './routes/api/public/health-connect/pair'
 import { Route as ApiPublicHealthConnectUnpairRouteImport } from './routes/api/public/health-connect/unpair'
@@ -39,6 +43,11 @@ import { Route as ApiPublicConnectIqV1WorkoutsActiveRouteImport } from './routes
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountDeletionRoute = AccountDeletionRouteImport.update({
+  id: '/account-deletion',
+  path: '/account-deletion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -54,6 +63,11 @@ const CoachRoute = CoachRouteImport.update({
 const ConnectionsRoute = ConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthConnectRoute = HealthConnectRouteImport.update({
+  id: '/health-connect',
+  path: '/health-connect',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HistoryRoute = HistoryRouteImport.update({
@@ -74,6 +88,11 @@ const NutritionRoute = NutritionRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProgramRoute = ProgramRouteImport.update({
@@ -134,6 +153,11 @@ const Char91DotmcpChar93InvokeToolToolRoute =
     path: '/.mcp/invoke-tool/$tool',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiAccountDeleteRoute = ApiAccountDeleteRouteImport.update({
+  id: '/api/account/delete',
+  path: '/api/account/delete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHealthConnectIngestRoute =
   ApiPublicHealthConnectIngestRouteImport.update({
     id: '/api/public/health-connect/ingest',
@@ -179,13 +203,16 @@ const ApiPublicConnectIqV1WorkoutsActiveRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/account-deletion': typeof AccountDeletionRoute
   '/auth': typeof AuthRoute
   '/coach': typeof CoachRoute
   '/connections': typeof ConnectionsRoute
+  '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/program': typeof ProgramRoute
   '/progress': typeof ProgressRoute
   '/recovery': typeof RecoveryRoute
@@ -197,6 +224,7 @@ export interface FileRoutesByFullPath {
   '/exercises/': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/account/delete': typeof ApiAccountDeleteRoute
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
@@ -207,13 +235,16 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/account-deletion': typeof AccountDeletionRoute
   '/auth': typeof AuthRoute
   '/coach': typeof CoachRoute
   '/connections': typeof ConnectionsRoute
+  '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/program': typeof ProgramRoute
   '/progress': typeof ProgressRoute
   '/recovery': typeof RecoveryRoute
@@ -225,6 +256,7 @@ export interface FileRoutesByTo {
   '/exercises': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/account/delete': typeof ApiAccountDeleteRoute
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
@@ -236,13 +268,16 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/account-deletion': typeof AccountDeletionRoute
   '/auth': typeof AuthRoute
   '/coach': typeof CoachRoute
   '/connections': typeof ConnectionsRoute
+  '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/program': typeof ProgramRoute
   '/progress': typeof ProgressRoute
   '/recovery': typeof RecoveryRoute
@@ -254,6 +289,7 @@ export interface FileRoutesById {
   '/exercises/': typeof ExercisesIndexRoute
   '/.lovable/oauth/consent': typeof DotlovableOauthConsentRoute
   '/.mcp/invoke-tool/$tool': typeof Char91DotmcpChar93InvokeToolToolRoute
+  '/api/account/delete': typeof ApiAccountDeleteRoute
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
@@ -266,13 +302,16 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/account-deletion'
     | '/auth'
     | '/coach'
     | '/connections'
+    | '/health-connect'
     | '/history'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
+    | '/privacy'
     | '/program'
     | '/progress'
     | '/recovery'
@@ -284,6 +323,7 @@ export interface FileRouteTypes {
     | '/exercises/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/account/delete'
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
@@ -294,13 +334,16 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/account-deletion'
     | '/auth'
     | '/coach'
     | '/connections'
+    | '/health-connect'
     | '/history'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
+    | '/privacy'
     | '/program'
     | '/progress'
     | '/recovery'
@@ -312,6 +355,7 @@ export interface FileRouteTypes {
     | '/exercises'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/account/delete'
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
@@ -322,13 +366,16 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/account-deletion'
     | '/auth'
     | '/coach'
     | '/connections'
+    | '/health-connect'
     | '/history'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
+    | '/privacy'
     | '/program'
     | '/progress'
     | '/recovery'
@@ -340,6 +387,7 @@ export interface FileRouteTypes {
     | '/exercises/'
     | '/.lovable/oauth/consent'
     | '/.mcp/invoke-tool/$tool'
+    | '/api/account/delete'
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
@@ -351,13 +399,16 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountDeletionRoute: typeof AccountDeletionRoute
   AuthRoute: typeof AuthRoute
   CoachRoute: typeof CoachRoute
   ConnectionsRoute: typeof ConnectionsRoute
+  HealthConnectRoute: typeof HealthConnectRoute
   HistoryRoute: typeof HistoryRoute
   McpRoute: typeof McpRoute
   NutritionRoute: typeof NutritionRoute
   OnboardingRoute: typeof OnboardingRoute
+  PrivacyRoute: typeof PrivacyRoute
   ProgramRoute: typeof ProgramRoute
   ProgressRoute: typeof ProgressRoute
   RecoveryRoute: typeof RecoveryRoute
@@ -369,6 +420,7 @@ export interface RootRouteChildren {
   ExercisesIndexRoute: typeof ExercisesIndexRoute
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   Char91DotmcpChar93InvokeToolToolRoute: typeof Char91DotmcpChar93InvokeToolToolRoute
+  ApiAccountDeleteRoute: typeof ApiAccountDeleteRoute
   ApiPublicHealthConnectIngestRoute: typeof ApiPublicHealthConnectIngestRoute
   ApiPublicHealthConnectPairRoute: typeof ApiPublicHealthConnectPairRoute
   ApiPublicHealthConnectUnpairRoute: typeof ApiPublicHealthConnectUnpairRoute
@@ -385,6 +437,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account-deletion': {
+      id: '/account-deletion'
+      path: '/account-deletion'
+      fullPath: '/account-deletion'
+      preLoaderRoute: typeof AccountDeletionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -406,6 +465,13 @@ declare module '@tanstack/react-router' {
       path: '/connections'
       fullPath: '/connections'
       preLoaderRoute: typeof ConnectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health-connect': {
+      id: '/health-connect'
+      path: '/health-connect'
+      fullPath: '/health-connect'
+      preLoaderRoute: typeof HealthConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -434,6 +500,13 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/onboarding'
       preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/program': {
@@ -513,6 +586,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char91DotmcpChar93InvokeToolToolRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/account/delete': {
+      id: '/api/account/delete'
+      path: '/api/account/delete'
+      fullPath: '/api/account/delete'
+      preLoaderRoute: typeof ApiAccountDeleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/health-connect/ingest': {
       id: '/api/public/health-connect/ingest'
       path: '/api/public/health-connect/ingest'
@@ -567,13 +647,16 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountDeletionRoute: AccountDeletionRoute,
   AuthRoute: AuthRoute,
   CoachRoute: CoachRoute,
   ConnectionsRoute: ConnectionsRoute,
+  HealthConnectRoute: HealthConnectRoute,
   HistoryRoute: HistoryRoute,
   McpRoute: McpRoute,
   NutritionRoute: NutritionRoute,
   OnboardingRoute: OnboardingRoute,
+  PrivacyRoute: PrivacyRoute,
   ProgramRoute: ProgramRoute,
   ProgressRoute: ProgressRoute,
   RecoveryRoute: RecoveryRoute,
@@ -586,6 +669,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExercisesIndexRoute: ExercisesIndexRoute,
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   Char91DotmcpChar93InvokeToolToolRoute: Char91DotmcpChar93InvokeToolToolRoute,
+  ApiAccountDeleteRoute: ApiAccountDeleteRoute,
   ApiPublicHealthConnectIngestRoute: ApiPublicHealthConnectIngestRoute,
   ApiPublicHealthConnectPairRoute: ApiPublicHealthConnectPairRoute,
   ApiPublicHealthConnectUnpairRoute: ApiPublicHealthConnectUnpairRoute,

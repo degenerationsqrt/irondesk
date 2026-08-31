@@ -47,6 +47,13 @@ export const templateQuery = (mode: ServiceMode, id: string) =>
 export const progressionQuery = (mode: ServiceMode) =>
   queryOptions({ queryKey: queryKeys.progression(mode), queryFn: () => serviceFor(mode).getProgression() });
 
+/** IronDesk Black specialization windows for the signed-in athlete. */
+export const specializationWindowsQuery = (mode: ServiceMode) =>
+  queryOptions({
+    queryKey: queryKeys.specializationWindows(mode),
+    queryFn: () => serviceFor(mode).getSpecializationWindows(),
+  });
+
 /** Signed-in account context (profile + preferences + equipment). */
 export const accountQuery = queryOptions({
   queryKey: queryKeys.account,

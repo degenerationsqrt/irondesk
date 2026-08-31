@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { isFreeStartable, RELEASE_GATE_LABEL } from "@/lib/irondesk/program-logic";
 import { templatesQuery } from "@/lib/irondesk/queries";
+import type { AthleteMethodProfile } from "@/lib/irondesk/training-methods";
 import type {
   Exercise,
   PersonalTemplateDraft,
@@ -212,6 +213,7 @@ export function TemplateLibrary({
   onStartCreated,
   onDeletePersonal,
   builderReadOnlyNote,
+  methodProfile,
 }: {
   onStart: (template: WorkoutTemplate) => void;
   /**
@@ -231,6 +233,7 @@ export function TemplateLibrary({
   onStartCreated?: (templateId: string) => Promise<void>;
   onDeletePersonal?: (templateId: string) => Promise<void>;
   builderReadOnlyNote?: string;
+  methodProfile?: AthleteMethodProfile;
 }) {
   const templates = useModeData(templatesQuery);
   const units = useUnits();
@@ -552,6 +555,7 @@ export function TemplateLibrary({
               exercises={exercises}
               disabled={busy}
               onClose={() => setBuilding(false)}
+              {...(methodProfile ? { methodProfile } : {})}
               {...(onCreatePersonal ? { onCreate: onCreatePersonal } : {})}
               {...(onStartCreated ? { onStart: onStartCreated } : {})}
               {...(!canWritePersonal
