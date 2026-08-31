@@ -110,6 +110,15 @@ describe("PWA safety and lifecycle wiring", () => {
     expect(manager).toContain('aria-label="Install IronDesk"');
     expect(manager).toContain("<DialogTitle");
     expect(manager).toContain('worker.postMessage({ type: "SKIP_WAITING" })');
+    expect(manager).toContain('!window.location.pathname.startsWith("/auth")');
+  });
+
+  it("keeps the narrow mobile header within the viewport", () => {
+    const shell = readFileSync(
+      join(root, "src", "components", "irondesk", "app-shell.tsx"),
+      "utf8",
+    );
+    expect(shell).toContain("max-[430px]:hidden");
   });
 });
 
