@@ -16,10 +16,15 @@
 
     <!-- Needed only for the user-initiated "Sync Now" push to their own IronDesk account. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Required so Android 13 and lower can discover the Health Connect provider. -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -42,10 +47,40 @@
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
+        </activity>
+
+        <!-- Android 14+ opens the same rationale through a permission-protected alias. -->
+        <activity-alias
+            android:name=".ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".PrivacyActivity">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
+        </activity-alias>
+
+        <!-- Pairing is required before Health Connect data can sync, so Health Connect needs an
+             onboarding entry point in addition to the normal launcher activity. -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="true"
+            android:permission="com.google.android.apps.healthdata.permission.START_ONBOARDING">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_ONBOARDING" />
+            </intent-filter>
         </activity>
+
+        <!-- Android 14+ framework Health Connect uses the platform action and permission. -->
+        <activity-alias
+            android:name=".UAndAboveOnboardingActivity"
+            android:exported="true"
+            android:permission="android.permission.health.START_ONBOARDING"
+            android:targetActivity=".OnboardingActivity">
+            <intent-filter>
+                <action android:name="android.health.connect.action.SHOW_ONBOARDING" />
+            </intent-filter>
+        </activity-alias>
     </application>
 </manifest>

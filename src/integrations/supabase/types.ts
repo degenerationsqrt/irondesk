@@ -10,10 +10,58 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
+      black_exposures: {
+        Row: {
+          created_at: string
+          id: string
+          prescription: Json
+          session_id: string | null
+          target_region: string
+          user_id: string
+          week_start: string
+          window_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          prescription?: Json
+          session_id?: string | null
+          target_region: string
+          user_id: string
+          week_start: string
+          window_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          prescription?: Json
+          session_id?: string | null
+          target_region?: string
+          user_id?: string
+          week_start?: string
+          window_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "black_exposures_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "workout_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "black_exposures_window_id_fkey"
+            columns: ["window_id"]
+            isOneToOne: false
+            referencedRelation: "training_specialization_windows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       body_metrics: {
         Row: {
           body_fat_percent: number | null
@@ -1193,6 +1241,8 @@ export type Database = {
           target_reps: string | null
           target_rpe: number | null
           target_sets: number | null
+          training_method_config: Json
+          training_method_id: string | null
           updated_at: string
         }
         Insert: {
@@ -1214,6 +1264,8 @@ export type Database = {
           target_reps?: string | null
           target_rpe?: number | null
           target_sets?: number | null
+          training_method_config?: Json
+          training_method_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -1235,6 +1287,8 @@ export type Database = {
           target_reps?: string | null
           target_rpe?: number | null
           target_sets?: number | null
+          training_method_config?: Json
+          training_method_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1278,6 +1332,8 @@ export type Database = {
           target_rpe: number | null
           target_sets: number | null
           template_id: string
+          training_method_config: Json
+          training_method_id: string | null
           updated_at: string
         }
         Insert: {
@@ -1296,6 +1352,8 @@ export type Database = {
           target_rpe?: number | null
           target_sets?: number | null
           template_id: string
+          training_method_config?: Json
+          training_method_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -1314,6 +1372,8 @@ export type Database = {
           target_rpe?: number | null
           target_sets?: number | null
           template_id?: string
+          training_method_config?: Json
+          training_method_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1332,6 +1392,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      training_specialization_windows: {
+        Row: {
+          config: Json
+          created_at: string
+          ends_on: string
+          id: string
+          method_id: string
+          started_on: string
+          status: string
+          target_region: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          ends_on: string
+          id?: string
+          method_id?: string
+          started_on?: string
+          status?: string
+          target_region: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          ends_on?: string
+          id?: string
+          method_id?: string
+          started_on?: string
+          status?: string
+          target_region?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_equipment: {
         Row: {
@@ -1498,6 +1597,8 @@ export type Database = {
           created_at: string
           id: string
           is_warmup: boolean
+          method_segment: string | null
+          method_segment_config: Json
           notes: string | null
           reps: number | null
           rest_seconds: number | null
@@ -1513,6 +1614,8 @@ export type Database = {
           created_at?: string
           id?: string
           is_warmup?: boolean
+          method_segment?: string | null
+          method_segment_config?: Json
           notes?: string | null
           reps?: number | null
           rest_seconds?: number | null
@@ -1528,6 +1631,8 @@ export type Database = {
           created_at?: string
           id?: string
           is_warmup?: boolean
+          method_segment?: string | null
+          method_segment_config?: Json
           notes?: string | null
           reps?: number | null
           rest_seconds?: number | null
@@ -1642,7 +1747,7 @@ export type Database = {
           _payload: Json
           _request_hash: string
           _session_id: string
-          _set_id: string | null
+          _set_id: string
           _user_id: string
         }
         Returns: Json
@@ -1654,7 +1759,7 @@ export type Database = {
       exchange_device_pairing: {
         Args: {
           _code_hash: string
-          _data_source_type?: string | null
+          _data_source_type?: string
           _device_label: string
           _platform: string
           _token_hash: string

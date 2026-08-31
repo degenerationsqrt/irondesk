@@ -1,145 +1,161 @@
 # IronDesk Health Connect companion (Android)
 
-Android's Health Connect has **no web API**: a browser cannot read it, and there is no
-OAuth-style server flow. The only supported path is an on-device app the user grants read
-permission to, which then either exports a file or pushes records to the user's own IronDesk
-account. This module is that app.
+IronDesk Health is the on-device bridge between Android Health Connect and an athlete's own
+IronDesk account. A browser cannot read Health Connect directly. This companion lets the athlete
+choose record types and a date range, preview what is available, and then either sync it over
+HTTPS or export the same payload as JSON.
 
-It is a complete, reproducible Android Studio project: root scripts, version catalog, module
-config, resources, manifest, Kotlin sources, JVM unit tests, and a committed Gradle wrapper
-(`./gradlew`, Gradle 8.11.1). Verified build: AGP 8.9.1, Kotlin 2.0.21, compileSdk 36,
-targetSdk 35, minSdk 28.
+## Release status
 
-## Build
+**Private-beta engineering build — not a public download.**
 
-**Android Studio** (Ladybug or newer): *File → Open* → `android-health-connect/`, let it sync,
-then *Run* on a device with Health Connect. JDK 17 is required (bundled with recent Studio).
+- Package: `app.irondesk.health`
+- Version: `1.1.0-beta.1` (`versionCode 11001`)
+- Android: min SDK 28 (Android 9), target/compile SDK 36 (Android 16)
+- Distribution: no signed APK or AAB is committed or produced by CI
+- Production endpoint: `https://irondeskpro.lovable.app`
 
-**Command line** (JDK 17 + Android SDK on `ANDROID_HOME`, platform android-36):
+The older GitHub asset `IronDesk-0.9.0-debug.apk` is the legacy full Capacitor app
+(`com.irondesk.app`). It is **not** this Health Connect companion and must not be offered as the
+connector download.
+
+Before inviting testers, complete [the release checklist](docs/RELEASE_CHECKLIST.md) and give
+them [the private-beta setup guide](docs/PRIVATE_BETA_SETUP.md). The requested data types and the
+Play/privacy preparation are documented in
+[Privacy and permissions](docs/PRIVACY_AND_PERMISSIONS.md).
+
+## What the companion does
+
+- Pairs with an eight-character, single-use code generated in IronDesk.
+- Stores the resulting device token behind an AES-256/GCM Android Keystore key; it never stores
+  an IronDesk password or backend service key.
+- Requests read permission only for the record types currently selected by the athlete.
+- Handles partial grants: unauthorized selected types are visibly listed and safely skipped;
+  authorized types can still be previewed and synced.
+- Reads steps, sleep, resting heart rate, HRV, weight, active calories, distance, and exercise
+  sessions. Distance is optional and off by default.
+- Requests historical access separately and only when the installed Health Connect provider
+  supports it. Without it, ranges longer than 30 days are honestly capped to 30 days.
+- Shows per-type record counts and totals before anything leaves the phone.
+- Syncs only when the athlete presses **Sync now**, or writes a JSON file through Android's system
+  document picker.
+- Encrypts a maximum five-batch retry outbox at rest. There is no background read or upload.
+- Lets the athlete revoke the server token, forget local credentials, and manage system Health
+  Connect permissions.
+- Disables Android cloud backup and device transfer for tokens and queued health payloads.
+
+The companion is read-only: it declares no Health Connect write permission.
+
+## Build and verify locally
+
+Requirements:
+
+- JDK 17
+- Android SDK platform 36 and build-tools 36.0.0
+- Android Studio Meerkat 2024.3.1 Patch 1 or newer, or the command-line SDK tools
+
+On Windows PowerShell:
+
+```powershell
+Set-Location android-health-connect
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+.\gradlew.bat --no-daemon lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
+```
+
+On macOS or Linux:
 
 ```bash
 cd android-health-connect
-./gradlew --no-daemon clean lintDebug testDebugUnitTest assembleDebug
-# → app/build/outputs/apk/debug/app-debug.apk
+./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug assembleRelease bundleRelease
 ```
 
-**CI**: `.github/workflows/android-health-connect.yml` installs JDK 17 and the Android SDK with
-API 36 / build-tools 36.0.0, runs `lintDebug` and the unit tests first, then assembles and always
-uploads the `irondesk-health-debug-apk` artifact. A GitHub prerelease is created only when the
-workflow is dispatched with the boolean input `publish_github_release = true`. It holds no
-signing secrets.
+Override the IronDesk service for an authorized preview environment with
+`-PirondeskBaseUrl=https://your-host`. The default is the production HTTPS endpoint above.
 
+Important artifact boundaries:
 
-Point the app at another deployment with `-PirondeskBaseUrl=https://your-host` (default:
-`https://irondeskpro.lovable.app`). Release builds intentionally declare **no signing config** —
-sign with your own upload key.
+- `app/build/outputs/apk/debug/app-debug.apk` is debug-signed for local developer testing only.
+- `app/build/outputs/apk/release/app-release-unsigned.apk` is not installable by ordinary testers.
+- `app/build/outputs/bundle/release/app-release.aab` is not ready for Play until it is signed with
+  the controlled upload identity.
+- Keystores, passwords, and Play credentials must never be committed to this repository.
 
-## Samsung Health (or any tracker) → Health Connect
+## Continuous integration
 
-1. Install **Health Connect** from Play (pre-installed on Android 14+).
-2. Samsung Health → *Settings → Health Connect* → allow it to write steps, sleep, heart rate,
-   HRV, weight, calories, distance and exercise.
-3. Wait for one Samsung Health sync, then open IronDesk Health.
+`.github/workflows/android-health-connect.yml` runs for companion changes and manual dispatches.
+It installs JDK 17 plus Android SDK 36, runs lint and JVM tests, builds debug and release variants,
+checks package/version/target metadata, and uploads short-lived **unsigned verification
+artifacts** with checksums.
 
-## Pair, sync, unlink
+The workflow intentionally:
 
-1. In IronDesk on the web: **Connections & Imports → generate pairing code** (8 characters,
-   single-use, expiring).
-2. In the app: type the code, name the phone, tap **Pair this phone**. The code is exchanged for
-   a device token encrypted with an AES-256/GCM key generated in the AndroidKeyStore (a small
-   `Codec` in `Crypto.kt`; `androidx.security:security-crypto` is deliberately not used). No
-   IronDesk password or backend key ever reaches the phone. The plaintext token written by the
-   very first build is migrated once and wiped; a blob that cannot be decrypted is discarded
-   rather than treated as valid.
-3. **Grant read access** — the eight record types below, read-only. **Manage Health Connect
-   access** opens the system screen, and grants are re-read every time the app returns to the
-   foreground.
-4. Pick a range (7 / 30 / 90 days / 1 year) and record types, then **Preview data**: per-type
-   counts plus step, sleep, workout, calorie and distance totals.
-5. **Sync now** posts the payload to `/api/public/health-connect/ingest` under the device token
-   and reports new / already-present / skipped records and how many recovery and weight days
-   were filled.
-6. **Export JSON file instead** writes the same payload through the system file picker for
-   manual upload — the offline path is preserved.
-7. **Unlink this device** calls `/api/public/health-connect/unpair` with the device token. The
-   local token is cleared only on a confirmed revocation or a confirmed already-revoked `401`;
-   every other network/server error keeps the token so you can retry. *Forget locally only* is a
-   separate, explicitly confirmed action.
+- has read-only repository permissions;
+- contains no signing secret;
+- does not create a GitHub release;
+- does not publish to Google Play; and
+- labels the uploaded release outputs `UNSIGNED` and `DO NOT DISTRIBUTE`.
 
-Everything is user-initiated. There is no background sync, no analytics and no third-party
-sharing in this build.
+A signed private beta is a separate, authorized release operation after the physical-device,
+privacy, account-deletion, and Play declaration gates pass.
 
-## Honest behaviour notes
+## Pair, preview, sync, and unlink
 
-- **History gating.** Health Connect only shares the last 30 days unless the app also holds
-  `READ_HEALTH_DATA_HISTORY`. Before offering it, the app checks
-  `HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY`; when the installed provider does not
-  support it the permission is never requested and the 90-day / 1-year choices say the longer
-  read is unavailable. Ungranted or unsupported both read 30 days, say so, and stamp
-  `history_authorized: false`. It never implies a longer read happened.
-- **Deduplication.** `external_id` values are deterministic (`hc:steps:<date>`, `hc:sess:<id>`,
-  …), so re-syncing an overlapping range imports zero duplicates — the server dedupes on
-  `ext:health_connect:<external_id>`.
-- **Daily steps.** Steps are cumulative and arrive from several apps, so raw records are never
-  summed. The app calls `aggregateGroupByPeriod` with `StepsRecord.COUNT_TOTAL`,
-  `Period.ofDays(1)` and a `LocalDateTime` range, so buckets are real calendar days (DST-safe)
-  with no cross-source double counting.
-- **Exercise types.** Mapped through the official `ExerciseSessionRecord.EXERCISE_TYPE_*`
-  constants in connect-client 1.1.0 — no hard-coded numeric ids.
-- **Provenance.** Source package, device manufacturer/model and recording method are sent when
-  Health Connect supplies them, and the server keeps them in `raw_metadata`.
-- **Manual data is protected.** Derived recovery (sleep, HRV, resting HR) and bodyweight rows
-  fill gaps only; a day the athlete logged by hand is never overwritten. That rule lives on the
-  server, so it holds for file upload and device sync alike.
-- **Outbox.** A network or 5xx failure keeps the prepared payload in a small file-backed queue
-  (max 5 batches, identical payloads deduped on the plaintext) and drains it on the next
-  **Sync now**. Queued bodies are encrypted at rest with the same Keystore key; an unreadable
-  entry is dropped instead of retried forever. Nothing reads health data in the background.
-- **Day boundaries.** Derived recovery/bodyweight rows are grouped by the record's own timezone
-  (UTC only as a fallback), so an evening reading is not pushed onto the wrong day.
-- **Pagination.** Reads follow page tokens, capped at 20,000 records per type per sync.
-- **Enrichment.** Sessions carry distance and active calories that fall inside the session
-  window. Average heart rate is not exported because that would need a broader permission.
+The ordinary tester path is maintained in [Private beta setup](docs/PRIVATE_BETA_SETUP.md). In
+brief:
 
-## Files
+1. A tracker such as Samsung Health writes records to Health Connect.
+2. The athlete generates a code under **Connections & Imports** in IronDesk.
+3. IronDesk Health exchanges that code for a limited device token.
+4. The athlete selects record types and grants only the desired read permissions.
+5. The athlete previews a range and presses **Sync now** or **Export JSON file instead**.
+6. The server deduplicates deterministic external IDs and fills recovery/weight gaps without
+   overwriting days logged manually.
+7. The athlete can revoke Health Connect permissions and unlink the server token independently.
 
-- `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `gradle/libs.versions.toml`,
-  `gradlew`, `gradlew.bat`, `gradle/wrapper/*` — project skeleton, pinned versions, wrapper.
-- `app/build.gradle.kts`, `app/proguard-rules.pro` — module config, `IRONDESK_BASE_URL`, shrinker.
-- `app/src/main/AndroidManifest.xml` — eight read permissions plus `READ_HEALTH_DATA_HISTORY`
-  (only requested when supported), INTERNET for user-initiated sync, rationale/data-usage activity.
-- `Theme.kt` — IronDesk dark palette and condensed type.
-- `PairingCode.kt` — pairing-code and device-name rules (pure, tested).
-- `Payload.kt`, `Aggregation.kt` — wire format, locale-pinned serializer (NaN/∞ refused), daily
-  step points, preview totals (pure, tested).
-- `ExerciseTypes.kt` — official exercise-type and recording-method constants (tested).
-- `Crypto.kt` — `Codec`, `PlainCodec`, AndroidKeyStore AES-256/GCM `KeystoreCodec`.
-- `HealthRepository.kt` — availability, permission set, history feature check, aggregated steps,
-  paginated reads for the raw types, ranges.
-- `HealthMapper.kt` — Health Connect records → wire model, including provenance.
-- `TokenStore.kt` — `SecureStore`/`CodecStore`/`TokenVault` and legacy-token migration (tested).
-- `SyncQueue.kt` — encrypted file-backed retry outbox with injectable codec (tested).
-- `SyncClient.kt` — pair, ingest, unpair; transient vs revoked vs definite failures.
-- `MainActivity.kt` — pair → grant → range → preview → sync → linked device.
-- `PrivacyActivity.kt` — permission rationale / data-usage screen.
-- `app/src/test/...` — JVM unit tests: pairing codes, payload/serializer/locale/provenance,
-  queue (codec, dedupe, corruption), token vault migration, exercise types.
+## Notable data behavior
 
-## Troubleshooting
+- Steps use Health Connect daily aggregation instead of summing overlapping raw writers.
+- All pages are read, with a defensive cap of 20,000 records per type per sync.
+- Exercise types use official `ExerciseSessionRecord.EXERCISE_TYPE_*` constants.
+- Source package, device manufacturer/model, recording method, and timezone are retained when
+  Health Connect supplies them.
+- Exercise sessions can be enriched with selected distance and active-calorie records inside the
+  session window.
+- Re-syncing an overlapping range is safe because external IDs are deterministic and the server
+  deduplicates them.
+- Sleep, HRV, resting heart rate, and weight fill missing IronDesk days only. The server protects
+  manual entries.
 
-- *"Health Connect not found" / "needs updating"* — install or update Health Connect, then reopen.
-- *Preview shows 0 records* — your tracker is not writing to Health Connect yet (step 2 above),
-  or the range predates what the provider has.
-- *"That pairing code is not valid any more"* — codes are single-use and expire; generate a new one.
-- *"IronDesk rejected this device"* — the link was revoked on the web. Unlink locally and pair again.
-- *Sync fails offline* — the batch stays in the outbox; press **Sync now** when back online.
-- *Longer ranges look short* — grant historical access, or accept the 30-day window.
+## Project map
 
-## Remaining limits
+- `app/build.gradle.kts` — package, beta version, SDK levels, production endpoint, unsigned
+  release boundary.
+- `app/src/main/AndroidManifest.xml` — minimum read permissions, package visibility, privacy
+  rationale aliases, onboarding aliases, and backup exclusions.
+- `MainActivity.kt` — pair → select → grant → preview → sync → unlink flow.
+- `HealthRepository.kt` — availability, selected-type permission policy, partial-grant filtering,
+  historical feature check, reads, pagination, and aggregated steps.
+- `HealthMapper.kt`, `Aggregation.kt`, `Payload.kt` — Health Connect data to deterministic IronDesk
+  payloads and preview totals.
+- `Crypto.kt`, `TokenStore.kt`, `SyncQueue.kt` — Android Keystore encryption, legacy token
+  migration, and encrypted retry queue.
+- `SyncClient.kt` — pair, ingest, and unpair HTTPS calls.
+- `PrivacyActivity.kt`, `OnboardingActivity.kt` — Health Connect privacy and onboarding entry
+  points for Android 13 and Android 14+.
+- `app/src/test/...` — JVM tests for permissions, pairing, payloads, aggregation, queue encryption,
+  token migration, and exercise mapping.
 
-- Verified with `./gradlew clean lintDebug testDebugUnitTest assembleDebug`: lint clean (0 errors,
-  23 warnings), 33 unit tests passing, debug APK produced. Not run on a physical device here.
-- No Changes-API incremental sync and no WorkManager background sync yet.
-- Sleep is exported as total minutes; sleep stages are not exported.
-- Play Store distribution additionally needs a health-app declaration, hosted privacy policy,
-  data-safety answers and a review video. Sideloading needs none of that.
+## Remaining beta gates
+
+Passing Gradle checks proves the source builds; it does not prove a releasable product. The beta
+still requires a controlled signing identity, a signed-artifact inspection, physical Android 13
+and Android 14+ testing, end-to-end production pairing/sync/revoke evidence, a matching public
+privacy policy, Data Safety answers, Health Apps declaration, permission justifications, account
+deletion verification, and a reviewer-access/video package.
+
+Current Android references:
+
+- [Get started with Health Connect](https://developer.android.com/health-and-fitness/health-connect/get-started)
+- [Publish a Health Connect app](https://developer.android.com/health-and-fitness/health-connect/publish)
+- [Google Play Health Content and Services policy](https://support.google.com/googleplay/android-developer/answer/16679511)

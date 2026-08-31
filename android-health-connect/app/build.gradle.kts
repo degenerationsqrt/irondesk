@@ -11,9 +11,9 @@ android {
     defaultConfig {
         applicationId = "app.irondesk.health"
         minSdk = 28
-        targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        targetSdk = 36
+        versionCode = 11001
+        versionName = "1.1.0-beta.1"
 
         // The IronDesk deployment this app pairs with. Override with
         // -PirondeskBaseUrl=... for a self-hosted or preview deployment.

@@ -29,6 +29,9 @@ export interface SetRow {
   rest_seconds: number | null;
   completed_at: string | null;
   notes: string | null;
+  /** Executable method segment identity (additive; null for plain sets). */
+  method_segment: string | null;
+  method_segment_config: unknown;
 }
 
 /** Prescription context copied from a template into the live session. */
@@ -52,6 +55,9 @@ export interface SessionExerciseRow extends PrescriptionColumns {
   target_sets: number | null;
   target_reps: string | null;
   notes: string | null;
+  /** Selected training method (additive; null for untouched rows). */
+  training_method_id: string | null;
+  training_method_config: unknown;
   workout_sets: SetRow[];
 }
 
@@ -81,8 +87,10 @@ export const FULL_SESSION_SELECT = `
   session_exercises (
     id, exercise_id, original_exercise_id, exercise_name, primary_muscle, equipment,
     position, target_sets, target_reps, notes, ${PRESCRIPTION_COLUMNS},
+    training_method_id, training_method_config,
     workout_sets (
-      id, set_number, weight_kg, reps, rpe, completed, is_warmup, rest_seconds, completed_at, notes
+      id, set_number, weight_kg, reps, rpe, completed, is_warmup, rest_seconds, completed_at, notes,
+      method_segment, method_segment_config
     )
   )
 `;
@@ -97,6 +105,9 @@ export interface TemplateExerciseRow extends PrescriptionColumns {
   target_sets: number | null;
   target_reps: string | null;
   notes: string | null;
+  /** Method inherited by any session started from this template. */
+  training_method_id: string | null;
+  training_method_config: unknown;
 }
 
 export interface TemplateRow {
@@ -130,6 +141,7 @@ export const FULL_TEMPLATE_SELECT = `
   environment, workout_type, category, level, estimated_minutes, tags, sort_order, legacy_day_id,
   release_gate, requires_acknowledgment, library_startable, warnings,
   template_exercises (
-    id, exercise_id, exercise_name, position, target_sets, target_reps, notes, ${PRESCRIPTION_COLUMNS}
+    id, exercise_id, exercise_name, position, target_sets, target_reps, notes, ${PRESCRIPTION_COLUMNS},
+    training_method_id, training_method_config
   )
 `;

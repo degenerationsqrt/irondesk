@@ -4,6 +4,17 @@ import { useMemo, useState } from "react";
 import { ExercisePicker } from "@/components/irondesk/exercise-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  defaultMethodConfigFor,
+  methodConfigNeedsResolution,
+  serializeMethodConfig,
+} from "@/lib/irondesk/method-composition";
+import {
+  TRAINING_METHODS,
+  firstMethodSelectionRejection,
+  methodSelectionDecision,
+  type AthleteMethodProfile,
+} from "@/lib/irondesk/training-methods";
 import type {
   Exercise,
   PersonalTemplateDraft,
@@ -17,6 +28,7 @@ export function CustomWorkoutBuilder({
   onStart,
   onClose,
   readOnlyNote,
+  methodProfile = READ_ONLY_METHOD_PROFILE,
 }: {
   exercises: readonly Exercise[];
   disabled?: boolean;
@@ -24,6 +36,7 @@ export function CustomWorkoutBuilder({
   onStart?: (templateId: string) => Promise<void>;
   onClose: () => void;
   readOnlyNote?: string;
+  methodProfile?: AthleteMethodProfile;
 }) {
   const [name, setName] = useState("My Workout");
   const [focus, setFocus] = useState("");
@@ -35,6 +48,28 @@ export function CustomWorkoutBuilder({
     () => new Set(selected.map((exercise) => exercise.exerciseId)),
     [selected],
   );
+  const exerciseById = useMemo(
+    () => new Map(exercises.map((exercise) => [exercise.id, exercise])),
+    [exercises],
+  );
+
+  const methodDecisionFor = (exerciseId: string, methodId: string) => {
+    const exercise = exerciseById.get(exerciseId);
+    if (!exercise) {
+      return {
+        allowed: false,
+        reason: "That movement is no longer available in the exercise library.",
+      };
+    }
+    return methodSelectionDecision({
+      methodId,
+      profile: methodProfile,
+      exercise,
+      selectedIds: selected
+        .filter((item) => item.exerciseId !== exerciseId && item.trainingMethodId)
+        .map((item) => item.trainingMethodId!),
+    });
+  };
 
   const add = (exercise: Exercise) => {
     setSelected((current) =>
@@ -76,6 +111,17 @@ export function CustomWorkoutBuilder({
     setBusy(startAfterSave ? "start" : "save");
     setError(null);
     try {
+      const planned = selected.map((item) => {
+        const exercise = exerciseById.get(item.exerciseId);
+        if (!exercise) {
+          throw new Error(`${item.name} is no longer available in the exercise library.`);
+        }
+        return { methodId: item.trainingMethodId, exercise };
+      });
+      const rejection = firstMethodSelectionRejection(planned, methodProfile);
+      if (rejection) {
+        throw new Error(`${planned[rejection.index]!.exercise.name}: ${rejection.decision.reason}`);
+      }
       const templateId = await onCreate({ name, focus, exercises: selected });
       if (!startAfterSave) {
         onClose();
@@ -138,7 +184,7 @@ export function CustomWorkoutBuilder({
             {selected.map((exercise, index) => (
               <div
                 key={exercise.exerciseId}
-                className="grid gap-2 rounded-lg border border-border bg-surface-2/50 p-3 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_auto] sm:items-end"
+                className="grid gap-2 rounded-lg border border-border bg-surface-2/50 p-3 sm:grid-cols-[minmax(0,1fr)_5rem_6rem_9rem_auto] sm:items-end"
               >
                 <div className="min-w-0 self-center">
                   <p className="truncate text-sm font-semibold">
@@ -170,6 +216,56 @@ export function CustomWorkoutBuilder({
                     maxLength={32}
                     disabled={Boolean(createdTemplateId)}
                   />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[0.6875rem] font-semibold text-muted-foreground">
+                    Method
+                  </span>
+                  <select
+                    value={exercise.trainingMethodId ?? ""}
+                    onChange={(event) => {
+                      const methodId = event.target.value || null;
+                      if (methodId) {
+                        const decision = methodDecisionFor(exercise.exerciseId, methodId);
+                        if (!decision.allowed) {
+                          setError(`${exercise.name}: ${decision.reason}`);
+                          return;
+                        }
+                      }
+                      // Validated dosing defaults are materialized immediately so an
+                      // inherited method never arrives with an empty configuration.
+                      update(exercise.exerciseId, {
+                        trainingMethodId: methodId,
+                        trainingMethodConfig: methodId
+                          ? serializeMethodConfig(defaultMethodConfigFor(methodId))
+                          : null,
+                      });
+                    }}
+                    disabled={Boolean(createdTemplateId)}
+                    aria-label={`Training method for ${exercise.name}`}
+                    className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-xs font-semibold text-foreground"
+                  >
+                    <option value="">Standard</option>
+                    {TRAINING_METHODS.map((method) => {
+                      const decision = methodDecisionFor(exercise.exerciseId, method.id);
+                      return (
+                        <option key={method.id} value={method.id} disabled={!decision.allowed}>
+                          L{method.level} · {method.displayName}
+                          {decision.allowed ? "" : " · Locked"}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {exercise.trainingMethodId &&
+                  methodConfigNeedsResolution(
+                    exercise.trainingMethodId,
+                    defaultMethodConfigFor(exercise.trainingMethodId),
+                  ) ? (
+                    <span className="block text-[0.625rem] text-muted-foreground">
+                      Partner or stations are resolved from your real movements when the workout
+                      starts.
+                    </span>
+                  ) : null}
                 </label>
                 <div className="flex justify-end gap-1">
                   <Button
@@ -277,3 +373,11 @@ export function CustomWorkoutBuilder({
     </div>
   );
 }
+
+const READ_ONLY_METHOD_PROFILE: AthleteMethodProfile = {
+  experience: "beginner",
+  monthsTraining: 0,
+  sessionsLast28Days: 0,
+  averageReadiness: null,
+  specializationWindowOpen: false,
+};

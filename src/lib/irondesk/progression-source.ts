@@ -1,6 +1,6 @@
 /**
  * Adapters that turn each mode's stored history into the pure progression
- * module's `PerformancePoint` shape.
+ * module's `PerformancePoint` shape, plus weekly direct-set volume per muscle.
  *
  * Demo mode reads the deterministic mock exercise history (parsed from its own
  * detail strings) so previews produce real suggestions without touching an
@@ -8,12 +8,19 @@
  */
 import type { Exercise } from "./types";
 import { performanceKey, type PerformanceMap, type PerformancePoint } from "./progression";
+import {
+  weeklyDirectSets,
+  type DirectSetRecord,
+  type MuscleVolumeMap,
+} from "./method-composition";
 import { toKg } from "./units";
 
 export interface ProgressionContext {
   performance: PerformanceMap;
   /** Today's readiness score, when the athlete checked in. */
   readiness: number | null;
+  /** Weekly direct working sets per primary muscle, current vs prior window. */
+  muscleVolume: MuscleVolumeMap;
 }
 
 /**
@@ -44,16 +51,32 @@ export function parseDemoHistoryDetail(date: string, detail: string): Performanc
 export function demoProgressionContext(
   exercises: Exercise[],
   readiness: number | null,
+  now?: Date,
 ): ProgressionContext {
   const performance: PerformanceMap = {};
+  const directSets: DirectSetRecord[] = [];
   for (const exercise of exercises) {
     const points = exercise.history
       .map((entry) => parseDemoHistoryDetail(entry.date, entry.detail))
       .filter((p): p is PerformancePoint => p !== null)
       .sort((a, b) => a.date.localeCompare(b.date));
+    for (const point of points) {
+      for (let i = 0; i < Math.max(1, point.sets); i += 1) {
+        directSets.push({
+          date: point.date,
+          muscle: exercise.muscle,
+          weightKg: point.weightKg,
+          reps: point.reps,
+        });
+      }
+    }
     if (!points.length) continue;
     performance[exercise.id] = points;
     performance[performanceKey(exercise.name)] = points;
   }
-  return { performance, readiness };
+  return {
+    performance,
+    readiness,
+    muscleVolume: weeklyDirectSets(directSets, now ? { now } : {}),
+  };
 }

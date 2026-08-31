@@ -5,13 +5,19 @@
  * only its hash — and unlinking a device revokes its sync token immediately.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Smartphone, Watch } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ExternalLink, Smartphone, Watch } from "lucide-react";
 import { useState } from "react";
 
 import { SectionCard } from "@/components/irondesk/primitives";
 import { Button } from "@/components/ui/button";
 import { importKeys, linkedDevicesQuery } from "@/lib/imports/queries";
 import * as importRepo from "@/lib/imports/repo";
+
+const configuredBetaDownloadUrl = import.meta.env["VITE_HEALTH_CONNECT_DOWNLOAD_URL"]?.trim();
+const betaDownloadUrl = configuredBetaDownloadUrl?.startsWith("https://")
+  ? configuredBetaDownloadUrl
+  : undefined;
 
 const fmt = (value: string) =>
   new Date(value).toLocaleString(undefined, {
@@ -180,8 +186,9 @@ export function DeviceSyncCard() {
       <SectionCard title="Garmin watch companion" eyebrow="Connect IQ · Workout control">
         <p className="text-sm text-muted-foreground">
           Pair an IronDesk Connect IQ app to load the workout already active in your account, log
-          sets in kilograms, run rest timers and sync the finished session. The watch cannot enroll
-          in a program, start gated content or bypass a workout acknowledgment.
+          sets in the weight unit selected on your watch, run rest timers and sync the finished
+          session. The watch cannot enroll in a program, start gated content or bypass a workout
+          acknowledgment.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={() => pairGarmin.mutate()} disabled={pairGarmin.isPending}>
@@ -210,7 +217,7 @@ export function DeviceSyncCard() {
         </p>
       </SectionCard>
 
-      <SectionCard title="Health Connect companion" eyebrow="Recommended · Android">
+      <SectionCard title="Health Connect companion" eyebrow="Private beta · Android">
         <p className="text-sm text-muted-foreground">
           Health Connect has no web API, so the IronDesk companion app reads the records you approve
           on your phone and pushes them here. Pair the phone once, then use{" "}
@@ -219,6 +226,29 @@ export function DeviceSyncCard() {
           only Health Connect path on this page that populates those derived views; file uploads
           below are evidence archives only. Anything you logged by hand is never overwritten.
         </p>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link to="/health-connect">Setup and use</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link to="/privacy">Privacy and data use</Link>
+          </Button>
+          {betaDownloadUrl && (
+            <Button asChild size="sm">
+              <a href={betaDownloadUrl} rel="noreferrer">
+                Download private beta <ExternalLink className="size-4" />
+              </a>
+            </Button>
+          )}
+        </div>
+
+        {!betaDownloadUrl && (
+          <p className="mt-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+            No vetted installer is published yet. Approved testers receive a versioned build only
+            after its signing identity and checksum are verified.
+          </p>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={() => pairAndroid.mutate()} disabled={pairAndroid.isPending}>
@@ -250,9 +280,8 @@ export function DeviceSyncCard() {
         </div>
 
         <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <Smartphone className="size-3.5" /> Companion source lives in{" "}
-          <code className="text-foreground">android-health-connect/</code> — build and sideload it
-          yourself; no signed APK is distributed from here.
+          <Smartphone className="size-3.5" /> Android only. Apple Health requires a separate iOS
+          HealthKit companion or a supported file export.
         </p>
       </SectionCard>
 

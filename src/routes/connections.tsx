@@ -77,7 +77,7 @@ const FILE_IMPORT_CHOICES: readonly FileImportChoice[] = [
     eyebrow: "Raw evidence only",
     title: "Health Connect evidence archive",
     blurb:
-      "Archive the JSON created by the IronDesk Android companion, or map a CSV/JSON health export. File imports retain activity, metric and source-app evidence but do not populate Recovery or Body Metrics; use live companion sync above for that.",
+      "Archive the JSON created by the IronDesk Android companion, or map a supported CSV/JSON health export. File imports retain activity, metric and source-app evidence but do not populate Recovery or Body Metrics; use live companion sync above for that. Apple's standard export.xml is not supported yet.",
     formats: ".csv, .json, .zip",
     acceptedFormats: ["csv", "json", "zip"],
   },
@@ -97,11 +97,13 @@ const FILE_IMPORT_CHOICES: readonly FileImportChoice[] = [
     eyebrow: "Mapped file",
     title: "Generic file import",
     blurb:
-      "Import another CSV or JSON export. Unrecognized columns open the mapping wizard so you decide what each field means.",
+      "Import another CSV or JSON export. Recognized records go straight to preview with unused columns marked Not stored; mapping review opens only when essential fields are unclear, and remains available as an optional edit.",
     formats: ".csv, .json, .zip",
     acceptedFormats: ["csv", "json", "zip"],
   },
 ];
+
+const EMPTY_SAVED_MAPPINGS: readonly importRepo.SavedMapping[] = [];
 
 function ConnectionsPage() {
   const { mode } = useAuth();
@@ -119,6 +121,7 @@ function ConnectionsPage() {
   const activities = useQuery({ ...importedActivitiesQuery, enabled: live });
   const metrics = useQuery({ ...importedMetricsQuery, enabled: live });
   const mappings = useQuery({ ...savedMappingsQuery, enabled: live });
+  const savedMappings = mappings.data ?? EMPTY_SAVED_MAPPINGS;
 
   const refresh = () => {
     for (const key of Object.values(importKeys))
@@ -189,7 +192,9 @@ function ConnectionsPage() {
             <p className="text-sm text-muted-foreground">
               Choose what created the file, then preview one import below. The selected source
               controls the accepted formats and the provenance saved with each record. Health files
-              are evidence archives, not a substitute for live companion sync.
+              are evidence archives, not a substitute for live companion sync. Recognized files go
+              directly to preview; unused metadata is called out as Not stored and can be reviewed.
+              Mapping review is required only when essential columns cannot be resolved safely.
             </p>
             <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="File import source">
               {FILE_IMPORT_CHOICES.map((choice) => (
@@ -214,6 +219,7 @@ function ConnectionsPage() {
             blurb={selectedImport.blurb}
             formats={selectedImport.formats}
             acceptedFormats={selectedImport.acceptedFormats}
+            savedMappings={savedMappings}
           />
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -378,6 +384,11 @@ function ConnectionsPage() {
 
               {mappings.data?.length ? (
                 <SectionCard title="Saved field mappings" eyebrow="Reusable">
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    After you load a CSV or JSON file, IronDesk offers only mappings whose file type
+                    and referenced column names still match. You choose whether to apply one; none
+                    are applied automatically.
+                  </p>
                   <ul className="space-y-2">
                     {mappings.data.map((mapping) => (
                       <li

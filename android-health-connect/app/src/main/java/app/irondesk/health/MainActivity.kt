@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
@@ -104,8 +106,7 @@ private fun CompanionApp() {
     val client = remember { SyncClient() }
 
     var paired by remember { mutableStateOf(vault.paired) }
-    var granted by remember { mutableStateOf(false) }
-    var historyGranted by remember { mutableStateOf(false) }
+    var grantedPermissions by remember { mutableStateOf(emptySet<String>()) }
     var range by remember { mutableStateOf(RangeOption.MONTH) }
     var selection by remember { mutableStateOf(Selection()) }
     var snapshot by remember { mutableStateOf<HealthSnapshot?>(null) }
@@ -114,13 +115,16 @@ private fun CompanionApp() {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var queued by remember { mutableStateOf(queue.size) }
+    var queued by remember { mutableIntStateOf(queue.size) }
+
+    val selectedPermissions = health.permissionsFor(selection)
+    val missingSelectedPermissions = selectedPermissions - grantedPermissions
+    val missingSelectedLabels = health.missingPermissionLabels(selection, grantedPermissions)
+    val authorizedSelectedCount = selectedPermissions.size - missingSelectedPermissions.size
+    val historyGranted = health.historySupported && health.historyPermission in grantedPermissions
 
     suspend fun refreshPermissions() {
-        val granted0 = health.grantedPermissions()
-        granted = health.permissions.all { granted0.contains(it) }
-        // Never treat history as authorized when the provider cannot serve it.
-        historyGranted = health.historySupported && granted0.contains(health.historyPermission)
+        grantedPermissions = health.grantedPermissions()
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -161,7 +165,9 @@ private fun CompanionApp() {
                 val effectiveDays = range.effectiveDays(historyGranted)
                 val to = Instant.now()
                 val from = to.minus(Duration.ofDays(effectiveDays.toLong()))
-                val read = withContext(Dispatchers.IO) { health.collect(selection, from, to, zone) }
+                val read = withContext(Dispatchers.IO) {
+                    health.collect(selection, grantedPermissions, from, to, zone)
+                }
                 val (metrics, activities) = HealthMapper.map(read, zone)
                 snapshot = read
                 summary = PreviewSummary.of(effectiveDays, metrics, activities)
@@ -174,11 +180,17 @@ private fun CompanionApp() {
                         historyAuthorized = historyGranted,
                     ),
                 )
-                status = if (effectiveDays < range.days) {
+                val rangeMessage = if (effectiveDays < range.days) {
                     "Read the last $effectiveDays days. Health Connect only shares older data with historical access."
                 } else {
                     "Ready: ${read.total} records from the last $effectiveDays days."
                 }
+                val skippedMessage = if (missingSelectedLabels.isEmpty()) {
+                    ""
+                } else {
+                    " Skipped selected types without access: ${missingSelectedLabels.joinToString()}."
+                }
+                status = rangeMessage + skippedMessage
             } catch (t: Throwable) {
                 error = t.message ?: "Could not read Health Connect."
             } finally {
@@ -317,19 +329,46 @@ private fun CompanionApp() {
 
             SectionCard("Health Connect access") {
                 Text(
-                    if (granted) "Read access granted for the eight record types IronDesk uses."
-                    else "IronDesk needs read-only access to steps, sleep, resting heart rate, HRV, weight, active " +
-                        "calories, distance and workouts. Nothing is written back.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (granted) IronDesk.Green else IronDesk.Muted,
-                )
-                Button(
-                    onClick = { permissionLauncher.launch(health.permissions) },
-                    enabled = health.available && !busy,
-                    modifier = Modifier.fillMaxWidth().semantics {
-                        contentDescription = "Request read-only Health Connect permissions"
+                    when {
+                        selectedPermissions.isEmpty() -> "Choose at least one record type. Nothing is written back."
+                        missingSelectedPermissions.isEmpty() ->
+                            "Read access granted for all ${selectedPermissions.size} selected record types."
+                        authorizedSelectedCount > 0 ->
+                            "$authorizedSelectedCount of ${selectedPermissions.size} selected record types are " +
+                                "authorized. Types without access are skipped safely."
+                        else ->
+                            "Choose the health records to import, then grant read-only access. Nothing is written back."
                     },
-                ) { Text(if (granted) "Review permissions" else "Grant read access") }
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selectedPermissions.isNotEmpty() && missingSelectedPermissions.isEmpty()) {
+                        IronDesk.Green
+                    } else {
+                        IronDesk.Muted
+                    },
+                )
+                RecordToggles(selection) { selection = it; payload = null; snapshot = null }
+                if (missingSelectedLabels.isNotEmpty()) {
+                    Text(
+                        "Still needed: ${missingSelectedLabels.joinToString()}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IronDesk.Amber,
+                    )
+                }
+                Button(
+                    onClick = { permissionLauncher.launch(missingSelectedPermissions) },
+                    enabled = health.available && !busy && missingSelectedPermissions.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = "Request read-only access for selected Health Connect records"
+                    },
+                ) {
+                    Text(
+                        when {
+                            missingSelectedPermissions.isEmpty() -> "Selected access granted"
+                            authorizedSelectedCount > 0 -> "Grant remaining selected access"
+                            else -> "Grant selected access"
+                        },
+                    )
+                }
                 OutlinedButton(
                     onClick = {
                         runCatching {
@@ -392,12 +431,11 @@ private fun CompanionApp() {
                         }
                     }
                 }
-                RecordToggles(selection) { selection = it; payload = null; snapshot = null }
                 Button(
                     onClick = { prepare() },
-                    enabled = granted && !busy,
+                    enabled = authorizedSelectedCount > 0 && !busy,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Preview data") }
+                ) { Text(if (missingSelectedPermissions.isEmpty()) "Preview data" else "Preview authorized data") }
             }
 
             snapshot?.let { read ->
@@ -476,6 +514,11 @@ private fun Header() {
             "HEALTH CONNECT COMPANION",
             style = MaterialTheme.typography.titleSmall,
             color = IronDesk.Blue,
+        )
+        Text(
+            "PRIVATE BETA · ${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.bodySmall,
+            color = IronDesk.Amber,
         )
     }
 }
@@ -662,5 +705,5 @@ private fun formatTime(millis: Long): String =
     if (millis <= 0L) "Never" else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
 
 private fun android.content.Context.openUri(uri: String) {
-    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri))) }
+    runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri.toUri())) }
 }

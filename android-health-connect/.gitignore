@@ -1,6 +1,10 @@
-build/
 .gradle/
+.kotlin/
 local.properties
+**/build/
 .cxx/
+beta-artifacts/
 *.apk
 *.aab
+*.jks
+*.keystore

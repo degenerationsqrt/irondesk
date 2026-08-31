@@ -26,7 +26,12 @@ import {
   ProgressBar,
   SectionCard,
 } from "@/components/irondesk/primitives";
+import {
+  MethodExecutionCard,
+  TrainingMethodSelector,
+} from "@/components/irondesk/method-selector";
 import { AssignedWorkoutCard } from "@/components/irondesk/program-panels";
+
 import { TemplateLibrary } from "@/components/irondesk/template-library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,14 +43,56 @@ import {
   exercisesQuery,
   historyQuery,
   progressionQuery,
+  specializationWindowsQuery,
   workoutQuery,
 } from "@/lib/irondesk/queries";
 import { startLibraryWorkout } from "@/lib/irondesk/programs";
 import {
+  doubleProgressionState,
+  loadIncrementKg,
+  loadIncrementLb,
   lookupPoints,
+  parseTargetReps,
   suggestWorkingWeight,
   type WorkingWeightSuggestion,
 } from "@/lib/irondesk/progression";
+import {
+  buildMethodPrescription,
+  deriveMethodProfile,
+  getMethod,
+  methodSelectionDecision,
+} from "@/lib/irondesk/training-methods";
+import {
+  antagonistPartnerCandidates,
+  blackSetPlan,
+  blackWindowState,
+  canOpenBlackWindow,
+  canRecordBlackExposure,
+  circuitSlots,
+  commitBlackApplication,
+  currentBlackWindow,
+  methodSetPlan,
+  replaceCircuitStation,
+  restSecondsForCompletedSet,
+
+  parseMethodConfig,
+  parseMethodSegmentConfig,
+  planBlackBlockResult,
+  preExhaustCandidates,
+  selectAntagonistPartner,
+  selectCircuitGroup,
+  selectPreExhaustPlan,
+  serializeMethodSegmentConfig,
+  staggerCandidates,
+  stationCandidates,
+  volumeRecommendationForMuscle,
+  type BlackExercisePrescription,
+  type MethodConfig,
+  type MethodSegmentConfig,
+  type MethodSetPlan,
+  type MovementCandidate,
+} from "@/lib/irondesk/method-composition";
+
 import * as repo from "@/lib/irondesk/repo";
 import type {
   ActiveWorkout,
@@ -139,6 +186,20 @@ function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean })
   const invalidate = useIronDeskInvalidate();
   const { data: history } = useQuery({ ...historyQuery("live"), enabled: live });
   const { data: account } = useQuery({ ...accountQuery, enabled: live });
+  const { data: progression } = useQuery({ ...progressionQuery("live"), enabled: live });
+  const { data: specializationWindows } = useQuery({
+    ...specializationWindowsQuery("live"),
+    enabled: live,
+  });
+  const methodProfile = useMemo(
+    () =>
+      deriveMethodProfile({
+        sessionDates: history?.map((session) => session.date) ?? [],
+        averageReadiness: progression?.readiness ?? null,
+        specializationWindowOpen: Boolean(currentBlackWindow(specializationWindows ?? [])),
+      }),
+    [history, progression?.readiness, specializationWindows],
+  );
   const browserTimeZone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     [],
@@ -151,7 +212,7 @@ function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean })
     setBusy(true);
     setError(null);
     try {
-      await repo.startWorkoutFromTemplate(template.id);
+      await repo.startWorkoutFromTemplate(template.id, methodProfile);
       invalidate();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not start that template.");
@@ -193,13 +254,13 @@ function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean })
   };
 
   const createPersonal = async (draft: PersonalTemplateDraft) => {
-    const templateId = await repo.createPersonalWorkoutTemplate(draft);
+    const templateId = await repo.createPersonalWorkoutTemplate(draft, methodProfile);
     invalidate();
     return templateId;
   };
 
   const startCreated = async (templateId: string) => {
-    await repo.startWorkoutFromTemplate(templateId);
+    await repo.startWorkoutFromTemplate(templateId, methodProfile);
     invalidate();
   };
 
@@ -231,6 +292,7 @@ function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean })
         canStart={live}
         note="Demo mode is read-only — sign in to start a template and save your sets."
         exercises={library}
+        methodProfile={methodProfile}
         {...(live
           ? {
               onCreatePersonal: createPersonal,
@@ -318,6 +380,52 @@ function WorkoutConsole({
   const unit = weightUnit(units);
   const mode = useServiceMode();
   const progression = useQuery(progressionQuery(mode)).data;
+  const sessionHistory = useQuery(historyQuery(mode)).data;
+  const specializationWindows = useQuery(specializationWindowsQuery(mode)).data ?? [];
+
+  /** The current IronDesk Black window — active or suspended, both are current. */
+  const openBlackWindow = currentBlackWindow(specializationWindows);
+
+
+  /**
+   * Method eligibility is earned: experience and consistency are derived from
+   * logged sessions, never self-declared.
+   */
+  const methodProfile = useMemo(
+    () =>
+      deriveMethodProfile({
+        sessionDates: sessionHistory?.map((session) => session.date) ?? [],
+        averageReadiness: progression?.readiness ?? null,
+        specializationWindowOpen: Boolean(openBlackWindow),
+      }),
+    [sessionHistory, progression?.readiness, openBlackWindow],
+  );
+
+  /** Persisted per-exercise method selection, hydrated from the session rows. */
+  const [methodByExercise, setMethodByExercise] = useState<Record<string, string>>(() => {
+    const map: Record<string, string> = {};
+    for (const ex of initial.exercises) if (ex.trainingMethodId) map[ex.id] = ex.trainingMethodId;
+    return map;
+  });
+  const [methodConfigByExercise, setMethodConfigByExercise] = useState<Record<string, MethodConfig>>(
+    () => {
+      const map: Record<string, MethodConfig> = {};
+      for (const ex of initial.exercises)
+        map[ex.id] = parseMethodConfig(ex.trainingMethodConfig ?? {});
+      return map;
+    },
+  );
+  const [methodPickerFor, setMethodPickerFor] = useState<string | null>(null);
+  const [methodNotice, setMethodNotice] = useState<string | null>(null);
+  const methodFor = (exId: string) => methodByExercise[exId] ?? "double-progression";
+  const configFor = (exId: string) => methodConfigByExercise[exId] ?? {};
+  const stackedMethodIds = useMemo(
+    () => Object.values(methodByExercise),
+    [methodByExercise],
+  );
+
+
+
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>(initial.exercises);
   const [notes, setNotes] = useState(initial.notes);
@@ -342,7 +450,7 @@ function WorkoutConsole({
 
   /** Runs a write in live mode and tracks saving/saved/error for the UI. */
   const persist = useCallback(
-    async (task: () => Promise<void>) => {
+    async (task: () => Promise<void>, options?: { rethrow?: boolean }) => {
       if (!live) return;
       pending.current += 1;
       setSaveState("saving");
@@ -353,6 +461,7 @@ function WorkoutConsole({
       } catch (caught) {
         setSaveError(caught instanceof Error ? caught.message : "Change not saved.");
         setSaveState("error");
+        if (options?.rethrow) throw caught;
       } finally {
         pending.current -= 1;
       }
@@ -433,6 +542,558 @@ function WorkoutConsole({
     }
   };
 
+  /* ---------------------------------------------- training-method selection */
+
+  /** Logged RPE is the athlete's effort signal; RIR is its inverse. */
+  const rirFromRpe = (rpe: number): number | null => (rpe > 0 ? Math.max(0, 10 - rpe) : null);
+
+  /** Real movements available for pairing: this session first, then the library. */
+  const methodCandidates = useMemo<MovementCandidate[]>(() => {
+    const fromSession = exercises.map((e) => ({
+      id: e.id,
+      name: e.name,
+      muscle: e.muscle,
+      equipment: e.equipment,
+      source: "session" as const,
+    }));
+    const seen = new Set(fromSession.map((c) => c.name.toLowerCase()));
+    const fromLibrary = library
+      .filter((e) => !seen.has(e.name.toLowerCase()))
+      .map((e) => ({
+        id: e.id,
+        name: e.name,
+        muscle: e.muscle,
+        equipment: e.equipment,
+        source: "library" as const,
+      }));
+    return [...fromSession, ...fromLibrary];
+
+  }, [exercises, library]);
+
+  /**
+   * Resolves the real configuration a method needs: genuine partner movements,
+   * genuine station lists, and the actual top-set basis for heavy + backoff.
+   * Nothing here invents a placeholder movement.
+   */
+  const buildConfigFor = (ex: WorkoutExercise, methodId: string): MethodConfig => {
+    const primary: MovementCandidate = {
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+      equipment: ex.equipment,
+    };
+    const groupKey = `${ex.id}:${methodId}`;
+    switch (methodId) {
+      case "antagonist-supersets": {
+        const partner = selectAntagonistPartner(primary, methodCandidates);
+        return partner
+          ? { groupKey, partnerExerciseId: partner.id, partnerName: partner.name }
+          : { groupKey };
+      }
+      case "pre-exhaust": {
+        const plan = selectPreExhaustPlan(primary, methodCandidates);
+        if (!plan) return { groupKey };
+        const partner = plan.kind === "pre-exhaust" ? plan.first : plan.second;
+        return {
+          groupKey,
+          pairKind: plan.kind,
+          partnerExerciseId: partner.id,
+          partnerName: partner.name,
+        };
+      }
+      case "trisets":
+      case "giant-sets": {
+        const group = selectCircuitGroup({ methodId, primary, candidates: methodCandidates });
+        return group
+          ? {
+              groupKey,
+              stationNames: group.stations.map((s) => s.name),
+              stationIds: group.stations.map((s) => s.id),
+            }
+          : { groupKey };
+      }
+      case "heavy-backoff": {
+        const basis =
+          suggestions[ex.id]?.weightKg ??
+          [...ex.sets].reverse().find((s) => s.weightKg > 0)?.weightKg ??
+          null;
+        return basis ? { topSetWeightKg: basis } : {};
+      }
+      case "irondesk-black":
+        return openBlackWindow ? { blackWindowId: openBlackWindow.id } : {};
+      default:
+        return {};
+    }
+  };
+
+  /** Selection is gated by eligibility AND the session fatigue budget. */
+  const chooseMethod = (exId: string, methodId: string) => {
+    const exercise = exercises.find((e) => e.id === exId);
+    if (!exercise) return;
+    const others = Object.entries(methodByExercise)
+      .filter(([id]) => id !== exId)
+      .map(([, value]) => value);
+    const decision = methodSelectionDecision({
+      methodId,
+      profile: methodProfile,
+      exercise,
+      selectedIds: others,
+    });
+    if (!decision.allowed) {
+      setMethodNotice(decision.reason);
+      return;
+    }
+    const config = buildConfigFor(exercise, methodId);
+    setMethodNotice(null);
+    setMethodByExercise((prev) => ({ ...prev, [exId]: methodId }));
+    setMethodConfigByExercise((prev) => ({ ...prev, [exId]: config }));
+    setMethodPickerFor(null);
+    if (live && !exId.startsWith("local-")) {
+      void persist(() =>
+        repo.setSessionExerciseMethod({ sessionExerciseId: exId, methodId, config }),
+      );
+    }
+  };
+
+  /** Real replacement candidates for a pairing/station method, never placeholders. */
+  const replacementCandidatesFor = (ex: WorkoutExercise, methodId: string): MovementCandidate[] => {
+    const primary: MovementCandidate = {
+      id: ex.id,
+      name: ex.name,
+      muscle: ex.muscle,
+      equipment: ex.equipment,
+    };
+    switch (methodId) {
+      case "antagonist-supersets":
+        return antagonistPartnerCandidates(primary, methodCandidates);
+      case "pre-exhaust": {
+        const pre = preExhaustCandidates(primary, methodCandidates);
+        return pre.length ? pre : staggerCandidates(primary, methodCandidates);
+      }
+      case "trisets":
+      case "giant-sets":
+        return stationCandidates({ methodId, primary, candidates: methodCandidates });
+      default:
+        return [];
+    }
+  };
+
+  /**
+   * Athlete-chosen partner or station overrides the engine's default. Circuit
+   * edits are slot based: the primary is pinned, the group never shrinks below
+   * its required station count, and a movement is never duplicated.
+   */
+  const replaceMethodPartner = (
+    exId: string,
+    methodId: string,
+    choice: MovementCandidate,
+    slotIndex?: number,
+  ) => {
+    const current = configFor(exId);
+    const ex = exercises.find((e) => e.id === exId);
+    let next: MethodConfig;
+    if ((methodId === "trisets" || methodId === "giant-sets") && ex) {
+      const primary: MovementCandidate = {
+        id: ex.id,
+        name: ex.name,
+        muscle: ex.muscle,
+        equipment: ex.equipment,
+        source: "session",
+      };
+      const slots = circuitSlots({
+        methodId,
+        primary,
+        ...(current.stationIds ? { stationIds: current.stationIds } : {}),
+        ...(current.stationNames ? { stationNames: current.stationNames } : {}),
+      });
+      const firstEmpty = slots.stationIds.findIndex((id) => !id);
+      const target =
+        slotIndex ?? (firstEmpty > 0 ? firstEmpty : Math.max(1, slots.total - 1));
+      const result = replaceCircuitStation({
+        methodId,
+        primary,
+        ...(current.stationIds ? { stationIds: current.stationIds } : {}),
+        ...(current.stationNames ? { stationNames: current.stationNames } : {}),
+        slotIndex: target,
+        choice,
+      });
+      if (result.reason) setMethodNotice(result.reason);
+      next = {
+        ...current,
+        stationIds: result.stationIds,
+        stationNames: result.stationNames,
+        userSelected: true,
+      };
+    } else {
+      next = {
+        ...current,
+        partnerExerciseId: choice.id,
+        partnerName: choice.name,
+        userSelected: true,
+      };
+    }
+
+    setMethodConfigByExercise((prev) => ({ ...prev, [exId]: next }));
+    if (live && !exId.startsWith("local-")) {
+      void persist(() =>
+        repo.setSessionExerciseMethod({ sessionExerciseId: exId, methodId, config: next }),
+      );
+    }
+  };
+
+  /** The persisted Black prescription assigned to this movement, when any. */
+  const blackPrescriptionFor = (exId: string): BlackExercisePrescription | null => {
+    const ex = exercises.find((e) => e.id === exId);
+    if (!ex || !openBlackWindow) return null;
+    const name = ex.name.toLowerCase();
+    return (
+      openBlackWindow.prescriptions.find((p) => p.exerciseId === ex.id) ??
+      openBlackWindow.prescriptions.find((p) => p.exerciseName.toLowerCase() === name) ??
+      null
+    );
+  };
+
+  /**
+   * The executable plan for a movement's selected method. IronDesk Black reads
+   * its persisted per-exercise prescription instead of a generic structure.
+   */
+  const planForExercise = (exId: string): MethodSetPlan | null => {
+    const ex = exercises.find((e) => e.id === exId);
+    if (!ex) return null;
+    const workingWeightKg =
+      suggestions[exId]?.weightKg ??
+      [...ex.sets].reverse().find((s) => s.weightKg > 0)?.weightKg ??
+      null;
+    const methodId = methodFor(exId);
+    if (methodId === "irondesk-black") {
+      const prescription = blackPrescriptionFor(exId);
+      if (!prescription || !openBlackWindow) return null;
+      return blackSetPlan({ prescription, windowId: openBlackWindow.id, workingWeightKg });
+    }
+    return methodSetPlan({
+      methodId,
+      config: configFor(exId),
+      workingWeightKg,
+      plannedSets: ex.sets.length || ex.targetSets || 3,
+      targetReps: suggestions[exId]?.reps ?? parseTargetReps(ex.targetReps).high,
+      ...(units === "imperial" ? { incrementLb: loadIncrementLb(ex.equipment) } : {}),
+    });
+  };
+
+  /**
+   * Writes one method's real set structure into a single movement. Completed
+   * sets are never rewritten and every prefilled row stays editable.
+   */
+  const writePlanToSets = async (exId: string, plan: MethodSetPlan) => {
+    const ex = exercises.find((e) => e.id === exId);
+    if (!ex) return;
+    const open = ex.sets.filter((s) => !s.done);
+    for (let i = 0; i < plan.rows.length; i += 1) {
+      const row = plan.rows[i]!;
+      const segmentConfig: MethodSegmentConfig = {
+        methodId: plan.methodId,
+        ...(row.segmentConfig ?? {}),
+        ...(row.restSeconds == null ? {} : { restSeconds: row.restSeconds }),
+      };
+      const target = open[i];
+      if (target) {
+        const patch: Partial<SetEntry> = {
+          ...(row.weightKg == null ? {} : { weightKg: row.weightKg }),
+          ...(row.reps == null ? {} : { reps: row.reps }),
+          methodSegment: row.segment ?? null,
+          methodSegmentConfig: serializeMethodSegmentConfig(segmentConfig),
+        };
+        patchLocal(exId, target.id, patch);
+        if (live && !target.id.startsWith("local-")) {
+          try {
+            await persist(
+              () =>
+                repo.updateSet(target.id, {
+                  ...(patch.weightKg !== undefined ? { weightKg: patch.weightKg } : {}),
+                  ...(patch.reps !== undefined ? { reps: patch.reps } : {}),
+                  methodSegment: patch.methodSegment ?? null,
+                  methodSegmentConfig: parseMethodSegmentConfig(patch.methodSegmentConfig),
+                }),
+              { rethrow: true },
+            );
+          } catch (caught) {
+            patchLocal(exId, target.id, target);
+            throw caught;
+          }
+        }
+      } else {
+        await addSetWithValues(exId, row.weightKg, row.reps, {
+          id: row.segment ?? null,
+          config: segmentConfig,
+        }, { strict: true });
+      }
+    }
+  };
+
+  /**
+   * Applies the whole Black block at once. The database has no atomic RPC for
+   * this client-composed write, so the weekly exposure is recorded only after
+   * every method row and set row has returned a verified success.
+   */
+  const applyBlackBlock = async () => {
+    if (!openBlackWindow) return;
+    if (blackState && !blackState.canApply) {
+      setMethodNotice(blackState.resumeRequirement ?? blackState.reason);
+      return;
+    }
+    const targets = openBlackWindow.prescriptions
+      .map((p) => {
+        const match =
+          exercises.find((e) => e.id === p.exerciseId) ??
+          exercises.find((e) => e.name.toLowerCase() === p.exerciseName.toLowerCase());
+        return match ? { exerciseId: match.id, prescription: p } : null;
+      })
+      .filter((t): t is { exerciseId: string; prescription: BlackExercisePrescription } => t !== null);
+    if (!targets.length) {
+      setMethodNotice("None of this Black block's movements are in the current workout yet.");
+      return;
+    }
+
+    if (live && targets.some((target) => target.exerciseId.startsWith("local-"))) {
+      setMethodNotice("Wait for every Black movement to finish saving, then apply the block again.");
+      return;
+    }
+
+    // Preflight the whole block using the same eligibility/exercise/stack gate
+    // as the builder and single-method picker. Nothing is written on refusal.
+    const plannedMethods = { ...methodByExercise };
+    for (const target of targets) {
+      const exercise = exercises.find((item) => item.id === target.exerciseId);
+      if (!exercise) return;
+      const decision = methodSelectionDecision({
+        methodId: "irondesk-black",
+        profile: methodProfile,
+        exercise,
+        selectedIds: Object.entries(plannedMethods)
+          .filter(([id]) => id !== target.exerciseId)
+          .map(([, methodId]) => methodId),
+      });
+      if (!decision.allowed) {
+        setMethodNotice(`${exercise.name}: ${decision.reason}`);
+        return;
+      }
+      plannedMethods[target.exerciseId] = "irondesk-black";
+    }
+
+    let exposureWeekStart: string | null = null;
+    if (live) {
+      try {
+        const existing = await repo.listBlackExposures();
+        const gate = canRecordBlackExposure({
+          targetRegion: openBlackWindow.targetRegion,
+          date: new Date(),
+          existing,
+        });
+        if (!gate.allowed) {
+          setMethodNotice(gate.reason ?? "That Black exposure was already recorded this week.");
+          return;
+        }
+        exposureWeekStart = gate.weekStart;
+      } catch (caught) {
+        setMethodNotice(
+          caught instanceof Error ? caught.message : "That Black exposure was already recorded.",
+        );
+        return;
+      }
+    }
+
+    try {
+      await commitBlackApplication({
+        targets,
+        writeTarget: async (target) => {
+          const exercise = exercises.find((item) => item.id === target.exerciseId);
+          if (!exercise) throw new Error("A Black movement is no longer in this workout.");
+          const config = buildConfigFor(exercise, "irondesk-black");
+          if (live) {
+            await persist(
+              () =>
+                repo.setSessionExerciseMethod({
+                  sessionExerciseId: target.exerciseId,
+                  methodId: "irondesk-black",
+                  config,
+                }),
+              { rethrow: true },
+            );
+          }
+          setMethodByExercise((previous) => ({
+            ...previous,
+            [target.exerciseId]: "irondesk-black",
+          }));
+          setMethodConfigByExercise((previous) => ({
+            ...previous,
+            [target.exerciseId]: config,
+          }));
+
+          const workingWeightKg =
+            suggestions[target.exerciseId]?.weightKg ??
+            [...exercise.sets].reverse().find((set) => set.weightKg > 0)?.weightKg ??
+            null;
+          await writePlanToSets(
+            target.exerciseId,
+            blackSetPlan({
+              prescription: target.prescription,
+              windowId: openBlackWindow.id,
+              workingWeightKg,
+            }),
+          );
+        },
+        recordExposure: async () => {
+          if (!live) return;
+          if (!exposureWeekStart)
+            throw new Error("IronDesk could not verify the Black exposure week.");
+          await repo.recordBlackExposure({
+            windowId: openBlackWindow.id,
+            sessionId: initial.id,
+            targetRegion: openBlackWindow.targetRegion,
+            weekStart: exposureWeekStart,
+            prescriptions: targets.map((target) => target.prescription),
+          });
+        },
+      });
+    } catch (caught) {
+      if (live) invalidate();
+      setMethodNotice(
+        caught instanceof Error
+          ? `Black block was not recorded: ${caught.message}`
+          : "Black block was not recorded because a workout write failed.",
+      );
+      return;
+    }
+    if (live) invalidate();
+    setMethodNotice(
+      `Black block applied to ${targets.length} movement(s) · one ${openBlackWindow.targetRegion} exposure this week.`,
+    );
+  };
+
+  /**
+   * Writes the selected method's real set structure into the active workout.
+   * IronDesk Black always applies as a block, never per exercise.
+   */
+  const applyMethodToSets = async (exId: string) => {
+    const methodId = methodFor(exId);
+    if (methodId === "irondesk-black") {
+      await applyBlackBlock();
+      return;
+    }
+    const exercise = exercises.find((item) => item.id === exId);
+    if (!exercise) return;
+    const decision = methodSelectionDecision({
+      methodId,
+      profile: methodProfile,
+      exercise,
+      selectedIds: Object.entries(methodByExercise)
+        .filter(([id]) => id !== exId)
+        .map(([, selectedMethodId]) => selectedMethodId),
+    });
+    if (!decision.allowed) {
+      setMethodNotice(decision.reason);
+      return;
+    }
+    const plan = planForExercise(exId);
+    if (!plan) return;
+    try {
+      await writePlanToSets(exId, plan);
+      setMethodNotice(plan.explanation);
+    } catch (caught) {
+      setMethodNotice(caught instanceof Error ? caught.message : "That method could not be applied.");
+    }
+  };
+
+
+  /* -------------------------------------------------- IronDesk Black window */
+
+  const blackEligibility = canOpenBlackWindow(methodProfile, specializationWindows);
+  const blackState = openBlackWindow
+    ? blackWindowState({ window: openBlackWindow, profile: methodProfile })
+    : null;
+
+  /** Suspension and expiry are persisted as soon as the engine detects them. */
+  useEffect(() => {
+    void reconcileBlackWindow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openBlackWindow?.id, blackState?.status, live]);
+
+  /** Opens a real 2-3 week specialization block on a muscle trained today. */
+  const startBlackWindow = async (region: string) => {
+    const workingWeightKgByExerciseId = Object.fromEntries(
+      exercises.map((e) => [
+        e.id,
+        suggestions[e.id]?.weightKg ??
+          [...e.sets].reverse().find((s) => s.weightKg > 0)?.weightKg ??
+          null,
+      ]),
+    );
+    const { plan, reason } = planBlackBlockResult({
+      targetRegion: region,
+      candidates: methodCandidates,
+      workingWeightKgByExerciseId,
+    });
+    if (!plan) {
+      setMethodNotice(reason ?? "No safe specialization movements available for that region yet.");
+      return;
+    }
+
+    if (!live) {
+      setMethodNotice("Specialization windows are stored on your account — switch out of demo mode.");
+      return;
+    }
+    await persist(async () => {
+      await repo.openSpecializationWindow({
+        targetRegion: plan.targetRegion,
+        startedOn: plan.startedOn,
+        endsOn: plan.endsOn,
+        modifierIds: plan.modifierIds,
+        exerciseNames: plan.exercises.map((e) => e.name),
+        prescriptions: plan.prescriptions,
+      });
+      invalidate();
+    });
+    setMethodNotice(`Black block opened: ${plan.sequence.join(" → ")}`);
+  };
+
+  /**
+   * Persists a suspension, a resume, or an expiry the engine detected, so the
+   * window's lifecycle is fully audited rather than inferred at render time.
+   */
+  const reconcileBlackWindow = async () => {
+    if (!openBlackWindow || !live || !blackState) return;
+    const next =
+      blackState.status === "expired"
+        ? "expired"
+        : blackState.status === "suspended"
+          ? "suspended"
+          : blackState.status === "active" && openBlackWindow.status === "suspended"
+            ? "active"
+            : null;
+    if (!next || openBlackWindow.status === next) return;
+
+    await persist(async () => {
+      await repo.closeSpecializationWindow(openBlackWindow.id, next);
+      invalidate();
+    });
+    setMethodNotice(
+      blackState.status === "expired"
+        ? (blackState.exitRecommendation ?? blackState.reason)
+        : blackState.reason,
+    );
+  };
+
+  const endBlackWindow = async () => {
+    if (!openBlackWindow || !live) return;
+    await persist(async () => {
+      await repo.closeSpecializationWindow(openBlackWindow.id, "completed");
+      invalidate();
+    });
+    setMethodNotice(blackState?.exitRecommendation ?? "Specialization window closed.");
+  };
+
+
+
   const patchLocal = (exId: string, setId: string, patch: Partial<SetEntry>) =>
     setExercises((prev) =>
       prev.map((e) =>
@@ -450,6 +1111,10 @@ function WorkoutConsole({
         ...(patch.weightKg !== undefined ? { weightKg: patch.weightKg } : {}),
         ...(patch.reps !== undefined ? { reps: patch.reps } : {}),
         ...(patch.rpe !== undefined ? { rpe: patch.rpe } : {}),
+        ...(patch.methodSegment !== undefined ? { methodSegment: patch.methodSegment } : {}),
+        ...(patch.methodSegmentConfig !== undefined
+          ? { methodSegmentConfig: parseMethodSegmentConfig(patch.methodSegmentConfig) }
+          : {}),
       }),
     );
   };
@@ -460,10 +1125,16 @@ function WorkoutConsole({
     const next = !set.done;
     patchLocal(exId, setId, { done: next });
     if (next) {
-      // Prefer the template's prescribed rest when the session came from one.
-      setRest(exercises.find((e) => e.id === exId)?.restSeconds ?? 120);
+      // The set's own method segment prescribes its rest; template rest is next.
+      setRest(
+        restSecondsForCompletedSet({
+          segmentConfig: set.methodSegmentConfig,
+          exerciseRestSeconds: exercises.find((e) => e.id === exId)?.restSeconds ?? null,
+        }),
+      );
       setRestStarted(Date.now());
     }
+
     if (setId.startsWith("local-")) return;
     const restSeconds =
       next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
@@ -478,40 +1149,72 @@ function WorkoutConsole({
     );
   };
 
-  const addSet = async (exId: string) => {
-    if (busySets.current.has(exId)) return; // guards duplicate rows from rapid taps
+  const addSetWithValues = async (
+    exId: string,
+    weightKg?: number | null,
+    reps?: number | null,
+    segment?: { id: string | null; config: MethodSegmentConfig } | null,
+    options?: { strict?: boolean },
+  ) => {
+    if (busySets.current.has(exId)) {
+      if (options?.strict)
+        throw new Error("Another set write is still in progress. Wait a moment and try again.");
+      return; // guards duplicate rows from rapid taps
+    }
     busySets.current.add(exId);
     const ex = exercises.find((e) => e.id === exId);
     const last = ex?.sets[ex.sets.length - 1];
     const suggestion = suggestions[exId];
     const draft: SetEntry = {
       id: uid(),
-      weightKg: last?.weightKg ?? suggestion?.weightKg ?? defaultSetWeightKg(units),
-      reps: last?.reps ?? suggestion?.reps ?? 8,
+      weightKg: weightKg ?? last?.weightKg ?? suggestion?.weightKg ?? defaultSetWeightKg(units),
+      reps: reps ?? last?.reps ?? suggestion?.reps ?? 8,
       rpe: last?.rpe ?? 7,
       done: false,
+      methodSegment: segment?.id ?? null,
+      methodSegmentConfig: segment ? serializeMethodSegmentConfig(segment.config) : null,
     };
     setExercises((prev) =>
       prev.map((e) => (e.id === exId ? { ...e, sets: [...e.sets, draft] } : e)),
     );
-    if (live && !exId.startsWith("local-")) {
-      await persist(async () => {
-        const id = await repo.addSet(exId, {
-          weightKg: draft.weightKg,
-          reps: draft.reps,
-          rpe: draft.rpe,
-        });
-        setExercises((prev) =>
-          prev.map((e) =>
-            e.id === exId
-              ? { ...e, sets: e.sets.map((s) => (s.id === draft.id ? { ...s, id } : s)) }
-              : e,
-          ),
+    try {
+      if (live && !exId.startsWith("local-")) {
+        await persist(
+          async () => {
+            const id = await repo.addSet(exId, {
+              weightKg: draft.weightKg,
+              reps: draft.reps,
+              rpe: draft.rpe,
+              ...(segment
+                ? { methodSegment: segment.id, methodSegmentConfig: segment.config }
+                : {}),
+            });
+            setExercises((prev) =>
+              prev.map((e) =>
+                e.id === exId
+                  ? { ...e, sets: e.sets.map((s) => (s.id === draft.id ? { ...s, id } : s)) }
+                  : e,
+              ),
+            );
+          },
+          options?.strict ? { rethrow: true } : undefined,
         );
-      });
+      }
+    } catch (caught) {
+      setExercises((prev) =>
+        prev.map((e) =>
+          e.id === exId ? { ...e, sets: e.sets.filter((set) => set.id !== draft.id) } : e,
+        ),
+      );
+      throw caught;
+    } finally {
+      busySets.current.delete(exId);
     }
-    busySets.current.delete(exId);
   };
+
+  const addSet = (exId: string) => addSetWithValues(exId);
+
+
 
   const removeSet = (exId: string, setId: string) => {
     setExercises((prev) =>
@@ -781,6 +1484,128 @@ function WorkoutConsole({
         </div>
       )}
 
+      <SectionCard
+        title="IronDesk Black"
+        eyebrow="Specialization window"
+        action={
+          openBlackWindow ? (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={!blackState?.canApply}
+                onClick={() => void applyBlackBlock()}
+              >
+                Apply Black block
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => void endBlackWindow()}>
+                End block
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {openBlackWindow ? (
+          <div
+            className={`space-y-1.5 rounded-lg border p-3 text-xs text-muted-foreground ${
+              blackState?.status === "suspended"
+                ? "border-warning/50 bg-warning/5"
+                : "border-primary/40 bg-primary/5"
+            }`}
+          >
+            <p className="numeric text-sm font-bold text-foreground">
+              {openBlackWindow.targetRegion} · {openBlackWindow.startedOn} → {openBlackWindow.endsOn}
+            </p>
+            <p className={blackState?.status === "suspended" ? "text-warning" : undefined}>
+              {blackState?.reason}
+            </p>
+            {blackState?.resumeRequirement ? (
+              <p className="text-warning">{blackState.resumeRequirement}</p>
+            ) : null}
+
+            {openBlackWindow.prescriptions.length ? (
+              <ul className="space-y-2">
+                {openBlackWindow.prescriptions.map((prescription) => {
+                  const inSession = exercises.find(
+                    (e) =>
+                      e.id === prescription.exerciseId ||
+                      e.name.toLowerCase() === prescription.exerciseName.toLowerCase(),
+                  );
+                  const libraryMatch = library.find(
+                    (e) => e.name.toLowerCase() === prescription.exerciseName.toLowerCase(),
+                  );
+                  return (
+                    <li
+                      key={`${prescription.exerciseId}-${prescription.modifierId}`}
+                      className="rounded-md border border-border bg-surface-2/50 p-2.5"
+                    >
+                      <p className="numeric text-xs font-bold text-foreground">
+                        {prescription.exerciseName} · {prescription.modifierName}
+                      </p>
+                      <p className="numeric">
+                        {prescription.sets}×{prescription.reps} @ {prescription.loadPercent}%
+                        {prescription.loadKg
+                          ? ` (${fromKg(prescription.loadKg, units)} ${unit})`
+                          : ""}{" "}
+                        · RIR {prescription.expectedRir}
+                      </p>
+                      <p className="numeric">
+                        Intra-set rest {prescription.intraSetRestSeconds}s · between sets{" "}
+                        {prescription.interSetRestSeconds}s
+                      </p>
+                      <p>Stop rule: {prescription.stopRule}</p>
+                      {!inSession && libraryMatch ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="mt-2"
+                          onClick={() =>
+                            void addExercise({
+                              id: libraryMatch.id,
+                              name: libraryMatch.name,
+                              muscle: libraryMatch.muscle,
+                              equipment: libraryMatch.equipment,
+                            })
+                          }
+                        >
+                          Add {libraryMatch.name}
+                        </Button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : openBlackWindow.exerciseNames.length ? (
+              <p>Movements: {openBlackWindow.exerciseNames.join(", ")}</p>
+            ) : null}
+            {blackState?.exitRecommendation ? <p>{blackState.exitRecommendation}</p> : null}
+          </div>
+        ) : blackEligibility.allowed ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Open a 2-3 week block on one region. Only recovery-safe modifiers are used.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[...new Set(exercises.map((e) => e.muscle))].map((muscle) => (
+                <Button
+                  key={muscle}
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void startBlackWindow(muscle)}
+                >
+                  Specialize {muscle}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <ul className="space-y-1 text-xs text-warning">
+            {blackEligibility.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
+
       {exercises.length === 0 ? (
         <EmptyState
           title="No exercises yet"
@@ -888,6 +1713,174 @@ function WorkoutConsole({
                 </div>
               )}
 
+              {(() => {
+                const method = getMethod(methodFor(ex.id));
+                if (!method) return null;
+                const config = configFor(ex.id);
+                const suggestion = suggestions[ex.id];
+                const setWeightKg =
+                  suggestion?.weightKg ?? ex.sets[ex.sets.length - 1]?.weightKg ?? 0;
+                const setReps = suggestion?.reps ?? parseTargetReps(ex.targetReps).high;
+                const pairInstructions =
+                  method.id === "pre-exhaust" && config.partnerName
+                    ? config.pairKind === "staggered"
+                      ? [
+                          `Main work: ${ex.name} as prescribed`,
+                          `Stagger ${config.partnerName} into each rest period — non-interfering muscle only`,
+                        ]
+                      : [
+                          `Pre-exhaust: ${config.partnerName} for 10-12 reps at RIR 1-2`,
+                          `Then ${ex.name} — expect a lower load, that is the point`,
+                        ]
+                    : null;
+                const prescription = buildMethodPrescription(method.id, {
+                  weightKg: setWeightKg,
+                  reps: setReps,
+                  exerciseName: ex.name,
+                  partnerName: config.partnerName ?? null,
+                  stationNames: config.stationNames ?? null,
+                  pairInstructions,
+                });
+                const target = parseTargetReps(ex.targetReps);
+                const doubleState =
+                  method.id === "double-progression"
+                    ? doubleProgressionState({
+                        weightKg: setWeightKg,
+                        sets: ex.sets
+                          .filter((s) => s.done)
+                          .map((s) => ({ reps: s.reps, rir: rirFromRpe(s.rpe) })),
+                        target,
+                        incrementKg: loadIncrementKg(ex.equipment),
+                        plannedSets: ex.sets.length,
+                      })
+                    : null;
+                const loggedReps = ex.sets
+                  .filter((s) => s.done)
+                  .map((s) => s.reps)
+                  .join("/");
+                const doubleLine = doubleState
+                  ? `${fromKg(setWeightKg, units)} ${unit} • target ${
+                      target.low === target.high ? target.low : `${target.low}-${target.high}`
+                    }${
+                      loggedReps ? ` • last: ${loggedReps}` : ""
+                    } — ${doubleState.explanation}`
+                  : null;
+                const readinessNote =
+                  suggestion && suggestion.readinessPercent !== 0
+                    ? `${suggestion.readinessPercent > 0 ? "+" : ""}${suggestion.readinessPercent}% · readiness`
+                    : null;
+                const volume =
+                  method.id === "volume-progression" && progression
+                    ? volumeRecommendationForMuscle({
+                        muscle: ex.muscle,
+                        volume: progression.muscleVolume,
+                        averageReadiness: progression.readiness,
+                      })
+                    : null;
+                const plan = planForExercise(ex.id);
+                const blackPrescription =
+                  method.id === "irondesk-black" ? blackPrescriptionFor(ex.id) : null;
+                // Black shows its real assignment: modifier, load, sets/reps,
+                // rest intervals and stop rule — never a metadata summary.
+                const blackDisplay =
+                  blackPrescription && plan
+                    ? {
+                        methodId: "irondesk-black",
+                        loadsKg: plan.rows
+                          .map((row) => row.weightKg)
+                          .filter((w): w is number => w != null),
+                        notes: [],
+                        summary: `${blackPrescription.modifierName} on ${blackPrescription.exerciseName} · ${blackPrescription.sets}×${blackPrescription.reps} @ ${blackPrescription.loadPercent}%${
+                          blackPrescription.loadKg
+                            ? ` (${fromKg(blackPrescription.loadKg, units)} ${unit})`
+                            : ""
+                        } · RIR ${blackPrescription.expectedRir}`,
+                        steps: [
+                          ...plan.rows.map((row) => row.label ?? "Working set"),
+                          `Intra-set rest ${blackPrescription.intraSetRestSeconds}s · between sets ${blackPrescription.interSetRestSeconds}s`,
+                          `Stop rule: ${blackPrescription.stopRule}`,
+                        ],
+                      }
+                    : null;
+                return (
+                  <>
+                    <MethodExecutionCard
+                      method={method}
+                      prescription={blackDisplay ?? prescription}
+                      doubleProgressionLine={doubleLine}
+                      readinessNote={readinessNote}
+                      volumeLine={
+                        volume
+                          ? `${volume.muscle}: ${volume.currentWeeklySets} direct sets this week (prev ${volume.previousWeeklySets}, trend ${volume.trend}) — ${volume.explanation}`
+                          : null
+                      }
+                      missingPairing={
+                        (method.id === "antagonist-supersets" ||
+                          method.id === "pre-exhaust" ||
+                          method.id === "trisets" ||
+                          method.id === "giant-sets") &&
+                        !prescription
+                          ? "No safe real movement in your library matches this pairing yet — add one or pick another method."
+                          : null
+                      }
+                      onApply={plan ? () => void applyMethodToSets(ex.id) : undefined}
+                      onChange={() =>
+                        setMethodPickerFor(methodPickerFor === ex.id ? null : ex.id)
+                      }
+                    />
+                    {(() => {
+                      const candidates = replacementCandidatesFor(ex, method.id);
+                      if (!candidates.length) return null;
+                      const chosen = new Set(
+                        config.stationIds ?? (config.partnerExerciseId ? [config.partnerExerciseId] : []),
+                      );
+                      return (
+                        <div className="mb-3 rounded-lg border border-border bg-surface-2/40 p-3">
+                          <p className="label-eyebrow text-primary">
+                            {method.id === "trisets" || method.id === "giant-sets"
+                              ? "Stations"
+                              : "Partner movement"}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {candidates.slice(0, 10).map((candidate) => (
+                              <button
+                                key={candidate.id}
+                                type="button"
+                                onClick={() =>
+                                  replaceMethodPartner(ex.id, method.id, candidate)
+                                }
+                                className={`rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
+                                  chosen.has(candidate.id)
+                                    ? "border-primary/60 bg-primary/10 text-foreground"
+                                    : "border-border-strong bg-surface-2 hover:border-primary/50"
+                                }`}
+                              >
+                                {candidate.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {methodPickerFor === ex.id ? (
+                      <div className="mb-3">
+                        <TrainingMethodSelector
+                          profile={methodProfile}
+                          exercise={{ name: ex.name, equipment: ex.equipment }}
+                          selectedIds={stackedMethodIds}
+                          activeId={method.id}
+                          notice={methodNotice}
+                          onSelect={(methodId) => chooseMethod(ex.id, methodId)}
+                          onClose={() => setMethodPickerFor(null)}
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                );
+              })()}
+
+
+
               {subFor === ex.id && (
                 <div className="mb-3 rounded-lg border border-primary/30 bg-primary/8 p-3">
                   <p className="label-eyebrow text-primary">Substitute movement</p>
@@ -919,9 +1912,34 @@ function WorkoutConsole({
                   <span />
                   <span />
                 </div>
-                {ex.sets.map((s, i) => (
+                {ex.sets.map((s, i) => {
+                  const segment = parseMethodSegmentConfig(s.methodSegmentConfig);
+                  const segmentLine = s.methodSegment
+                    ? [
+                        s.methodSegment.replace(/-/g, " "),
+                        segment.restSeconds != null ? `rest ${segment.restSeconds}s` : null,
+                        segment.eccentricSeconds != null
+                          ? `${segment.eccentricSeconds}s eccentric`
+                          : null,
+                        segment.targetRir != null ? `RIR ${segment.targetRir}` : null,
+                        segment.reductionPercent != null ? `-${segment.reductionPercent}%` : null,
+                        segment.stopRule ?? null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : null;
+                  return (
+                  <div key={s.id} className="space-y-1">
+                  {segmentLine ? (
+                    <p
+                      className={`numeric px-1 text-[0.625rem] font-semibold uppercase tracking-wide ${
+                        segment.methodId === "irondesk-black" ? "text-danger" : "text-primary"
+                      }`}
+                    >
+                      {segmentLine}
+                    </p>
+                  ) : null}
                   <div
-                    key={s.id}
                     className={`grid grid-cols-[1.5rem_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem_1.5rem] items-center gap-2 rounded-lg border p-1.5 ${
                       s.done ? "border-success/35 bg-success/8" : "border-border bg-surface-2/40"
                     }`}
@@ -970,7 +1988,9 @@ function WorkoutConsole({
                       <Minus className="size-4" />
                     </button>
                   </div>
-                ))}
+                  </div>
+                  );
+                })}
               </div>
 
               <div className="mt-3">

@@ -1,5 +1,6 @@
 package app.irondesk.health
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,8 +13,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 
 /**
  * The permission rationale / data-usage screen Health Connect and Android's
@@ -54,9 +57,24 @@ class PrivacyActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
+                            "Storage: the pairing token and retry outbox are encrypted with Android Keystore. Android " +
+                                "backup and device transfer are disabled for this companion.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
                             "This app never writes to Health Connect and never reads a record type you did not approve.",
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        TextButton(
+                            onClick = {
+                                startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        "https://irondeskpro.lovable.app/privacy".toUri(),
+                                    ),
+                                )
+                            },
+                        ) { Text("Open the full IronDesk privacy policy") }
                     }
                 }
             }

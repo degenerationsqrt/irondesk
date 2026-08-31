@@ -8,8 +8,11 @@
  * behind.
  */
 import {
+  ACTIVITY_TARGETS,
   DEFAULT_MAPPING,
+  METRIC_TARGETS,
   METRIC_TYPES,
+  type FileFormat,
   type ImportMapping,
   type MetricType,
   type NormalizedActivity,
@@ -93,6 +96,19 @@ export function guessMapping(headers: string[], preferred?: ImportMapping): Impo
   if (base.recordKind === "metric") {
     delete base.fields["startedAt"];
   } else {
+    // Activity exports commonly call elapsed time simply `Time` while metric
+    // exports use that same header as the recorded timestamp. Resolve the
+    // ambiguous alias only after record-kind detection so metric `Time`
+    // semantics remain intact.
+    if (
+      !base.fields["duration"] &&
+      ["activityType", "distance", "calories", "avgHr", "maxHr", "steps"].some((target) =>
+        Boolean(base.fields[target]),
+      )
+    ) {
+      const time = normalized.find((header) => header.key === "time");
+      if (time) base.fields["duration"] = time.header;
+    }
     delete base.fields["recordedAt"];
     delete base.fields["metricType"];
     delete base.fields["value"];
@@ -125,6 +141,103 @@ export function mappingIsUsable(mapping: ImportMapping): boolean {
     : Boolean(mapping.fields["recordedAt"] && mapping.fields["value"]);
 }
 
+/** Essential targets that match more than one source header require a human choice. */
+export function ambiguousEssentialMappingFields(
+  headers: readonly string[],
+  mapping: ImportMapping,
+): string[] {
+  const essentialTargets =
+    mapping.recordKind === "activity"
+      ? (["startedAt"] as const)
+      : (["recordedAt", "value"] as const);
+  const normalized = headers.map((header) => ({ header, key: norm(header) }));
+
+  return essentialTargets.filter((target) => {
+    const aliases = ALIASES[target] ?? [];
+    const matches = normalized.filter(({ key }) => aliases.includes(key));
+    return matches.length > 1;
+  });
+}
+
+export interface SavedImportMappingLike {
+  fileFormat: string;
+  recordKind: string;
+  mapping: unknown;
+}
+
+const DURATION_UNITS = new Set<ImportMapping["durationUnit"]>(["seconds", "minutes", "hours"]);
+const DISTANCE_UNITS = new Set<ImportMapping["distanceUnit"]>(["m", "km", "mi"]);
+const WEIGHT_UNITS = new Set<ImportMapping["weightUnit"]>(["kg", "lb"]);
+const METRIC_TYPE_SET = new Set<MetricType>(METRIC_TYPES);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * Converts persisted JSON into the narrow mapping contract used by the parser.
+ *
+ * Saved rows are untrusted account data: only known fields and enum values are
+ * copied. Unknown future/legacy properties are ignored, and a malformed known
+ * field rejects the whole mapping instead of partially applying it.
+ */
+export function parseSavedImportMapping(saved: SavedImportMappingLike): ImportMapping | null {
+  if (!isRecord(saved.mapping)) return null;
+  const value = saved.mapping;
+  const recordKind = value["recordKind"];
+  if (
+    (recordKind !== "activity" && recordKind !== "metric") ||
+    recordKind !== saved.recordKind ||
+    !isRecord(value["fields"]) ||
+    !DURATION_UNITS.has(value["durationUnit"] as ImportMapping["durationUnit"]) ||
+    !DISTANCE_UNITS.has(value["distanceUnit"] as ImportMapping["distanceUnit"]) ||
+    !WEIGHT_UNITS.has(value["weightUnit"] as ImportMapping["weightUnit"]) ||
+    !METRIC_TYPE_SET.has(value["fixedMetricType"] as MetricType)
+  ) {
+    return null;
+  }
+
+  const sourceFields = value["fields"];
+  const targets = recordKind === "activity" ? ACTIVITY_TARGETS : METRIC_TARGETS;
+  const fields: Record<string, string> = {};
+  for (const target of targets) {
+    const raw = sourceFields[target];
+    if (raw === undefined || raw === "") continue;
+    if (typeof raw !== "string") return null;
+    const header = raw.trim();
+    if (!header || header.length > 256) return null;
+    fields[target] = header;
+  }
+
+  const mapping: ImportMapping = {
+    recordKind,
+    fields,
+    durationUnit: value["durationUnit"] as ImportMapping["durationUnit"],
+    distanceUnit: value["distanceUnit"] as ImportMapping["distanceUnit"],
+    weightUnit: value["weightUnit"] as ImportMapping["weightUnit"],
+    fixedMetricType: value["fixedMetricType"] as MetricType,
+  };
+  return mappingIsUsable(mapping) ? mapping : null;
+}
+
+/**
+ * Returns a saved mapping only when it is safe for this exact parsed table.
+ * Header matching is deliberately exact: renamed/removed exporter columns must
+ * send the athlete back through review rather than silently shifting fields.
+ */
+export function compatibleSavedImportMapping(
+  saved: SavedImportMappingLike,
+  headers: readonly string[],
+  fileFormat: FileFormat,
+): ImportMapping | null {
+  if (saved.fileFormat !== fileFormat || (fileFormat !== "csv" && fileFormat !== "json")) {
+    return null;
+  }
+  const mapping = parseSavedImportMapping(saved);
+  if (!mapping) return null;
+  const available = new Set(headers);
+  return Object.values(mapping.fields).every((header) => available.has(header)) ? mapping : null;
+}
+
 const DURATION_FACTOR = { seconds: 1, minutes: 60, hours: 3600 } as const;
 const DISTANCE_FACTOR = { m: 1, km: 1000, mi: 1609.344 } as const;
 
@@ -139,6 +252,107 @@ const intOf = (raw: string | undefined): number | null => {
   const value = numberOf(raw);
   return value == null ? null : Math.round(value);
 };
+
+function durationSeconds(
+  raw: string | undefined,
+  fallbackUnit: ImportMapping["durationUnit"],
+  row: number,
+  issues: ParseIssue[],
+): number | null {
+  if (!raw?.trim()) return null;
+  const value = raw.trim();
+  if (!value.includes(":")) {
+    const numeric = numberOf(value);
+    return numeric == null ? null : Math.round(numeric * DURATION_FACTOR[fallbackUnit]);
+  }
+
+  const parts = value.split(":");
+  const validShape =
+    (parts.length === 2 || parts.length === 3) &&
+    parts.every((part) => /^\d+(?:\.\d+)?$/.test(part.trim()));
+  const numeric = parts.map((part) => Number(part.trim()));
+  const seconds = numeric.at(-1);
+  const minutes = numeric.at(-2);
+  if (
+    !validShape ||
+    seconds == null ||
+    minutes == null ||
+    !Number.isFinite(seconds) ||
+    !Number.isFinite(minutes) ||
+    seconds >= 60 ||
+    minutes < 0 ||
+    (parts.length === 3 && minutes >= 60)
+  ) {
+    issues.push({
+      severity: "warning",
+      row,
+      field: "duration",
+      message: `Duration "${raw}" is not valid HH:MM:SS or MM:SS — duration was not imported.`,
+    });
+    return null;
+  }
+
+  const hours = parts.length === 3 ? numeric[0] : 0;
+  const total = (hours ?? 0) * 3600 + minutes * 60 + seconds;
+  return Number.isFinite(total) ? Math.round(total) : null;
+}
+
+const DISTANCE_UNIT_ALIASES: Record<string, keyof typeof DISTANCE_FACTOR> = {
+  m: "m",
+  meter: "m",
+  meters: "m",
+  metre: "m",
+  metres: "m",
+  km: "km",
+  kms: "km",
+  kilometer: "km",
+  kilometers: "km",
+  kilometre: "km",
+  kilometres: "km",
+  mi: "mi",
+  mile: "mi",
+  miles: "mi",
+};
+
+function distanceMeters(
+  raw: string | undefined,
+  fallbackUnit: ImportMapping["distanceUnit"],
+  row: number,
+  issues: ParseIssue[],
+): number | null {
+  if (!raw?.trim()) return null;
+  const value = raw.trim();
+  const suffix = value.match(/([a-zA-Z]+)\.?\s*$/);
+  let unit = fallbackUnit;
+  let numericText = value;
+  if (suffix) {
+    const supplied = suffix[1]!.toLowerCase();
+    const resolved = DISTANCE_UNIT_ALIASES[supplied];
+    if (!resolved) {
+      issues.push({
+        severity: "warning",
+        row,
+        field: "distance",
+        message: `Distance "${raw}" uses the unknown unit "${suffix[1]}" — distance was not imported.`,
+      });
+      return null;
+    }
+    unit = resolved;
+    numericText = value.slice(0, suffix.index).trim();
+  }
+
+  const numeric = numberOf(numericText);
+  if (numeric == null) {
+    issues.push({
+      severity: "warning",
+      row,
+      field: "distance",
+      message: `Distance "${raw}" is not a number — distance was not imported.`,
+    });
+    return null;
+  }
+  return Math.round(numeric * DISTANCE_FACTOR[unit]);
+}
 
 /**
  * Parses a timestamp. A naive value (no zone marker) is interpreted with the
@@ -226,8 +440,6 @@ export function applyMapping(table: TabularPreview, mapping: ImportMapping): Map
     if (mapping.recordKind === "activity") {
       const when = timestamp(get(row, "startedAt"), get(row, "timezone"), rowNumber, issues);
       if (!when) return;
-      const rawDuration = numberOf(get(row, "duration"));
-      const rawDistance = numberOf(get(row, "distance"));
       const activity: NormalizedActivity = {
         kind: "activity",
         externalId: get(row, "externalId")?.trim() || null,
@@ -235,14 +447,8 @@ export function applyMapping(table: TabularPreview, mapping: ImportMapping): Map
         name: get(row, "name")?.trim() || null,
         startedAt: when.iso,
         sourceTimezone: when.zone,
-        durationSec:
-          rawDuration == null
-            ? null
-            : Math.round(rawDuration * DURATION_FACTOR[mapping.durationUnit]),
-        distanceM:
-          rawDistance == null
-            ? null
-            : Math.round(rawDistance * DISTANCE_FACTOR[mapping.distanceUnit]),
+        durationSec: durationSeconds(get(row, "duration"), mapping.durationUnit, rowNumber, issues),
+        distanceM: distanceMeters(get(row, "distance"), mapping.distanceUnit, rowNumber, issues),
         calories: intOf(get(row, "calories")),
         avgHr: intOf(get(row, "avgHr")),
         maxHr: intOf(get(row, "maxHr")),

@@ -23,6 +23,85 @@ import java.time.Period
 import java.time.ZoneId
 import kotlin.reflect.KClass
 
+/** One place maps every UI toggle to its exact Health Connect read permission. */
+internal object HealthAccessPolicy {
+    private data class AccessType(
+        val label: String,
+        val permission: String,
+        val selected: (Selection) -> Boolean,
+        val setSelected: (Selection, Boolean) -> Selection,
+    )
+
+    private val accessTypes = listOf(
+        AccessType(
+            "Steps",
+            HealthPermission.getReadPermission(StepsRecord::class),
+            { it.steps },
+            { selection, value -> selection.copy(steps = value) },
+        ),
+        AccessType(
+            "Sleep",
+            HealthPermission.getReadPermission(SleepSessionRecord::class),
+            { it.sleep },
+            { selection, value -> selection.copy(sleep = value) },
+        ),
+        AccessType(
+            "Resting heart rate",
+            HealthPermission.getReadPermission(RestingHeartRateRecord::class),
+            { it.restingHr },
+            { selection, value -> selection.copy(restingHr = value) },
+        ),
+        AccessType(
+            "Heart rate variability",
+            HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
+            { it.hrv },
+            { selection, value -> selection.copy(hrv = value) },
+        ),
+        AccessType(
+            "Weight",
+            HealthPermission.getReadPermission(WeightRecord::class),
+            { it.weight },
+            { selection, value -> selection.copy(weight = value) },
+        ),
+        AccessType(
+            "Active calories",
+            HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
+            { it.activeCalories },
+            { selection, value -> selection.copy(activeCalories = value) },
+        ),
+        AccessType(
+            "Distance",
+            HealthPermission.getReadPermission(DistanceRecord::class),
+            { it.distance },
+            { selection, value -> selection.copy(distance = value) },
+        ),
+        AccessType(
+            "Workouts",
+            HealthPermission.getReadPermission(ExerciseSessionRecord::class),
+            { it.sessions },
+            { selection, value -> selection.copy(sessions = value) },
+        ),
+    )
+
+    val allPermissions: Set<String> = accessTypes.mapTo(linkedSetOf()) { it.permission }
+
+    fun permissionsFor(selection: Selection): Set<String> =
+        accessTypes.filter { it.selected(selection) }.mapTo(linkedSetOf()) { it.permission }
+
+    fun missingLabels(selection: Selection, grantedPermissions: Set<String>): List<String> =
+        accessTypes.filter { it.selected(selection) && it.permission !in grantedPermissions }.map { it.label }
+
+    /** Turns off only selected types that are not currently authorized. */
+    fun authorizedSelection(selection: Selection, grantedPermissions: Set<String>): Selection =
+        accessTypes.fold(selection) { current, access ->
+            if (access.selected(current) && access.permission !in grantedPermissions) {
+                access.setSelected(current, false)
+            } else {
+                current
+            }
+        }
+}
+
 /**
  * Read-only Health Connect access.
  *
@@ -46,17 +125,15 @@ class HealthRepository(context: Context) {
 
     val available: Boolean get() = client != null
 
-    /** Exactly the record types the export needs — no broader scope is requested. */
-    val permissions: Set<String> = setOf(
-        HealthPermission.getReadPermission(StepsRecord::class),
-        HealthPermission.getReadPermission(SleepSessionRecord::class),
-        HealthPermission.getReadPermission(RestingHeartRateRecord::class),
-        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
-        HealthPermission.getReadPermission(WeightRecord::class),
-        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
-        HealthPermission.getReadPermission(DistanceRecord::class),
-        HealthPermission.getReadPermission(ExerciseSessionRecord::class),
-    )
+    /** Manifest-declared read permissions. Runtime requests use [permissionsFor] instead. */
+    val permissions: Set<String> = HealthAccessPolicy.allPermissions
+
+    /** Exact read permissions for the record types the athlete selected. */
+    fun permissionsFor(selection: Selection): Set<String> = HealthAccessPolicy.permissionsFor(selection)
+
+    /** Human-readable selected types that are not currently authorized. */
+    fun missingPermissionLabels(selection: Selection, grantedPermissions: Set<String>): List<String> =
+        HealthAccessPolicy.missingLabels(selection, grantedPermissions)
 
     /**
      * Health Connect only returns the last 30 days unless the app additionally
@@ -135,22 +212,35 @@ class HealthRepository(context: Context) {
         }
     }
 
-    /** Reads every selected type for the range. Types the user did not grant come back empty. */
+    /**
+     * Reads every selected and authorized type for the range.
+     *
+     * Permission state is filtered here as a final safety boundary. A partial
+     * grant therefore produces a partial snapshot instead of a security error.
+     */
     suspend fun collect(
         selection: Selection,
+        grantedPermissions: Set<String>,
         from: Instant,
         to: Instant,
         zone: ZoneId = ZoneId.systemDefault(),
-    ): HealthSnapshot = HealthSnapshot(
-        steps = if (selection.steps) dailySteps(from, to, zone) else emptyList(),
-        sleep = if (selection.sleep) read(SleepSessionRecord::class, from, to) else emptyList(),
-        restingHr = if (selection.restingHr) read(RestingHeartRateRecord::class, from, to) else emptyList(),
-        hrv = if (selection.hrv) read(HeartRateVariabilityRmssdRecord::class, from, to) else emptyList(),
-        weight = if (selection.weight) read(WeightRecord::class, from, to) else emptyList(),
-        activeCalories = if (selection.activeCalories) read(ActiveCaloriesBurnedRecord::class, from, to) else emptyList(),
-        distance = if (selection.distance) read(DistanceRecord::class, from, to) else emptyList(),
-        sessions = if (selection.sessions) read(ExerciseSessionRecord::class, from, to) else emptyList(),
-    )
+    ): HealthSnapshot {
+        val authorized = HealthAccessPolicy.authorizedSelection(selection, grantedPermissions)
+        return HealthSnapshot(
+            steps = if (authorized.steps) dailySteps(from, to, zone) else emptyList(),
+            sleep = if (authorized.sleep) read(SleepSessionRecord::class, from, to) else emptyList(),
+            restingHr = if (authorized.restingHr) read(RestingHeartRateRecord::class, from, to) else emptyList(),
+            hrv = if (authorized.hrv) read(HeartRateVariabilityRmssdRecord::class, from, to) else emptyList(),
+            weight = if (authorized.weight) read(WeightRecord::class, from, to) else emptyList(),
+            activeCalories = if (authorized.activeCalories) {
+                read(ActiveCaloriesBurnedRecord::class, from, to)
+            } else {
+                emptyList()
+            },
+            distance = if (authorized.distance) read(DistanceRecord::class, from, to) else emptyList(),
+            sessions = if (authorized.sessions) read(ExerciseSessionRecord::class, from, to) else emptyList(),
+        )
+    }
 
     companion object {
         const val PAGE_SIZE = 1000

@@ -69,13 +69,19 @@ This project was built with [Lovable](https://lovable.dev).
 
 The Garmin Connect IQ companion and secure API are implemented under `connectiq/irondesk` and `src/routes/api/public/connect-iq`. The release package is pinned to the production HTTPS origin above; deploy and verify the accompanying Supabase migration and API routes before pairing a physical watch or submitting to the Connect IQ Store.
 
+The read-only Android Health Connect companion is under `android-health-connect/`. It is currently
+an engineering private beta, not a public installer. Start with
+`android-health-connect/docs/PRIVATE_BETA_SETUP.md` and complete every signing, physical-device,
+privacy, and Play gate in `android-health-connect/docs/RELEASE_CHECKLIST.md` before distributing it.
+The signed-out web guide lives at https://irondeskpro.lovable.app/health-connect.
+
 ## Build with Lovable
 
 Continue developing this project in the [Lovable editor](https://lovable.dev/projects/eed18f2c-5219-4d27-b990-ff314dde9ed8).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
 - **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitLab and your changes sync back into Lovable, ready for your next prompt.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 

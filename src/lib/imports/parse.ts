@@ -9,7 +9,12 @@ import { CsvError, parseCsv } from "./csv";
 import { FitError, parseFit } from "./fit";
 import { HealthConnectPayloadError, parseHealthConnectEnvelope } from "./health-connect-payload";
 import { JsonError, parseJsonTable } from "./json";
-import { applyMapping, guessMapping, mappingIsUsable } from "./mapping";
+import {
+  ambiguousEssentialMappingFields,
+  applyMapping,
+  guessMapping,
+  mappingIsUsable,
+} from "./mapping";
 import {
   LIMITS,
   SUPPORTED_EXTENSIONS,
@@ -124,7 +129,11 @@ function tabular(
   const table = format === "csv" ? parseCsv(text) : parseJsonTable(text);
   const resolved = guessMapping(table.headers, mapping);
   const usable = mappingIsUsable(resolved);
-  if (!usable) {
+  const ambiguousFields = mapping ? [] : ambiguousEssentialMappingFields(table.headers, resolved);
+  const ambiguousLabels = ambiguousFields.map((field) =>
+    field === "startedAt" ? "start time" : field === "recordedAt" ? "timestamp" : "value",
+  );
+  if (!usable || ambiguousFields.length > 0) {
     return {
       format,
       recognized: false,
@@ -132,8 +141,9 @@ function tabular(
       issues: [
         {
           severity: "warning",
-          message:
-            "The columns in this file were not recognized — map them below before importing.",
+          message: ambiguousFields.length
+            ? `More than one column could supply ${ambiguousLabels.join(" and ")} — choose the intended mapping below before importing.`
+            : "The columns in this file were not recognized — map them below before importing.",
         },
       ],
       skippedFields: table.headers,
@@ -154,6 +164,18 @@ function tabular(
         ? [`Only the first ${LIMITS.maxRecords} records are imported.`]
         : [],
   };
+}
+
+/**
+ * Generic tabular files need an explicit mapping pass only when their essential
+ * fields are unknown. Recognized files go straight to the normalized preview,
+ * where skipped metadata is disclosed and the mapping remains editable.
+ * Standards-based FIT/TCX/GPX imports do not carry a mapping table.
+ */
+export function needsFieldMappingReview(
+  result: Pick<ParseResult, "recognized" | "table">,
+): boolean {
+  return Boolean(result.table) && !result.recognized;
 }
 
 async function parseSingle(

@@ -26,7 +26,7 @@ import {
 } from "./derive";
 import type { ManualCardioInput } from "./cardio-log";
 import { dayKeyForInstant, safeTimeZone } from "./dates";
-import { IronDeskError, asIronDeskError } from "./errors";
+import { IronDeskError, asIronDeskError, asPostgrestIronDeskError } from "./errors";
 import {
   excludeLikelyMirroredActivities,
   importedActivitiesForLocalDay,
@@ -61,7 +61,28 @@ import {
 import { isFreeStartable } from "./program-logic";
 import { performanceKey, type PerformanceMap, type PerformancePoint } from "./progression";
 import type { ProgressionContext } from "./progression-source";
+import {
+  parseBlackPrescriptions,
+  parseMethodConfig,
+  normalizeSegmentId,
+  parseMethodSegmentConfig,
+  serializeMethodConfig,
+  serializeMethodSegmentConfig,
+  weeklyDirectSets,
+  type BlackExercisePrescription,
+  type BlackExposure,
+  type BlackWindow,
+  type DirectSetRecord,
+  type MethodConfig,
+  type MethodSegmentConfig,
+} from "./method-composition";
+import {
+  firstMethodSelectionRejection,
+  getMethod,
+  type AthleteMethodProfile,
+} from "./training-methods";
 import { toWarnings } from "./programs";
+import type { Json } from "@/integrations/supabase/types";
 import type {
   ActiveWorkout,
   CoachData,
@@ -729,6 +750,8 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
         se.source_load_unit === "lb" || se.source_load_unit === "kg" ? se.source_load_unit : null,
       isDropSet: se.is_drop_set,
       isHeavy: se.is_heavy,
+      trainingMethodId: se.training_method_id ?? null,
+      trainingMethodConfig: se.training_method_config ?? {},
       previous: "—",
       sets: (se.workout_sets ?? [])
         .slice()
@@ -743,6 +766,10 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
           isWarmup: s.is_warmup,
           restSeconds: s.rest_seconds,
           notes: s.notes,
+          methodSegment: s.method_segment ?? null,
+          methodSegmentConfig: serializeMethodSegmentConfig(
+            parseMethodSegmentConfig(s.method_segment_config),
+          ),
         })),
     }));
 
@@ -909,7 +936,15 @@ export async function substituteSessionExercise(
 
 export async function addSet(
   sessionExerciseId: string,
-  input: { weightKg?: number; reps?: number; rpe?: number; isWarmup?: boolean },
+  input: {
+    weightKg?: number;
+    reps?: number;
+    rpe?: number;
+    isWarmup?: boolean;
+    restSeconds?: number | null;
+    methodSegment?: string | null;
+    methodSegmentConfig?: MethodSegmentConfig | null;
+  },
 ): Promise<string> {
   const existing = await supabase
     .from("workout_sets")
@@ -925,6 +960,9 @@ export async function addSet(
       reps: input.reps ?? null,
       rpe: input.rpe ?? null,
       is_warmup: input.isWarmup ?? false,
+      ...(input.restSeconds === undefined ? {} : { rest_seconds: input.restSeconds }),
+      method_segment: normalizeSegmentId(input.methodSegment),
+      method_segment_config: serializeMethodSegmentConfig(input.methodSegmentConfig ?? {}) as Json,
     })
     .select("id")
     .single();
@@ -947,9 +985,17 @@ export async function updateSet(
     isWarmup?: boolean;
     restSeconds?: number | null;
     notes?: string | null;
+    methodSegment?: string | null;
+    methodSegmentConfig?: MethodSegmentConfig | null;
   },
 ): Promise<void> {
   const payload: Database["public"]["Tables"]["workout_sets"]["Update"] = {};
+  if (patch.methodSegment !== undefined)
+    payload["method_segment"] = normalizeSegmentId(patch.methodSegment);
+  if (patch.methodSegmentConfig !== undefined)
+    payload["method_segment_config"] = serializeMethodSegmentConfig(
+      patch.methodSegmentConfig ?? {},
+    ) as Json;
   if (patch.weightKg !== undefined) payload["weight_kg"] = patch.weightKg;
   if (patch.reps !== undefined) payload["reps"] = patch.reps;
   if (patch.rpe !== undefined) payload["rpe"] = patch.rpe;
@@ -961,8 +1007,15 @@ export async function updateSet(
     payload["completed_at"] = patch.completed ? new Date().toISOString() : null;
   }
   if (!Object.keys(payload).length) return;
-  const { error } = await supabase.from("workout_sets").update(payload).eq("id", setId);
-  if (error) throw asIronDeskError(new Error(error.message));
+  const updated = await supabase
+    .from("workout_sets")
+    .update(payload)
+    .eq("id", setId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error) throw asIronDeskError(new Error(updated.error.message));
+  if (!updated.data)
+    throw new IronDeskError("That set could not be verified after saving.", "conflict");
 }
 
 export async function deleteSet(setId: string): Promise<void> {
@@ -1593,6 +1646,8 @@ function mapTemplate(row: TemplateRow): WorkoutTemplate {
         isDropSet: te.is_drop_set,
         isHeavy: te.is_heavy,
         notes: te.notes,
+        trainingMethodId: te.training_method_id ?? null,
+        trainingMethodConfig: serializeMethodConfig(parseMethodConfig(te.training_method_config)),
       })),
   };
 }
@@ -1627,6 +1682,8 @@ interface NormalizedPersonalTemplateDraft {
     name: string;
     targetSets: number;
     targetReps: string;
+    trainingMethodId: string | null;
+    trainingMethodConfig: MethodConfig;
   }[];
 }
 
@@ -1666,15 +1723,43 @@ export function normalizePersonalTemplateDraft(
       throw new IronDeskError("Sets must be a whole number from 1 to 20.", "validation");
     if (!targetReps || targetReps.length > 32)
       throw new IronDeskError("Rep targets must be between 1 and 32 characters.", "validation");
+    // A method chosen in the builder is validated here and inherited by sessions.
+    const methodId = exercise.trainingMethodId?.trim() || null;
+    if (methodId && !getMethod(methodId))
+      throw new IronDeskError("That training method is not recognised.", "validation");
     return {
       exerciseId,
       name: exercise.name.trim(),
       targetSets: exercise.targetSets,
       targetReps,
+      trainingMethodId: methodId,
+      trainingMethodConfig: parseMethodConfig(exercise.trainingMethodConfig),
     };
   });
 
   return { name, focus, exercises };
+}
+
+function assertTemplateMethodSelections(
+  selections: readonly {
+    methodId: string | null | undefined;
+    exercise: { name: string; equipment?: string | null };
+  }[],
+  profile?: AthleteMethodProfile,
+): void {
+  if (!selections.some((selection) => Boolean(selection.methodId))) return;
+  if (!profile) {
+    throw new IronDeskError(
+      "IronDesk could not verify training-method eligibility. Refresh your training history and try again.",
+      "validation",
+    );
+  }
+  const rejection = firstMethodSelectionRejection(selections, profile);
+  if (!rejection) return;
+  throw new IronDeskError(
+    `${selections[rejection.index]!.exercise.name}: ${rejection.decision.reason}`,
+    "validation",
+  );
 }
 
 const STAGED_PERSONAL_TEMPLATE = {
@@ -1725,22 +1810,32 @@ async function failAfterStagedTemplateCleanup(
  * ordered children are inserted, and only then is the parent finalized. Either
  * child or finalization failure removes only a still-staged owner row.
  */
-export async function createPersonalWorkoutTemplate(draft: PersonalTemplateDraft): Promise<string> {
+export async function createPersonalWorkoutTemplate(
+  draft: PersonalTemplateDraft,
+  methodProfile?: AthleteMethodProfile,
+): Promise<string> {
   const userId = await requireUserId();
   const normalized = normalizePersonalTemplateDraft(draft);
   const exerciseIds = normalized.exercises.map((exercise) => exercise.exerciseId);
   const library = await supabase
     .from("exercises")
-    .select("id, name")
+    .select("id, name, equipment")
     .in("id", exerciseIds)
     .eq("is_active", true);
   if (library.error) throw asIronDeskError(new Error(library.error.message));
-  const canonicalNames = new Map((library.data ?? []).map((row) => [row.id, row.name]));
-  if (canonicalNames.size !== exerciseIds.length)
+  const canonicalExercises = new Map((library.data ?? []).map((row) => [row.id, row]));
+  if (canonicalExercises.size !== exerciseIds.length)
     throw new IronDeskError(
       "One or more selected movements are no longer available. Refresh the library and try again.",
       "validation",
     );
+  assertTemplateMethodSelections(
+    normalized.exercises.map((exercise) => ({
+      methodId: exercise.trainingMethodId,
+      exercise: canonicalExercises.get(exercise.exerciseId)!,
+    })),
+    methodProfile,
+  );
 
   const parent = await supabase
     .from("workout_templates")
@@ -1771,7 +1866,7 @@ export async function createPersonalWorkoutTemplate(draft: PersonalTemplateDraft
   const children = normalized.exercises.map((exercise, position) => ({
     template_id: templateId,
     exercise_id: exercise.exerciseId,
-    exercise_name: canonicalNames.get(exercise.exerciseId)!,
+    exercise_name: canonicalExercises.get(exercise.exerciseId)!.name,
     position,
     target_sets: exercise.targetSets,
     target_reps: exercise.targetReps,
@@ -1782,6 +1877,11 @@ export async function createPersonalWorkoutTemplate(draft: PersonalTemplateDraft
     is_drop_set: false,
     is_heavy: false,
     notes: null,
+    // A method stored here is inherited by every session started from the template.
+    training_method_id: exercise.trainingMethodId ?? null,
+    training_method_config: serializeMethodConfig(
+      parseMethodConfig(exercise.trainingMethodConfig),
+    ) as Json,
   }));
   const inserted = await supabase.from("template_exercises").insert(children);
   if (inserted.error) {
@@ -1819,7 +1919,12 @@ export async function deletePersonalWorkoutTemplate(templateId: string): Promise
     .select("id, user_id, is_system")
     .eq("id", templateId)
     .maybeSingle();
-  if (existing.error) throw asIronDeskError(new Error(existing.error.message));
+  if (existing.error)
+    throw asPostgrestIronDeskError(
+      existing.error,
+      "workout-template-delete-lookup",
+      "IronDesk could not verify that personal workout before deletion.",
+    );
   if (!existing.data)
     throw new IronDeskError("That personal workout is no longer available.", "not_found");
   if (existing.data.is_system || existing.data.user_id !== userId)
@@ -1832,7 +1937,12 @@ export async function deletePersonalWorkoutTemplate(templateId: string): Promise
     .eq("user_id", userId)
     .eq("is_system", false)
     .select("id");
-  if (removed.error) throw asIronDeskError(new Error(removed.error.message));
+  if (removed.error)
+    throw asPostgrestIronDeskError(
+      removed.error,
+      "workout-template-delete",
+      "IronDesk could not delete that personal workout.",
+    );
   if (!removed.data?.length)
     throw new IronDeskError(
       "That personal workout was not deleted. Refresh and try again.",
@@ -1850,7 +1960,10 @@ export async function deletePersonalWorkoutTemplate(templateId: string): Promise
  * - an already-active session is reported as a conflict instead of silently
  *   creating a second one.
  */
-export async function startWorkoutFromTemplate(templateId: string): Promise<string> {
+export async function startWorkoutFromTemplate(
+  templateId: string,
+  methodProfile?: AthleteMethodProfile,
+): Promise<string> {
   const userId = await requireUserId();
 
   const active = await getActiveWorkout();
@@ -1872,6 +1985,38 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
     );
   }
 
+  // Resolve and authorize method-bearing movements before a session is created.
+  // That prevents an invalid inherited method from leaving an orphan active row.
+  const exerciseIds = template.exercises
+    .map((e) => e.exerciseId)
+    .filter((id): id is string => Boolean(id));
+  const context = new Map<
+    string,
+    { id: string; name: string; primary_muscle: string; equipment: string }
+  >();
+  if (exerciseIds.length) {
+    const lib = await supabase
+      .from("exercises")
+      .select("id, name, primary_muscle, equipment")
+      .in("id", exerciseIds);
+    if (lib.error) throw asIronDeskError(new Error(lib.error.message));
+    for (const row of lib.data ?? []) context.set(row.id, row);
+  }
+  const methodSelections = template.exercises.map((exercise) => {
+    const canonical = exercise.exerciseId ? context.get(exercise.exerciseId) : undefined;
+    if (exercise.trainingMethodId && !canonical) {
+      throw new IronDeskError(
+        `${exercise.name}: the training method cannot be verified because this movement is no longer linked to the exercise library.`,
+        "validation",
+      );
+    }
+    return {
+      methodId: exercise.trainingMethodId,
+      exercise: canonical ?? { name: exercise.name, equipment: null },
+    };
+  });
+  assertTemplateMethodSelections(methodSelections, methodProfile);
+
   const created = await supabase
     .from("workout_sessions")
     .insert({
@@ -1885,19 +2030,6 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
     .select("id")
     .single();
   const sessionId = unwrap(created).id;
-
-  // Resolve muscle/equipment context from the canonical library where linked.
-  const exerciseIds = template.exercises
-    .map((e) => e.exerciseId)
-    .filter((id): id is string => Boolean(id));
-  const context = new Map<string, { primary_muscle: string; equipment: string }>();
-  if (exerciseIds.length) {
-    const lib = await supabase
-      .from("exercises")
-      .select("id, primary_muscle, equipment")
-      .in("id", exerciseIds);
-    for (const row of lib.data ?? []) context.set(row.id, row);
-  }
 
   const rows = template.exercises.map((e) => {
     const ctx = e.exerciseId ? context.get(e.exerciseId) : undefined;
@@ -1917,6 +2049,10 @@ export async function startWorkoutFromTemplate(templateId: string): Promise<stri
       source_load_unit: e.sourceLoadUnit,
       is_drop_set: e.isDropSet,
       is_heavy: e.isHeavy,
+      training_method_id: e.trainingMethodId ?? null,
+      training_method_config: serializeMethodConfig(
+        parseMethodConfig(e.trainingMethodConfig),
+      ) as Json,
     };
   });
 
@@ -1963,12 +2099,13 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
     supabase
       .from("session_exercises")
       .select(
-        "exercise_id, exercise_name, workout_sets(weight_kg, reps, rpe, completed, is_warmup), workout_sessions!inner(started_at, status, is_sample)",
+        "exercise_id, exercise_name, primary_muscle, workout_sets(weight_kg, reps, rpe, completed, is_warmup), workout_sessions!inner(started_at, status, is_sample)",
       )
       .returns<
         {
           exercise_id: string | null;
           exercise_name: string;
+          primary_muscle: string | null;
           workout_sets: {
             weight_kg: number | null;
             reps: number | null;
@@ -1990,6 +2127,7 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
   if (setsRes.error) throw asIronDeskError(new Error(setsRes.error.message));
 
   const performance: PerformanceMap = {};
+  const directSets: DirectSetRecord[] = [];
   const push = (key: string, point: PerformancePoint) => {
     const list = performance[key] ?? [];
     list.push(point);
@@ -1998,17 +2136,33 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
 
   for (const row of setsRes.data ?? []) {
     if (row.workout_sessions?.status !== "completed" || row.workout_sessions.is_sample) continue;
-    const working = (row.workout_sets ?? []).filter(
-      (s) => s.completed && !s.is_warmup && (s.weight_kg ?? 0) > 0 && (s.reps ?? 0) > 0,
+    // Every completed non-warmup set counts as direct volume, including
+    // bodyweight/unloaded work; only loaded sets can feed an e1RM estimate.
+    const completed = (row.workout_sets ?? []).filter(
+      (s) => s.completed && !s.is_warmup && (s.reps ?? 0) > 0,
     );
-    if (!working.length) continue;
-    const top = working.reduce((a, b) => ((b.weight_kg ?? 0) > (a.weight_kg ?? 0) ? b : a));
+    const loaded = completed.filter((s) => (s.weight_kg ?? 0) > 0);
+    if (!completed.length) continue;
+    // Direct sets count against the PRIMARY muscle only; secondary muscles are
+    // never counted as direct work.
+    if (row.primary_muscle) {
+      for (const set of completed) {
+        directSets.push({
+          date: row.workout_sessions.started_at,
+          muscle: row.primary_muscle,
+          weightKg: Number(set.weight_kg ?? 0),
+          reps: set.reps ?? 0,
+        });
+      }
+    }
+    if (!loaded.length) continue;
+    const top = loaded.reduce((a, b) => ((b.weight_kg ?? 0) > (a.weight_kg ?? 0) ? b : a));
     const point: PerformancePoint = {
       date: row.workout_sessions.started_at,
       weightKg: Number(top.weight_kg ?? 0),
       reps: top.reps ?? 0,
       rpe: top.rpe == null ? null : Number(top.rpe),
-      sets: working.length,
+      sets: loaded.length,
     };
     if (row.exercise_id) push(row.exercise_id, point);
     if (row.exercise_name) push(performanceKey(row.exercise_name), point);
@@ -2016,5 +2170,164 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
   for (const list of Object.values(performance)) list.sort((a, b) => a.date.localeCompare(b.date));
 
   const readinessRow = recoveryRes.data as { readiness: number | null } | null;
-  return { performance, readiness: readinessRow?.readiness ?? null };
+  return {
+    performance,
+    readiness: readinessRow?.readiness ?? null,
+    muscleVolume: weeklyDirectSets(directSets),
+  };
+}
+
+/* ------------------------------------------------- training-method selection */
+
+/**
+ * Persists the training method attached to one session exercise. The config is
+ * validated and bounded before it is stored, so a hand-crafted payload cannot
+ * widen the engine's safety limits.
+ */
+export async function setSessionExerciseMethod(input: {
+  sessionExerciseId: string;
+  methodId: string | null;
+  config?: MethodConfig;
+}): Promise<void> {
+  const updated = await supabase
+    .from("session_exercises")
+    .update({
+      training_method_id: input.methodId,
+      training_method_config: serializeMethodConfig(input.config ?? {}) as Json,
+    })
+    .eq("id", input.sessionExerciseId)
+    .select("id")
+    .maybeSingle();
+  if (updated.error) throw asIronDeskError(new Error(updated.error.message));
+  if (!updated.data)
+    throw new IronDeskError(
+      "That exercise method could not be verified after saving.",
+      "conflict",
+    );
+}
+
+/* --------------------------------------- IronDesk Black specialization blocks */
+
+function mapBlackWindow(row: {
+  id: string;
+  target_region: string;
+  started_on: string;
+  ends_on: string;
+  status: string;
+  config: unknown;
+}): BlackWindow {
+  const config = (row.config ?? {}) as {
+    modifierIds?: unknown;
+    exerciseNames?: unknown;
+    prescriptions?: unknown;
+  };
+  const asStrings = (value: unknown) =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  return {
+    id: row.id,
+    targetRegion: row.target_region,
+    startedOn: row.started_on,
+    endsOn: row.ends_on,
+    status: (row.status as BlackWindow["status"]) ?? "active",
+    modifierIds: asStrings(config.modifierIds),
+    exerciseNames: asStrings(config.exerciseNames),
+    prescriptions: parseBlackPrescriptions(config.prescriptions),
+  };
+}
+
+export async function listSpecializationWindows(): Promise<BlackWindow[]> {
+  const res = await supabase
+    .from("training_specialization_windows")
+    .select("id, target_region, started_on, ends_on, status, config")
+    .order("created_at", { ascending: false });
+  if (res.error) throw asIronDeskError(new Error(res.error.message));
+  return (res.data ?? []).map(mapBlackWindow);
+}
+
+export async function openSpecializationWindow(input: {
+  targetRegion: string;
+  startedOn: string;
+  endsOn: string;
+  modifierIds: string[];
+  exerciseNames: string[];
+  prescriptions?: BlackExercisePrescription[];
+}): Promise<string> {
+  const userId = await requireUserId();
+  const res = await supabase
+    .from("training_specialization_windows")
+    .insert({
+      user_id: userId,
+      method_id: "irondesk-black",
+      target_region: input.targetRegion,
+      started_on: input.startedOn,
+      ends_on: input.endsOn,
+      status: "active",
+      config: {
+        modifierIds: input.modifierIds,
+        exerciseNames: input.exerciseNames,
+        prescriptions: parseBlackPrescriptions(input.prescriptions ?? []) as unknown as Json,
+      } as unknown as Json,
+    })
+    .select("id")
+    .single();
+  if (res.error) throw asIronDeskError(new Error(res.error.message));
+  return res.data.id;
+}
+
+export async function closeSpecializationWindow(
+  id: string,
+  status: "completed" | "cancelled" | "expired" | "suspended" | "active" = "completed",
+): Promise<void> {
+  const { error } = await supabase
+    .from("training_specialization_windows")
+    .update({ status })
+    .eq("id", id);
+  if (error) throw asIronDeskError(new Error(error.message));
+}
+
+/** Black exposures already recorded, used for the one-per-region-per-week rule. */
+export async function listBlackExposures(): Promise<BlackExposure[]> {
+  const res = await supabase
+    .from("black_exposures")
+    .select("target_region, week_start")
+    .order("week_start", { ascending: false })
+    .limit(200);
+  if (res.error) throw asIronDeskError(new Error(res.error.message));
+  return (res.data ?? []).map((row) => ({
+    targetRegion: row.target_region,
+    weekStart: row.week_start,
+  }));
+}
+
+/**
+ * Records one Black exposure. The unique (user, region, week) constraint is the
+ * real guard; a clash surfaces as a clear refusal rather than a raw DB error.
+ */
+export async function recordBlackExposure(input: {
+  windowId: string;
+  sessionId: string;
+  targetRegion: string;
+  weekStart: string;
+  /** Every prescription in the block; the exposure covers the whole block. */
+  prescriptions: readonly BlackExercisePrescription[];
+}): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase.from("black_exposures").insert({
+    user_id: userId,
+    window_id: input.windowId,
+    session_id: input.sessionId,
+    target_region: input.targetRegion,
+    week_start: input.weekStart,
+    prescription: { prescriptions: input.prescriptions } as unknown as Json,
+  });
+  if (error) {
+    if (error.code === "23505") {
+      throw asIronDeskError(
+        new Error(
+          `${input.targetRegion} already had its Black exposure in the week of ${input.weekStart}.`,
+        ),
+      );
+    }
+    throw asIronDeskError(new Error(error.message));
+  }
 }
