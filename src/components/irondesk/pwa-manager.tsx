@@ -236,6 +236,7 @@ export function PwaProvider({ children }: { children: ReactNode }) {
   const installControlVisible = mounted && !installed;
   const automaticInstallOfferVisible =
     mounted &&
+    !window.location.pathname.startsWith("/auth") &&
     installPreferenceLoaded &&
     !installed &&
     !installOfferDismissed &&

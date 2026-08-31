@@ -4,7 +4,7 @@
  * precaches the public offline/install assets and opportunistically caches versioned static files.
  * Bump SHELL_VERSION when the offline shell or its core assets change.
  */
-const SHELL_VERSION = "2026-08-31-3";
+const SHELL_VERSION = "2026-08-31-4";
 const CACHE_PREFIX = "irondesk-pwa-";
 const SHELL_CACHE = `${CACHE_PREFIX}shell-${SHELL_VERSION}`;
 const STATIC_CACHE = `${CACHE_PREFIX}static-${SHELL_VERSION}`;
