@@ -26,7 +26,7 @@ data class SetLogged(
     val setNumber: Int,
     val weightKg: Double,
     val reps: Int,
-    val rpe: Double,
+    val rpe: Double?,
 ) : WorkoutEvent
 
 data class SessionFinished(
@@ -44,7 +44,7 @@ data class LoggedSet(
     val setNumber: Int,
     val weightKg: Double,
     val reps: Int,
-    val rpe: Double,
+    val rpe: Double?,
     val loggedAtEpochMillis: Long,
 )
 

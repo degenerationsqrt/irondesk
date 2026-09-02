@@ -8,7 +8,8 @@ import java.io.DataOutputStream
 /** Versioned binary envelope. An unknown or corrupt format fails closed. */
 object WorkoutEventBinaryCodec {
     private const val MAGIC = 0x4952444B // IRDK
-    private const val VERSION = 1
+    private const val LEGACY_VERSION = 1
+    private const val VERSION = 2
     private const val MAX_EVENTS = 10_000
     private const val MAX_STRING_BYTES = 64 * 1024
 
@@ -38,7 +39,8 @@ object WorkoutEventBinaryCodec {
                             out.writeInt(event.setNumber)
                             out.writeDouble(event.weightKg)
                             out.writeInt(event.reps)
-                            out.writeDouble(event.rpe)
+                            out.writeBoolean(event.rpe != null)
+                            event.rpe?.let { out.writeDouble(it) }
                         }
 
                         is SessionFinished -> {
@@ -55,7 +57,8 @@ object WorkoutEventBinaryCodec {
     fun decode(bytes: ByteArray): List<WorkoutEvent> =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             require(input.readInt() == MAGIC) { "journal magic is invalid" }
-            require(input.readInt() == VERSION) { "journal version is unsupported" }
+            val version = input.readInt()
+            require(version in LEGACY_VERSION..VERSION) { "journal version is unsupported" }
             val count = input.readInt()
             require(count in 0..MAX_EVENTS) { "journal event count is invalid" }
 
@@ -77,7 +80,13 @@ object WorkoutEventBinaryCodec {
                                 setNumber = input.readInt(),
                                 weightKg = input.readDouble(),
                                 reps = input.readInt(),
-                                rpe = input.readDouble(),
+                                rpe = if (version == LEGACY_VERSION) {
+                                    input.readDouble()
+                                } else if (input.readBoolean()) {
+                                    input.readDouble()
+                                } else {
+                                    null
+                                },
                             )
                             3 -> SessionFinished(eventId, sessionId, at)
                             else -> error("journal event type is unsupported")

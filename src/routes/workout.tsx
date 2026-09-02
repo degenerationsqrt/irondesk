@@ -62,11 +62,10 @@ import {
 import {
   antagonistPartnerCandidates,
   blackSetPlan,
+  blackWeekStart,
   blackWindowState,
   canOpenBlackWindow,
-  canRecordBlackExposure,
   circuitSlots,
-  commitBlackApplication,
   currentBlackWindow,
   methodSetPlan,
   replaceCircuitStation,
@@ -102,8 +101,16 @@ import {
   createClientWorkoutRecordId,
   type WorkoutMutation,
   type WorkoutMutationCommitResult,
+  type WorkoutTerminalReceipt,
+  type WorkoutTerminalSummary,
 } from "@/lib/irondesk/workout-mutation-outbox";
 import { useWorkoutMutationQueue } from "@/lib/irondesk/use-workout-mutation-queue";
+import {
+  averageCompletedRpe,
+  parseRepsDraft,
+  parseRpeDraft,
+  parseWeightDraft,
+} from "@/lib/irondesk/workout-values";
 import {
   defaultSetWeightKg,
   formatLoadGuidance,
@@ -153,6 +160,113 @@ function uid() {
 
 type SaveState = "saved" | "saving" | "queued" | "error";
 
+type SetDraftField = "weight" | "reps" | "rpe";
+type SetDraftValues = Partial<Record<SetDraftField, string>>;
+
+function setDraftKey(setId: string, field: SetDraftField) {
+  return `${setId}:${field}`;
+}
+
+function newestPendingTerminalReceipt(
+  receipts: readonly WorkoutTerminalReceipt[],
+): WorkoutTerminalReceipt | null {
+  let newest: WorkoutTerminalReceipt | null = null;
+  for (const receipt of receipts) {
+    if (receipt.status === "applied") continue;
+    if (!newest || receipt.acceptedAt > newest.acceptedAt) newest = receipt;
+  }
+  return newest;
+}
+
+function newestAppliedFinishReceipt(
+  receipts: readonly WorkoutTerminalReceipt[],
+): WorkoutTerminalReceipt | null {
+  let newest: WorkoutTerminalReceipt | null = null;
+  for (const receipt of receipts) {
+    if (receipt.kind !== "session.finish" || receipt.status !== "applied" || !receipt.summary)
+      continue;
+    if (!newest || receipt.updatedAt > newest.updatedAt) newest = receipt;
+  }
+  return newest;
+}
+
+function finishReceiptForSession(
+  receipts: readonly WorkoutTerminalReceipt[],
+  sessionId: string,
+): WorkoutTerminalReceipt | null {
+  let newest: WorkoutTerminalReceipt | null = null;
+  for (const receipt of receipts) {
+    if (receipt.kind !== "session.finish" || receipt.sessionId !== sessionId) continue;
+    if (!newest || receipt.acceptedAt > newest.acceptedAt) newest = receipt;
+  }
+  return newest;
+}
+
+function pendingTerminalReceiptForSession(
+  receipts: readonly WorkoutTerminalReceipt[],
+  sessionId: string,
+): WorkoutTerminalReceipt | null {
+  let newest: WorkoutTerminalReceipt | null = null;
+  for (const receipt of receipts) {
+    if (receipt.sessionId !== sessionId || receipt.status === "applied") continue;
+    if (!newest || receipt.acceptedAt > newest.acceptedAt) newest = receipt;
+  }
+  return newest;
+}
+
+function receiptSummary(receipt: WorkoutTerminalReceipt): repo.WorkoutSummary | null {
+  if (!receipt.summary || !receipt.sessionId) return null;
+  return { sessionId: receipt.sessionId, ...receipt.summary };
+}
+
+/**
+ * Mirrors a queued atomic Black application into the workout editor. Stable
+ * set ids are important: edits made while offline must line up behind the
+ * Black mutation and address the rows that the RPC will create.
+ */
+function materializeBlackApplication(
+  current: readonly WorkoutExercise[],
+  application: repo.BlackWorkoutApplicationInput,
+): WorkoutExercise[] {
+  const targets = new Map(application.targets.map((target) => [target.sessionExerciseId, target]));
+  return current.map((exercise) => {
+    const target = targets.get(exercise.id);
+    if (!target) return exercise;
+    const plannedById = new Map(target.sets.map((set) => [set.id, set]));
+    const existingIds = new Set(exercise.sets.map((set) => set.id));
+    const updated = exercise.sets.map((set) => {
+      const planned = plannedById.get(set.id);
+      if (!planned) return set;
+      return {
+        ...set,
+        setNumber: planned.setNumber,
+        weightKg: planned.weightKg ?? set.weightKg,
+        reps: planned.reps ?? set.reps,
+        rpe: planned.rpe,
+        isWarmup: planned.isWarmup === true,
+        restSeconds: planned.restSeconds,
+        methodSegment: planned.methodSegment,
+        methodSegmentConfig: serializeMethodSegmentConfig(planned.methodSegmentConfig),
+      };
+    });
+    const created = target.sets
+      .filter((set) => !existingIds.has(set.id))
+      .map<SetEntry>((set) => ({
+        id: set.id,
+        setNumber: set.setNumber,
+        weightKg: set.weightKg ?? 0,
+        reps: set.reps ?? 0,
+        rpe: set.rpe,
+        done: false,
+        isWarmup: set.isWarmup === true,
+        restSeconds: set.restSeconds,
+        methodSegment: set.methodSegment,
+        methodSegmentConfig: serializeMethodSegmentConfig(set.methodSegmentConfig),
+      }));
+    return { ...exercise, sets: [...updated, ...created] };
+  });
+}
+
 class DeferredWorkoutMutationError extends Error {
   constructor() {
     super("That change is safely queued. Reconnect before applying the rest of this method block.");
@@ -162,14 +276,54 @@ class DeferredWorkoutMutationError extends Error {
 const previewCardioSave = async () => undefined;
 
 function WorkoutPage() {
+  const mutationQueue = useWorkoutMutationQueue();
+  const pendingTerminal = newestPendingTerminalReceipt(mutationQueue.terminalReceipts);
+
+  // A durable terminal receipt is the offline source of truth. Render it before
+  // any suspense-backed account/workout reads so an offline reload never waits
+  // on Supabase before showing the locally completed summary.
+  if (pendingTerminal) {
+    return (
+      <PendingWorkoutCompletion
+        key={pendingTerminal.itemId}
+        receipt={pendingTerminal}
+        mutationQueue={mutationQueue}
+      />
+    );
+  }
+
+  return <WorkoutServerData mutationQueue={mutationQueue} />;
+}
+
+function WorkoutServerData({
+  mutationQueue,
+}: {
+  mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
+}) {
   const mode = useServiceMode();
   const active = useModeData(workoutQuery);
   const library = useModeData(exercisesQuery);
+  const appliedFinish = newestAppliedFinishReceipt(mutationQueue.terminalReceipts);
 
+  if (!active && appliedFinish) {
+    return (
+      <PendingWorkoutCompletion
+        key={appliedFinish.itemId}
+        receipt={appliedFinish}
+        mutationQueue={mutationQueue}
+      />
+    );
+  }
   if (!active) return <WorkoutStart library={library} live={mode === "live"} />;
   return (
     <div className="space-y-4">
-      <WorkoutConsole key={active.id} initial={active} library={library} live={mode === "live"} />
+      <WorkoutConsole
+        key={active.id}
+        initial={active}
+        library={library}
+        live={mode === "live"}
+        mutationQueue={mutationQueue}
+      />
       {/* Browsable while training; starting is blocked until this session ends. */}
       <TemplateLibrary
         onStart={() => undefined}
@@ -186,6 +340,130 @@ function WorkoutPage() {
       {mode === "demo" ? (
         <CardioLogForm live={false} timeZone="UTC" onSave={previewCardioSave} />
       ) : null}
+    </div>
+  );
+}
+
+function PendingWorkoutCompletion({
+  receipt,
+  mutationQueue,
+}: {
+  receipt: WorkoutTerminalReceipt;
+  mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
+}) {
+  const units = useUnits();
+  const unit = weightUnit(units);
+  const needsAttention = receipt.status === "blocked";
+  const synced = receipt.status === "applied";
+  const isFinish = receipt.kind === "session.finish";
+  const hasQueuedTerminal = mutationQueue.items.some((item) => item.id === receipt.itemId);
+  const receiptLaneCount = mutationQueue.items.filter(
+    (item) => item.laneId === receipt.laneId,
+  ).length;
+  const olderLaneCount = Math.max(0, mutationQueue.items.length - receiptLaneCount);
+  const [summary, setDisplayedSummary] = useState<repo.WorkoutSummary | null>(() =>
+    receiptSummary(receipt),
+  );
+  const [authoritative, setAuthoritative] = useState(false);
+
+  useEffect(() => {
+    if (!synced || !receipt.sessionId) return;
+    let active = true;
+    void repo
+      .getWorkoutSummary(receipt.sessionId)
+      .then((result) => {
+        if (!active) return;
+        setDisplayedSummary(result);
+        setAuthoritative(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [receipt.sessionId, synced]);
+  return (
+    <div className="mx-auto max-w-2xl space-y-4">
+      <PageHeader
+        title={isFinish ? "Workout complete" : "Workout closed on this device"}
+        subtitle={summary?.title ?? "Saved on this device"}
+      />
+      <SectionCard
+        title={summary ? "Session summary" : "Previous workout sync"}
+        eyebrow={
+          synced
+            ? "Synced to your account"
+            : needsAttention
+              ? `${isFinish ? "Completion" : "Cancellation"} saved on this device — sync needs attention`
+              : `${isFinish ? "Completed" : "Cancelled"} — sync pending`
+        }
+      >
+        {summary ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <MetricTile label="Duration" value={`${summary.durationMin}m`} />
+            <MetricTile label="Sets" value={summary.sets} tone="primary" />
+            <MetricTile label="Reps" value={summary.reps} />
+            <MetricTile
+              label="Volume"
+              value={fromKg(summary.tonnageKg, units).toLocaleString()}
+              unit={unit}
+              tone="warning"
+            />
+            <MetricTile label="Avg RPE" value={summary.avgRpe ?? "—"} tone="success" />
+          </div>
+        ) : null}
+        <div
+          className={`mt-4 rounded-lg border p-3 text-sm ${
+            synced
+              ? "border-success/40 bg-success/10 text-success"
+              : needsAttention
+                ? "border-danger/40 bg-danger/10 text-danger"
+                : "border-warning/40 bg-warning/10 text-warning"
+          }`}
+          role="status"
+        >
+          <p className="font-semibold">
+            {synced
+              ? "This workout is synced to your account."
+              : needsAttention
+                ? "Your previous workout needs a sync correction."
+                : `Your workout ${isFinish ? "completion" : "cancellation"} is safe on this device.`}
+          </p>
+          <p className="mt-1 text-xs">
+            {synced
+              ? authoritative
+                ? "The server acknowledged the terminal state and the authoritative summary is shown."
+                : "The server acknowledged the terminal state. Refreshing the authoritative summary now."
+              : (receipt.lastError ??
+                `${receiptLaneCount} change${receiptLaneCount === 1 ? "" : "s"} for this workout will sync automatically${olderLaneCount ? `; ${olderLaneCount} change${olderLaneCount === 1 ? "" : "s"} from other or legacy workouts remain separate` : ""}.`)}
+          </p>
+          {needsAttention ? (
+            <Button
+              className="mt-3"
+              size="sm"
+              onClick={() =>
+                void (hasQueuedTerminal
+                  ? mutationQueue.retryBlocked()
+                  : mutationQueue.retryTerminalReceipt(receipt.itemId))
+              }
+            >
+              {hasQueuedTerminal ? "Review or retry sync" : "Reconcile server state"}
+            </Button>
+          ) : null}
+        </div>
+        {synced ? (
+          <Button
+            className="mt-3"
+            onClick={() => mutationQueue.dismissTerminalReceipt(receipt.itemId)}
+          >
+            Done
+          </Button>
+        ) : (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Starting another workout is disabled until this terminal change is acknowledged or its
+            conflict is resolved.
+          </p>
+        )}
+      </SectionCard>
     </div>
   );
 }
@@ -379,10 +657,12 @@ function WorkoutConsole({
   initial,
   library,
   live,
+  mutationQueue,
 }: {
   initial: ActiveWorkout;
   library: Exercise[];
   live: boolean;
+  mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
 }) {
   const invalidate = useIronDeskInvalidate();
   const units = useUnits();
@@ -391,7 +671,6 @@ function WorkoutConsole({
   const progression = useQuery(progressionQuery(mode)).data;
   const sessionHistory = useQuery(historyQuery(mode)).data;
   const specializationWindows = useQuery(specializationWindowsQuery(mode)).data ?? [];
-  const mutationQueue = useWorkoutMutationQueue();
   const commitWorkoutMutation = mutationQueue.commit;
   const queueIsDurable = mutationQueue.durable;
 
@@ -439,10 +718,39 @@ function WorkoutConsole({
   const [rest, setRest] = useState<number | null>(null);
   const [restStarted, setRestStarted] = useState<number | null>(null);
   const [subFor, setSubFor] = useState<string | null>(null);
-  const [summary, setSummary] = useState<repo.WorkoutSummary | null>(null);
+  const finishReceipt = finishReceiptForSession(mutationQueue.terminalReceipts, initial.id);
+  const pendingSessionTerminal = pendingTerminalReceiptForSession(
+    mutationQueue.terminalReceipts,
+    initial.id,
+  );
+  const pendingBlackApplication = useMemo(() => {
+    for (const item of mutationQueue.items) {
+      if (item.sessionId === initial.id && item.mutation.kind === "black.apply") {
+        return item.mutation.input;
+      }
+    }
+    return null;
+  }, [initial.id, mutationQueue.items]);
+  const queuedFinishMutation = useMemo(() => {
+    for (const item of mutationQueue.items) {
+      if (item.sessionId === initial.id && item.mutation.kind === "session.finish") {
+        return item.mutation;
+      }
+    }
+    return null;
+  }, [initial.id, mutationQueue.items]);
+  const [summary, setSummary] = useState<repo.WorkoutSummary | null>(() =>
+    finishReceipt ? receiptSummary(finishReceipt) : null,
+  );
   const [confirming, setConfirming] = useState<"finish" | "cancel" | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [finishStorageError, setFinishStorageError] = useState<string | null>(null);
+  const [setDrafts, setSetDrafts] = useState<Record<string, SetDraftValues>>({});
+  const setDraftsRef = useRef<Record<string, SetDraftValues>>({});
+  const [setDraftErrors, setSetDraftErrors] = useState<Record<string, string>>({});
+  const setInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const setDraftTimers = useRef<Map<string, number>>(new Map());
   const selectedExerciseIds = useMemo(
     () =>
       new Set(
@@ -452,12 +760,79 @@ function WorkoutConsole({
   );
   const pending = useRef(0);
   const busySets = useRef<Set<string>>(new Set());
-  const lastAppliedAt = useRef<string | null>(mutationQueue.lastAppliedAt);
+  const finishRequestedAt = useRef<string | null>(queuedFinishMutation?.completedAt ?? null);
+  const finishSummary = useRef<WorkoutTerminalSummary | null>(finishReceipt?.summary ?? null);
+  const terminalStageStarted = useRef(Boolean(finishReceipt));
+  const authoritativeSummaryLoadedFor = useRef<string | null>(null);
   const terminalMutationQueued = mutationQueue.items.some(
     (item) =>
       (item.mutation.kind === "session.finish" || item.mutation.kind === "session.cancel") &&
       item.mutation.sessionId === initial.id,
   );
+  const currentQueueItems = mutationQueue.items.filter(
+    (item) =>
+      item.sessionId === initial.id ||
+      (finishReceipt?.laneId != null && item.laneId === finishReceipt.laneId),
+  );
+  const currentQueueCount = currentQueueItems.length;
+  const currentPendingCount = currentQueueItems.filter((item) => item.state === "pending").length;
+  const currentBlockedItem = currentQueueItems.find((item) => item.state === "blocked") ?? null;
+  const otherQueueCount = Math.max(0, mutationQueue.items.length - currentQueueCount);
+
+  useEffect(() => {
+    if (!finishReceipt?.summary || !finishReceipt.sessionId) return;
+    setSummary((current) => current ?? receiptSummary(finishReceipt));
+  }, [finishReceipt]);
+
+  useEffect(
+    () => () => {
+      for (const timer of setDraftTimers.current.values()) window.clearTimeout(timer);
+      setDraftTimers.current.clear();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!pendingBlackApplication) return;
+    setExercises((current) => materializeBlackApplication(current, pendingBlackApplication));
+    setMethodByExercise((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        pendingBlackApplication.targets.map((target) => [
+          target.sessionExerciseId,
+          "irondesk-black",
+        ]),
+      ),
+    }));
+    setMethodConfigByExercise((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        pendingBlackApplication.targets.map((target) => [
+          target.sessionExerciseId,
+          target.methodConfig,
+        ]),
+      ),
+    }));
+  }, [pendingBlackApplication]);
+
+  useEffect(() => {
+    if (
+      finishReceipt?.status !== "applied" ||
+      !finishReceipt.sessionId ||
+      authoritativeSummaryLoadedFor.current === finishReceipt.itemId
+    )
+      return;
+    authoritativeSummaryLoadedFor.current = finishReceipt.itemId;
+    void repo
+      .getWorkoutSummary(finishReceipt.sessionId)
+      .then((result) => {
+        setSummary(result);
+        invalidate();
+      })
+      .catch(() => {
+        authoritativeSummaryLoadedFor.current = null;
+      });
+  }, [finishReceipt, invalidate]);
 
   /** Runs a write in live mode and tracks saving/saved/error for the UI. */
   const persist = useCallback(
@@ -488,11 +863,15 @@ function WorkoutConsole({
   const persistMutation = useCallback(
     async (
       mutation: WorkoutMutation,
-      options?: { requireAcknowledgment?: boolean },
+      options?: { requireAcknowledgment?: boolean; terminalSummary?: WorkoutTerminalSummary },
     ): Promise<WorkoutMutationCommitResult> => {
-      if (!live) return { itemId: "demo", status: "applied" };
+      if (!live) return { itemId: "demo", status: "applied", outcome: "applied" };
       setSaveState("saving");
-      const result = await commitWorkoutMutation(mutation);
+      const result = await commitWorkoutMutation(mutation, {
+        sessionId: initial.id,
+        ...(options?.requireAcknowledgment ? { requireAcknowledgment: true } : {}),
+        ...(options?.terminalSummary ? { terminalSummary: options.terminalSummary } : {}),
+      });
       if (result.status === "applied") {
         setSaveError(null);
         if (pending.current === 0) setSaveState("saved");
@@ -514,15 +893,15 @@ function WorkoutConsole({
         throw new Error("That change could not be saved. Review the queued-change warning.");
       return result;
     },
-    [commitWorkoutMutation, live, queueIsDurable],
+    [commitWorkoutMutation, initial.id, live, queueIsDurable],
   );
 
   useEffect(() => {
     if (!live) return;
-    if (mutationQueue.blockedCount > 0) {
-      setSaveError(mutationQueue.lastError ?? "A queued change needs your attention.");
+    if (currentBlockedItem) {
+      setSaveError(currentBlockedItem.lastError ?? "A queued change needs your attention.");
       setSaveState("error");
-    } else if (mutationQueue.pendingCount > 0) {
+    } else if (currentPendingCount > 0) {
       setSaveError(
         mutationQueue.durable
           ? "Connection interrupted. Your changes are safely queued on this device."
@@ -533,20 +912,7 @@ function WorkoutConsole({
       setSaveError(null);
       setSaveState("saved");
     }
-  }, [
-    live,
-    mutationQueue.blockedCount,
-    mutationQueue.durable,
-    mutationQueue.lastError,
-    mutationQueue.pendingCount,
-  ]);
-
-  useEffect(() => {
-    if (mutationQueue.lastAppliedAt && mutationQueue.lastAppliedAt !== lastAppliedAt.current) {
-      lastAppliedAt.current = mutationQueue.lastAppliedAt;
-      invalidate();
-    }
-  }, [invalidate, mutationQueue.lastAppliedAt]);
+  }, [live, currentBlockedItem, currentPendingCount, mutationQueue.durable]);
 
   useEffect(() => {
     if (!running || summary) return;
@@ -566,8 +932,9 @@ function WorkoutConsole({
 
   // Debounced session-notes autosave.
   useEffect(() => {
-    if (!live || notes === initial.notes) return;
+    if (!live || notes === initial.notes || terminalStageStarted.current) return;
     const t = setTimeout(() => {
+      if (terminalStageStarted.current) return;
       void persistMutation({ kind: "session.meta", sessionId: initial.id, patch: { notes } });
     }, 700);
     return () => clearTimeout(t);
@@ -580,7 +947,7 @@ function WorkoutConsole({
       plannedSets: exercises.reduce((a, e) => a + e.sets.length, 0),
       reps: done.reduce((a, s) => a + s.reps, 0),
       volume: done.reduce((a, s) => a + s.reps * s.weightKg, 0),
-      rpe: done.length ? done.reduce((a, s) => a + s.rpe, 0) / done.length : 0,
+      rpe: averageCompletedRpe(done),
     };
   }, [exercises]);
 
@@ -624,7 +991,8 @@ function WorkoutConsole({
   /* ---------------------------------------------- training-method selection */
 
   /** Logged RPE is the athlete's effort signal; RIR is its inverse. */
-  const rirFromRpe = (rpe: number): number | null => (rpe > 0 ? Math.max(0, 10 - rpe) : null);
+  const rirFromRpe = (rpe: number | null): number | null =>
+    rpe != null && rpe >= 1 && rpe <= 10 ? Math.max(0, 10 - rpe) : null;
 
   /** Real movements available for pairing: this session first, then the library. */
   const methodCandidates = useMemo<MovementCandidate[]>(() => {
@@ -925,16 +1293,29 @@ function WorkoutConsole({
   };
 
   /**
-   * Applies the whole Black block at once. The database has no atomic RPC for
-   * this client-composed write, so the weekly exposure is recorded only after
-   * every method row and set row has returned a verified success.
+   * Stages the complete Black block as one retry-safe mutation. The RPC applies
+   * methods, rows, and the exposure receipt transactionally; this client only
+   * materializes the same stable row ids once the operation is locally safe.
    */
   const applyBlackBlock = async () => {
     if (!openBlackWindow) return;
+    if (blackBlockMaterialized) {
+      setMethodNotice("This Black block is already materialized in the current workout.");
+      return;
+    }
     if (blackState && !blackState.canApply) {
       setMethodNotice(blackState.resumeRequirement ?? blackState.reason);
       return;
     }
+
+    if (pendingBlackApplication?.windowId === openBlackWindow.id) {
+      setExercises((current) => materializeBlackApplication(current, pendingBlackApplication));
+      setMethodNotice(
+        "This Black block is already saved on this device and will sync automatically.",
+      );
+      return;
+    }
+
     const targets = openBlackWindow.prescriptions
       .map((p) => {
         const match =
@@ -945,8 +1326,10 @@ function WorkoutConsole({
       .filter(
         (t): t is { exerciseId: string; prescription: BlackExercisePrescription } => t !== null,
       );
-    if (!targets.length) {
-      setMethodNotice("None of this Black block's movements are in the current workout yet.");
+    if (targets.length !== openBlackWindow.prescriptions.length) {
+      setMethodNotice(
+        "Add every prescribed Black movement to this workout before applying the block.",
+      );
       return;
     }
 
@@ -978,94 +1361,105 @@ function WorkoutConsole({
       plannedMethods[target.exerciseId] = "irondesk-black";
     }
 
-    let exposureWeekStart: string | null = null;
-    if (live) {
-      try {
-        const existing = await repo.listBlackExposures();
-        const gate = canRecordBlackExposure({
-          targetRegion: openBlackWindow.targetRegion,
-          date: new Date(),
-          existing,
+    const application: repo.BlackWorkoutApplicationInput = {
+      applicationId: createClientWorkoutRecordId(),
+      sessionId: initial.id,
+      windowId: openBlackWindow.id,
+      targetRegion: openBlackWindow.targetRegion,
+      weekStart: blackWeekStart(new Date(initial.startedAt)),
+      prescriptions: openBlackWindow.prescriptions,
+      targets: targets.map((target) => {
+        const exercise = exercises.find((item) => item.id === target.exerciseId);
+        if (!exercise) throw new Error("A Black movement is no longer in this workout.");
+        const methodConfig = buildConfigFor(exercise, "irondesk-black");
+        const workingWeightKg =
+          suggestions[target.exerciseId]?.weightKg ??
+          [...exercise.sets].reverse().find((set) => set.weightKg > 0)?.weightKg ??
+          null;
+        const plan = blackSetPlan({
+          prescription: target.prescription,
+          windowId: openBlackWindow.id,
+          workingWeightKg,
         });
-        if (!gate.allowed) {
-          setMethodNotice(gate.reason ?? "That Black exposure was already recorded this week.");
-          return;
-        }
-        exposureWeekStart = gate.weekStart;
-      } catch (caught) {
-        setMethodNotice(
-          caught instanceof Error ? caught.message : "That Black exposure was already recorded.",
+        const openSets = exercise.sets.filter((set) => !set.done);
+        const reservedSetNumbers = new Set(
+          exercise.sets
+            .map((set, index) => set.setNumber ?? index + 1)
+            .filter((setNumber) => Number.isInteger(setNumber) && setNumber > 0),
         );
-        return;
-      }
-    }
+        let nextSetNumber = Math.max(0, ...reservedSetNumbers) + 1;
+        return {
+          sessionExerciseId: exercise.id,
+          methodConfig,
+          sets: plan.rows.map((row, index) => {
+            const existing = openSets[index];
+            let setNumber =
+              existing?.setNumber ??
+              (existing
+                ? exercise.sets.findIndex((set) => set.id === existing.id) + 1
+                : nextSetNumber);
+            if (!existing) {
+              while (reservedSetNumbers.has(setNumber)) setNumber += 1;
+              nextSetNumber = setNumber + 1;
+              reservedSetNumbers.add(setNumber);
+            }
+            const methodSegmentConfig: MethodSegmentConfig = {
+              methodId: "irondesk-black",
+              blackWindowId: openBlackWindow.id,
+              ...(row.segmentConfig ?? {}),
+              ...(row.restSeconds == null ? {} : { restSeconds: row.restSeconds }),
+            };
+            return {
+              id: existing?.id ?? createClientWorkoutRecordId(),
+              setNumber,
+              weightKg: row.weightKg ?? existing?.weightKg ?? null,
+              reps: row.reps ?? existing?.reps ?? null,
+              rpe: existing?.rpe ?? null,
+              restSeconds: row.restSeconds ?? existing?.restSeconds ?? null,
+              methodSegment: row.segment ?? null,
+              methodSegmentConfig,
+              isWarmup: existing?.isWarmup === true,
+            };
+          }),
+        };
+      }),
+    };
 
     try {
-      await commitBlackApplication({
-        targets,
-        writeTarget: async (target) => {
-          const exercise = exercises.find((item) => item.id === target.exerciseId);
-          if (!exercise) throw new Error("A Black movement is no longer in this workout.");
-          const config = buildConfigFor(exercise, "irondesk-black");
-          if (live) {
-            await persistMutation(
-              {
-                kind: "exercise.method",
-                sessionExerciseId: target.exerciseId,
-                methodId: "irondesk-black",
-                config,
-              },
-              { requireAcknowledgment: true },
-            );
-          }
-          setMethodByExercise((previous) => ({
-            ...previous,
-            [target.exerciseId]: "irondesk-black",
-          }));
-          setMethodConfigByExercise((previous) => ({
-            ...previous,
-            [target.exerciseId]: config,
-          }));
-
-          const workingWeightKg =
-            suggestions[target.exerciseId]?.weightKg ??
-            [...exercise.sets].reverse().find((set) => set.weightKg > 0)?.weightKg ??
-            null;
-          await writePlanToSets(
-            target.exerciseId,
-            blackSetPlan({
-              prescription: target.prescription,
-              windowId: openBlackWindow.id,
-              workingWeightKg,
-            }),
-          );
-        },
-        recordExposure: async () => {
-          if (!live) return;
-          if (!exposureWeekStart)
-            throw new Error("IronDesk could not verify the Black exposure week.");
-          await repo.recordBlackExposure({
-            windowId: openBlackWindow.id,
-            sessionId: initial.id,
-            targetRegion: openBlackWindow.targetRegion,
-            weekStart: exposureWeekStart,
-            prescriptions: targets.map((target) => target.prescription),
-          });
-        },
-      });
+      repo.validateBlackWorkoutApplication(application);
+      const result = live
+        ? await persistMutation({ kind: "black.apply", input: application })
+        : ({
+            itemId: "demo",
+            status: "applied",
+            outcome: "applied",
+          } satisfies WorkoutMutationCommitResult);
+      if (result.status === "blocked") return;
+      setExercises((current) => materializeBlackApplication(current, application));
+      setMethodByExercise((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          application.targets.map((target) => [target.sessionExerciseId, "irondesk-black"]),
+        ),
+      }));
+      setMethodConfigByExercise((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          application.targets.map((target) => [target.sessionExerciseId, target.methodConfig]),
+        ),
+      }));
+      setMethodNotice(
+        result.status === "queued"
+          ? `Black block saved on this device for ${targets.length} movement(s) — sync pending.`
+          : `Black block applied to ${targets.length} movement(s) · one ${openBlackWindow.targetRegion} exposure this week.`,
+      );
     } catch (caught) {
-      if (live) invalidate();
       setMethodNotice(
         caught instanceof Error
-          ? `Black block was not recorded: ${caught.message}`
-          : "Black block was not recorded because a workout write failed.",
+          ? `Black block was not saved: ${caught.message}`
+          : "Black block was not saved because the operation could not be stored.",
       );
-      return;
     }
-    if (live) invalidate();
-    setMethodNotice(
-      `Black block applied to ${targets.length} movement(s) · one ${openBlackWindow.targetRegion} exposure this week.`,
-    );
   };
 
   /**
@@ -1110,6 +1504,25 @@ function WorkoutConsole({
   const blackState = openBlackWindow
     ? blackWindowState({ window: openBlackWindow, profile: methodProfile })
     : null;
+  const blackBlockMaterialized = Boolean(
+    openBlackWindow &&
+    openBlackWindow.prescriptions.length > 0 &&
+    openBlackWindow.prescriptions.every((prescription) => {
+      const exercise =
+        exercises.find((candidate) => candidate.id === prescription.exerciseId) ??
+        exercises.find(
+          (candidate) => candidate.name.toLowerCase() === prescription.exerciseName.toLowerCase(),
+        );
+      return Boolean(
+        exercise?.sets.some((set) => {
+          const segment = parseMethodSegmentConfig(set.methodSegmentConfig);
+          return (
+            segment.methodId === "irondesk-black" && segment.blackWindowId === openBlackWindow.id
+          );
+        }),
+      );
+    }),
+  );
 
   /** Suspension and expiry are persisted as soon as the engine detects them. */
   useEffect(() => {
@@ -1202,10 +1615,10 @@ function WorkoutConsole({
       ),
     );
 
-  const editSet = (exId: string, setId: string, patch: Partial<SetEntry>) => {
+  const editSet = async (exId: string, setId: string, patch: Partial<SetEntry>) => {
     patchLocal(exId, setId, patch);
     if (setId.startsWith("local-")) return;
-    void persistMutation({
+    return persistMutation({
       kind: "set.update",
       setId,
       patch: {
@@ -1220,9 +1633,179 @@ function WorkoutConsole({
     });
   };
 
-  const toggleSet = (exId: string, setId: string) => {
+  const updateSetDraft = (setId: string, field: SetDraftField, value: string) => {
+    const key = setDraftKey(setId, field);
+    const nextDrafts = {
+      ...setDraftsRef.current,
+      [setId]: { ...setDraftsRef.current[setId], [field]: value },
+    };
+    setDraftsRef.current = nextDrafts;
+    setSetDrafts(nextDrafts);
+    setSetDraftErrors((previous) => {
+      if (!(key in previous)) return previous;
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
+    const previousTimer = setDraftTimers.current.get(key);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+    const timer = window.setTimeout(() => {
+      setDraftTimers.current.delete(key);
+      const exercise = exercises.find((candidate) =>
+        candidate.sets.some((set) => set.id === setId),
+      );
+      const set = exercise?.sets.find((candidate) => candidate.id === setId);
+      if (!exercise || !set) return;
+      const parsed =
+        field === "weight"
+          ? parseWeightDraft(value, (displayValue) => toKg(displayValue, units))
+          : field === "reps"
+            ? parseRepsDraft(value)
+            : parseRpeDraft(value);
+      if (!parsed.ok) return;
+      const patch: Partial<SetEntry> =
+        field === "weight"
+          ? { weightKg: parsed.value as number }
+          : field === "reps"
+            ? { reps: parsed.value as number }
+            : { rpe: parsed.value as number | null };
+      void editSet(exercise.id, setId, patch)
+        .then(() => {
+          setSetDrafts((previous) => {
+            if (previous[setId]?.[field] !== value) return previous;
+            const fields = { ...previous[setId] };
+            delete fields[field];
+            const next = { ...previous };
+            if (Object.keys(fields).length === 0) delete next[setId];
+            else next[setId] = fields;
+            setDraftsRef.current = next;
+            return next;
+          });
+        })
+        .catch((caught) => {
+          setSaveError(
+            caught instanceof Error ? caught.message : "That set value could not be saved.",
+          );
+          setSaveState("error");
+        });
+    }, 650);
+    setDraftTimers.current.set(key, timer);
+  };
+
+  const displayedSetValue = (set: SetEntry, field: SetDraftField): string => {
+    const draft = setDrafts[set.id]?.[field];
+    if (draft !== undefined) return draft;
+    if (field === "weight") return String(fromKg(set.weightKg, units));
+    if (field === "reps") return String(set.reps);
+    return set.rpe == null ? "" : String(set.rpe);
+  };
+
+  const commitSetDraft = async (
+    exId: string,
+    set: SetEntry,
+    field: SetDraftField,
+    focusOnError = false,
+  ): Promise<boolean> => {
+    const key = setDraftKey(set.id, field);
+    const pendingTimer = setDraftTimers.current.get(key);
+    if (pendingTimer !== undefined) {
+      window.clearTimeout(pendingTimer);
+      setDraftTimers.current.delete(key);
+    }
+    const immediateDraft = setDraftsRef.current[set.id]?.[field];
+    const draft = immediateDraft ?? displayedSetValue(set, field);
+    const parsed =
+      field === "weight"
+        ? parseWeightDraft(draft, (value) => toKg(value, units))
+        : field === "reps"
+          ? parseRepsDraft(draft)
+          : parseRpeDraft(draft);
+    if (!parsed.ok) {
+      setSetDraftErrors((previous) => ({ ...previous, [key]: parsed.message }));
+      setSaveError(parsed.message);
+      setSaveState("error");
+      if (focusOnError) {
+        requestAnimationFrame(() => {
+          setInputRefs.current.get(key)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          setInputRefs.current.get(key)?.focus();
+        });
+      }
+      return false;
+    }
+
+    if (immediateDraft !== undefined) {
+      const patch: Partial<SetEntry> =
+        field === "weight"
+          ? { weightKg: parsed.value as number }
+          : field === "reps"
+            ? { reps: parsed.value as number }
+            : { rpe: parsed.value as number | null };
+      await editSet(exId, set.id, patch);
+      setSetDrafts((previous) => {
+        const fields = { ...previous[set.id] };
+        delete fields[field];
+        const next = { ...previous };
+        if (Object.keys(fields).length === 0) delete next[set.id];
+        else next[set.id] = fields;
+        setDraftsRef.current = next;
+        return next;
+      });
+    }
+    setSetDraftErrors((previous) => {
+      if (!(key in previous)) return previous;
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
+    return true;
+  };
+
+  const commitSetDrafts = async (
+    exId: string,
+    set: SetEntry,
+    focusOnError = false,
+  ): Promise<boolean> => {
+    for (const field of ["weight", "reps", "rpe"] as const) {
+      if (!(await commitSetDraft(exId, set, field, focusOnError))) return false;
+    }
+    return true;
+  };
+
+  const setWithCommittedDrafts = (set: SetEntry): SetEntry => {
+    const drafts = setDraftsRef.current[set.id];
+    if (!drafts) return set;
+    let next = set;
+    if (drafts.weight !== undefined) {
+      const parsed = parseWeightDraft(drafts.weight, (value) => toKg(value, units));
+      if (parsed.ok) next = { ...next, weightKg: parsed.value };
+    }
+    if (drafts.reps !== undefined) {
+      const parsed = parseRepsDraft(drafts.reps);
+      if (parsed.ok) next = { ...next, reps: parsed.value };
+    }
+    if (drafts.rpe !== undefined) {
+      const parsed = parseRpeDraft(drafts.rpe);
+      if (parsed.ok) next = { ...next, rpe: parsed.value };
+    }
+    return next;
+  };
+
+  const commitAllSetDrafts = async (): Promise<WorkoutExercise[] | null> => {
+    for (const exercise of exercises) {
+      for (const set of exercise.sets) {
+        if (!(await commitSetDrafts(exercise.id, set, true))) return null;
+      }
+    }
+    return exercises.map((exercise) => ({
+      ...exercise,
+      sets: exercise.sets.map(setWithCommittedDrafts),
+    }));
+  };
+
+  const toggleSet = async (exId: string, setId: string) => {
     const set = exercises.find((e) => e.id === exId)?.sets.find((s) => s.id === setId);
     if (!set) return;
+    if (!(await commitSetDrafts(exId, set, true))) return;
     const next = !set.done;
     patchLocal(exId, setId, { done: next });
     if (next) {
@@ -1239,15 +1822,12 @@ function WorkoutConsole({
     if (setId.startsWith("local-")) return;
     const restSeconds =
       next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
-    void persistMutation({
+    await persistMutation({
       kind: "set.update",
       setId,
       patch: {
         completed: next,
         completedAt: next ? new Date().toISOString() : null,
-        weightKg: set.weightKg,
-        reps: set.reps,
-        rpe: set.rpe,
         ...(restSeconds ? { restSeconds } : {}),
       },
     });
@@ -1274,7 +1854,7 @@ function WorkoutConsole({
       setNumber: Math.max(0, ...(ex?.sets.map((set) => set.setNumber ?? 0) ?? [])) + 1,
       weightKg: weightKg ?? last?.weightKg ?? suggestion?.weightKg ?? defaultSetWeightKg(units),
       reps: reps ?? last?.reps ?? suggestion?.reps ?? 8,
-      rpe: last?.rpe ?? 7,
+      rpe: null,
       done: false,
       methodSegment: segment?.id ?? null,
       methodSegmentConfig: segment ? serializeMethodSegmentConfig(segment.config) : null,
@@ -1393,32 +1973,92 @@ function WorkoutConsole({
 
   const finish = async () => {
     setConfirming(null);
+    const committedExercises = await commitAllSetDrafts();
+    if (!committedExercises) return;
+    terminalStageStarted.current = true;
+    finishRequestedAt.current ??= new Date().toISOString();
     setRunning(false);
+    setExercises(committedExercises);
+    const completedSets = committedExercises.flatMap((exercise) =>
+      exercise.sets.filter((set) => set.done),
+    );
+    const completedAverageRpe = averageCompletedRpe(completedSets);
+    const terminalSummary: WorkoutTerminalSummary = finishSummary.current ?? {
+      title: initial.title,
+      durationMin: Math.round(elapsed / 60),
+      sets: completedSets.length,
+      reps: completedSets.reduce((sum, set) => sum + set.reps, 0),
+      tonnageKg: completedSets.reduce((sum, set) => sum + set.reps * set.weightKg, 0),
+      avgRpe: completedAverageRpe == null ? null : Number(completedAverageRpe.toFixed(1)),
+    };
+    finishSummary.current = terminalSummary;
+    const localSummary: repo.WorkoutSummary = {
+      sessionId: initial.id,
+      ...terminalSummary,
+    };
     if (!live) {
-      setSummary({
-        sessionId: initial.id,
-        title: initial.title,
-        durationMin: Math.round(elapsed / 60),
-        sets: totals.sets,
-        reps: totals.reps,
-        tonnageKg: Math.round(totals.volume),
-        avgRpe: Number(totals.rpe.toFixed(1)),
-      });
+      setSummary(localSummary);
+      return;
+    }
+    if (!queueIsDurable && typeof navigator !== "undefined" && navigator.onLine === false) {
+      const message =
+        "This browser cannot use durable workout storage and is offline. Your workout is not yet safely completed. Reconnect, keep this page open, and retry.";
+      setFinishStorageError(message);
+      setSaveError(message);
+      setSaveState("error");
       return;
     }
     try {
-      const committed = await persistMutation({
-        kind: "session.finish",
-        sessionId: initial.id,
-        completedAt: new Date().toISOString(),
-      });
+      if (notes !== initial.notes) {
+        await persistMutation(
+          { kind: "session.meta", sessionId: initial.id, patch: { notes } },
+          !queueIsDurable ? { requireAcknowledgment: true } : undefined,
+        );
+      }
+      const committed = await persistMutation(
+        {
+          kind: "session.finish",
+          sessionId: initial.id,
+          completedAt: finishRequestedAt.current,
+        },
+        {
+          terminalSummary,
+          ...(!queueIsDurable ? { requireAcknowledgment: true } : {}),
+        },
+      );
+      setFinishStorageError(null);
+      if (committed.status === "queued") {
+        if (committed.durable === true) {
+          setSummary(localSummary);
+        } else {
+          const message =
+            "IronDesk could not persist completion in durable browser storage. Your workout is not yet safely completed; keep this page open and retry online.";
+          setFinishStorageError(message);
+          setSaveError(message);
+          setSaveState("error");
+        }
+      }
       if (committed.status === "applied") {
-        const result = await repo.getWorkoutSummary(initial.id);
-        setSummary(result);
-        invalidate();
+        setSummary(localSummary);
+        try {
+          const result = await repo.getWorkoutSummary(initial.id);
+          setSummary(result);
+          invalidate();
+        } catch (caught) {
+          setSaveError(
+            caught instanceof Error
+              ? `Workout synced, but the server summary could not be refreshed yet: ${caught.message}`
+              : "Workout synced, but the server summary could not be refreshed yet.",
+          );
+        }
       }
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : "Could not finish the session.");
+      const detail = caught instanceof Error ? caught.message : "Could not finish the session.";
+      const message = queueIsDurable
+        ? detail
+        : `Durable workout storage is unavailable, so IronDesk cannot claim this workout is complete yet. ${detail}`;
+      setFinishStorageError(queueIsDurable ? null : message);
+      setSaveError(message);
       setSaveState("error");
     }
   };
@@ -1435,15 +2075,68 @@ function WorkoutConsole({
     }
   };
 
+  if (finishStorageError && !summary) {
+    const pendingSummary = finishSummary.current;
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <PageHeader title="Workout completion needs retry" subtitle={initial.title} />
+        <SectionCard title="Not yet safely completed" eyebrow="Durable storage unavailable">
+          <div className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+            <p className="font-semibold">Keep this page open until IronDesk confirms the save.</p>
+            <p className="mt-1 text-xs">{finishStorageError}</p>
+          </div>
+          {pendingSummary ? (
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+              <MetricTile label="Duration" value={`${pendingSummary.durationMin}m`} />
+              <MetricTile label="Sets" value={pendingSummary.sets} tone="primary" />
+              <MetricTile label="Reps" value={pendingSummary.reps} />
+              <MetricTile
+                label="Volume"
+                value={fromKg(pendingSummary.tonnageKg, units).toLocaleString()}
+                unit={unit}
+                tone="warning"
+              />
+              <MetricTile label="Avg RPE" value={pendingSummary.avgRpe ?? "—"} tone="success" />
+            </div>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => void finish()}>Retry completion</Button>
+            <Button variant="secondary" onClick={() => void mutationQueue.flush(true)}>
+              Retry pending sync
+            </Button>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
+  if (pendingSessionTerminal && !summary) {
+    return (
+      <PendingWorkoutCompletion
+        key={pendingSessionTerminal.itemId}
+        receipt={pendingSessionTerminal}
+        mutationQueue={mutationQueue}
+      />
+    );
+  }
+
   if (summary) {
     return (
       <div className="mx-auto max-w-2xl">
         <PageHeader title="Workout complete" subtitle={summary.title} />
         <SectionCard
           title="Session summary"
-          eyebrow={live ? "Saved to your account" : "Demo — not saved"}
+          eyebrow={
+            !live
+              ? "Demo — not saved"
+              : finishReceipt?.status === "applied"
+                ? "Synced to your account"
+                : finishReceipt?.status === "blocked"
+                  ? "Completed on this device — sync needs attention"
+                  : "Completed — sync pending"
+          }
         >
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <MetricTile label="Duration" value={`${summary.durationMin}m`} />
             <MetricTile label="Sets" value={summary.sets} tone="primary" />
             <MetricTile label="Reps" value={summary.reps} />
@@ -1453,7 +2146,28 @@ function WorkoutConsole({
               unit={unit}
               tone="warning"
             />
+            <MetricTile label="Avg RPE" value={summary.avgRpe ?? "—"} tone="success" />
           </div>
+          {live && finishReceipt?.status !== "applied" ? (
+            <div
+              className={`mt-4 rounded-lg border p-3 text-sm ${
+                finishReceipt?.status === "blocked"
+                  ? "border-danger/40 bg-danger/10 text-danger"
+                  : "border-warning/40 bg-warning/10 text-warning"
+              }`}
+              role="status"
+            >
+              <p className="font-semibold">
+                {finishReceipt?.status === "blocked"
+                  ? "Your completed workout needs a sync correction."
+                  : "Your completed workout is safe on this device."}
+              </p>
+              <p className="mt-1 text-xs">
+                {finishReceipt?.lastError ??
+                  `${currentQueueCount} change${currentQueueCount === 1 ? "" : "s"} for this workout will sync automatically${otherQueueCount ? `; ${otherQueueCount} from other or legacy workouts remain separate` : ""}.`}
+              </p>
+            </div>
+          ) : null}
           <div className="mt-4 space-y-2">
             {exercises.map((e) => (
               <div
@@ -1549,7 +2263,11 @@ function WorkoutConsole({
             unit={unit}
             tone="warning"
           />
-          <MetricTile label="Avg RPE" value={totals.rpe.toFixed(1)} tone="success" />
+          <MetricTile
+            label="Avg RPE"
+            value={totals.rpe == null ? "—" : totals.rpe.toFixed(1)}
+            tone="success"
+          />
         </div>
       </div>
 
@@ -1562,13 +2280,19 @@ function WorkoutConsole({
           )}
           {saveState === "saved" && (
             <span className="flex items-center gap-1.5 text-success">
-              <Check className="size-3.5" /> All changes saved
+              <Check className="size-3.5" /> All changes for this workout saved
+              {otherQueueCount > 0
+                ? ` · ${otherQueueCount} change${otherQueueCount === 1 ? "" : "s"} from other or legacy workouts still pending`
+                : ""}
             </span>
           )}
           {saveState === "queued" && (
             <span className="flex items-center gap-1.5 text-warning">
-              <CloudOff className="size-3.5" /> {mutationQueue.pendingCount} change
-              {mutationQueue.pendingCount === 1 ? "" : "s"}{" "}
+              <CloudOff className="size-3.5" /> {currentQueueCount} change
+              {currentQueueCount === 1 ? "" : "s"} for this workout
+              {otherQueueCount > 0
+                ? ` · ${otherQueueCount} from other or legacy workouts`
+                : ""}{" "}
               {mutationQueue.durable
                 ? "safely queued on this device — IronDesk will retry after reconnecting, including after a reload."
                 : "kept only in this open page because local storage is unavailable — do not close or reload before reconnecting."}
@@ -1580,32 +2304,13 @@ function WorkoutConsole({
                 <CloudOff className="size-3.5" /> {saveError ?? "A queued change needs attention."}
               </span>
               {mutationQueue.blockedCount > 0 && (
-                <>
-                  <button
-                    type="button"
-                    className="font-semibold underline underline-offset-2"
-                    onClick={() => void mutationQueue.retryBlocked()}
-                  >
-                    Retry
-                  </button>
-                  <button
-                    type="button"
-                    className="font-semibold underline underline-offset-2"
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          "Discard the blocked change and every later queued workout change? The workout will reload from the last server-saved state.",
-                        )
-                      )
-                        return;
-                      mutationQueue.discardBlocked();
-                      invalidate();
-                      window.location.reload();
-                    }}
-                  >
-                    Discard blocked and later changes
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="font-semibold underline underline-offset-2"
+                  onClick={() => void mutationQueue.retryBlocked()}
+                >
+                  Retry safely
+                </button>
               )}
             </div>
           )}
@@ -1647,10 +2352,10 @@ function WorkoutConsole({
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                disabled={!blackState?.canApply}
+                disabled={!blackState?.canApply || blackBlockMaterialized}
                 onClick={() => void applyBlackBlock()}
               >
-                Apply Black block
+                {blackBlockMaterialized ? "Black block applied" : "Apply Black block"}
               </Button>
               <Button size="sm" variant="secondary" onClick={() => void endBlackWindow()}>
                 End block
@@ -2057,7 +2762,7 @@ function WorkoutConsole({
                   <span className="label-eyebrow text-[0.5625rem]">Set</span>
                   <span className="label-eyebrow text-[0.5625rem]">{unit}</span>
                   <span className="label-eyebrow text-[0.5625rem]">Reps</span>
-                  <span className="label-eyebrow text-[0.5625rem]">RPE</span>
+                  <span className="label-eyebrow text-[0.5625rem]">RPE (opt.)</span>
                   <span />
                   <span />
                 </div>
@@ -2101,32 +2806,71 @@ function WorkoutConsole({
                         <Input
                           type="number"
                           inputMode="decimal"
-                          value={fromKg(s.weightKg, units)}
-                          onChange={(e) =>
-                            editSet(ex.id, s.id, { weightKg: toKg(Number(e.target.value), units) })
-                          }
+                          min="0"
+                          max={String(fromKg(1000, units))}
+                          step="any"
+                          value={displayedSetValue(s, "weight")}
+                          aria-label={`${ex.name} set ${i + 1} weight in ${unit}`}
+                          ref={(node) => {
+                            const key = setDraftKey(s.id, "weight");
+                            if (node) setInputRefs.current.set(key, node);
+                            else setInputRefs.current.delete(key);
+                          }}
+                          aria-invalid={Boolean(setDraftErrors[setDraftKey(s.id, "weight")])}
+                          onChange={(e) => updateSetDraft(s.id, "weight", e.target.value)}
+                          onBlur={() => void commitSetDraft(ex.id, s, "weight")}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
                           className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <Input
                           type="number"
                           inputMode="numeric"
-                          value={s.reps}
-                          onChange={(e) => editSet(ex.id, s.id, { reps: Number(e.target.value) })}
+                          min="0"
+                          max="500"
+                          step="1"
+                          value={displayedSetValue(s, "reps")}
+                          aria-label={`${ex.name} set ${i + 1} reps`}
+                          ref={(node) => {
+                            const key = setDraftKey(s.id, "reps");
+                            if (node) setInputRefs.current.set(key, node);
+                            else setInputRefs.current.delete(key);
+                          }}
+                          aria-invalid={Boolean(setDraftErrors[setDraftKey(s.id, "reps")])}
+                          onChange={(e) => updateSetDraft(s.id, "reps", e.target.value)}
+                          onBlur={() => void commitSetDraft(ex.id, s, "reps")}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
                           className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <Input
                           type="number"
                           inputMode="decimal"
+                          min="1"
+                          max="10"
                           step="0.5"
-                          value={s.rpe}
-                          onChange={(e) => editSet(ex.id, s.id, { rpe: Number(e.target.value) })}
+                          value={displayedSetValue(s, "rpe")}
+                          aria-label={`${ex.name} set ${i + 1} optional RPE`}
+                          ref={(node) => {
+                            const key = setDraftKey(s.id, "rpe");
+                            if (node) setInputRefs.current.set(key, node);
+                            else setInputRefs.current.delete(key);
+                          }}
+                          aria-invalid={Boolean(setDraftErrors[setDraftKey(s.id, "rpe")])}
+                          onChange={(e) => updateSetDraft(s.id, "rpe", e.target.value)}
+                          onBlur={() => void commitSetDraft(ex.id, s, "rpe")}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
                           className="numeric h-10 px-1 text-center text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <Button
                           size="icon"
                           variant={s.done ? "default" : "secondary"}
                           className="size-10"
-                          onClick={() => toggleSet(ex.id, s.id)}
+                          onClick={() => void toggleSet(ex.id, s.id)}
                           aria-label="Toggle set complete"
                         >
                           <Check className="size-4" />
@@ -2139,6 +2883,15 @@ function WorkoutConsole({
                           <Minus className="size-4" />
                         </button>
                       </div>
+                      {(["weight", "reps", "rpe"] as const)
+                        .map((field) => setDraftErrors[setDraftKey(s.id, field)])
+                        .find(Boolean) ? (
+                        <p className="px-1 text-xs text-danger" role="alert">
+                          {(["weight", "reps", "rpe"] as const)
+                            .map((field) => setDraftErrors[setDraftKey(s.id, field)])
+                            .find(Boolean)}
+                        </p>
+                      ) : null}
                     </div>
                   );
                 })}

@@ -141,7 +141,8 @@ export interface SetEntry {
   id: string;
   weightKg: number;
   reps: number;
-  rpe: number;
+  /** Optional 1-10 effort rating in 0.5 increments. */
+  rpe: number | null;
   done: boolean;
   setNumber?: number;
   isWarmup?: boolean;

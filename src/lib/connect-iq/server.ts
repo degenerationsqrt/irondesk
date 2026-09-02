@@ -8,6 +8,14 @@
 import { z } from "zod";
 
 import type { DeviceIdentity } from "@/lib/imports/device-sync.server";
+import {
+  WORKOUT_SET_LIMITS,
+  isValidReps,
+  isValidRestSeconds,
+  isValidRpe,
+  isValidWeightKg,
+  workoutValueMessage,
+} from "@/lib/irondesk/workout-values";
 
 type AdminClient = Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"];
 
@@ -32,11 +40,36 @@ export const occurredAtSchema = z
 
 const setUpdatePayloadSchema = z
   .object({
-    weight_kg: z.number().finite().min(0).max(1_000).nullable().optional(),
-    reps: z.number().int().min(0).max(500).nullable().optional(),
-    rpe: z.number().finite().min(1).max(10).nullable().optional(),
+    weight_kg: z
+      .number()
+      .finite()
+      .min(WORKOUT_SET_LIMITS.weightKg.min)
+      .max(WORKOUT_SET_LIMITS.weightKg.max)
+      .nullable()
+      .optional(),
+    reps: z
+      .number()
+      .int()
+      .min(WORKOUT_SET_LIMITS.reps.min)
+      .max(WORKOUT_SET_LIMITS.reps.max)
+      .nullable()
+      .optional(),
+    rpe: z
+      .number()
+      .finite()
+      .min(WORKOUT_SET_LIMITS.rpe.min)
+      .max(WORKOUT_SET_LIMITS.rpe.max)
+      .refine((value) => isValidRpe(value), workoutValueMessage("rpe"))
+      .nullable()
+      .optional(),
     completed: z.boolean().optional(),
-    rest_seconds: z.number().int().min(0).max(3_600).nullable().optional(),
+    rest_seconds: z
+      .number()
+      .int()
+      .min(WORKOUT_SET_LIMITS.restSeconds.min)
+      .max(WORKOUT_SET_LIMITS.restSeconds.max)
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine((payload) => Object.keys(payload).length > 0, "Provide at least one set field.");
@@ -212,6 +245,18 @@ export function assertConnectIqSnapshotExecutable(
       return watchLimitError(
         `Garmin supports at most ${limits.maxSetsPerExercise} sets per exercise.`,
       );
+    }
+    for (const set of exercise.sets) {
+      if (set.weight_kg != null && !isValidWeightKg(set.weight_kg)) {
+        return watchLimitError(workoutValueMessage("weightKg"));
+      }
+      if (set.reps != null && !isValidReps(set.reps)) {
+        return watchLimitError(workoutValueMessage("reps"));
+      }
+      if (!isValidRpe(set.rpe)) return watchLimitError(workoutValueMessage("rpe"));
+      if (!isValidRestSeconds(set.rest_seconds)) {
+        return watchLimitError(workoutValueMessage("restSeconds"));
+      }
     }
     totalSets += exercise.sets.length;
   }

@@ -82,6 +82,14 @@ import {
   type AthleteMethodProfile,
 } from "./training-methods";
 import { toWarnings } from "./programs";
+import {
+  isValidReps,
+  isValidRestSeconds,
+  isValidRpe,
+  isValidWeightKg,
+  workoutValueMessage,
+  type WorkoutValueField,
+} from "./workout-values";
 import type { Json } from "@/integrations/supabase/types";
 import type {
   ActiveWorkout,
@@ -104,6 +112,152 @@ export interface AccountContext {
   profile: ProfileRow | null;
   preferences: PreferencesRow | null;
   equipmentIds: string[];
+}
+
+export interface RepositoryRequestOptions {
+  signal?: AbortSignal;
+}
+
+export type WorkoutSessionStatus = "draft" | "active" | "completed" | "cancelled";
+export type WorkoutTerminalStatus = Extract<WorkoutSessionStatus, "completed" | "cancelled">;
+
+export interface WorkoutSessionState {
+  id: string;
+  status: WorkoutSessionStatus;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface WorkoutTerminalTransition {
+  sessionId: string;
+  status: WorkoutTerminalStatus;
+  completedAt: string | null;
+  applied: true;
+  replayed: boolean;
+  recovered: boolean;
+  /** Legacy terminal rows can lack a completion timestamp and need repair. */
+  requiresTimestampRepair: boolean;
+}
+
+export interface WorkoutTerminalTransitionOptions extends RepositoryRequestOptions {
+  /** Explicit user-authorized recovery of a cancelled session as completed. */
+  recoverCancelled?: boolean;
+}
+
+/**
+ * An opposite terminal state is a durable business conflict, not a transient
+ * network failure. Queue processors can block it without retrying forever.
+ */
+export class WorkoutTerminalConflictError extends IronDeskError {
+  readonly terminalConflict = true;
+  readonly sessionId: string;
+  readonly requestedStatus: WorkoutTerminalStatus;
+  readonly actualStatus: string;
+
+  constructor(input: {
+    sessionId: string;
+    requestedStatus: WorkoutTerminalStatus;
+    actualStatus: string;
+    details?: string | null;
+    hint?: string | null;
+  }) {
+    super(
+      `That workout is already ${input.actualStatus} and cannot be marked ${input.requestedStatus}.`,
+      "conflict",
+      {
+        operation: "workout-session-terminal-transition",
+        code: "P0001",
+        details: input.details ?? null,
+        hint: input.hint ?? null,
+      },
+    );
+    this.name = "WorkoutTerminalConflictError";
+    this.sessionId = input.sessionId;
+    this.requestedStatus = input.requestedStatus;
+    this.actualStatus = input.actualStatus;
+  }
+}
+
+export function isWorkoutTerminalConflictError(
+  error: unknown,
+): error is WorkoutTerminalConflictError {
+  return (
+    error instanceof WorkoutTerminalConflictError ||
+    (error instanceof IronDeskError &&
+      error.code === "conflict" &&
+      (error as IronDeskError & { terminalConflict?: unknown }).terminalConflict === true)
+  );
+}
+
+interface RpcFailure {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+interface AbortableRpcRequest<T> extends PromiseLike<{ data: T | null; error: RpcFailure | null }> {
+  abortSignal(signal: AbortSignal): AbortableRpcRequest<T>;
+}
+
+interface AbortableRequest<T> extends PromiseLike<T> {
+  abortSignal(signal: AbortSignal): AbortableRequest<T>;
+}
+
+function withRequestSignal<T>(request: PromiseLike<T>, signal?: AbortSignal): PromiseLike<T> {
+  return signal ? (request as AbortableRequest<T>).abortSignal(signal) : request;
+}
+
+/**
+ * These RPCs are introduced by this change's migration. The checked-in
+ * generated schema can be refreshed after deployment; this narrow adapter
+ * keeps the repository typed without pretending the functions already exist
+ * in the remote generated schema.
+ */
+async function callRepositoryRpc<T>(
+  functionName: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<{ data: T | null; error: RpcFailure | null }> {
+  const rpc = supabase.rpc as unknown as (
+    name: string,
+    parameters: Record<string, unknown>,
+  ) => AbortableRpcRequest<T>;
+  const request = rpc.call(supabase, functionName, args);
+  return await (signal ? request.abortSignal(signal) : request);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+type WorkoutSetWriteValues = {
+  weightKg?: number | null;
+  reps?: number | null;
+  rpe?: number | null;
+  restSeconds?: number | null;
+};
+
+function invalidWorkoutValue(field: WorkoutValueField): never {
+  throw new IronDeskError(workoutValueMessage(field), "validation");
+}
+
+/** Runtime write gate for typed callers and untrusted persisted queue payloads. */
+function assertValidWorkoutSetWrite(values: WorkoutSetWriteValues): void {
+  if (
+    values.weightKg !== undefined &&
+    values.weightKg !== null &&
+    !isValidWeightKg(values.weightKg)
+  ) {
+    invalidWorkoutValue("weightKg");
+  }
+  if (values.reps !== undefined && values.reps !== null && !isValidReps(values.reps)) {
+    invalidWorkoutValue("reps");
+  }
+  if (values.rpe !== undefined && !isValidRpe(values.rpe)) invalidWorkoutValue("rpe");
+  if (values.restSeconds !== undefined && !isValidRestSeconds(values.restSeconds)) {
+    invalidWorkoutValue("restSeconds");
+  }
 }
 
 async function requireUserId(): Promise<string> {
@@ -774,21 +928,32 @@ function mapActiveWorkout(row: FullSessionRow): ActiveWorkout {
       sets: (se.workout_sets ?? [])
         .slice()
         .sort((a, b) => a.set_number - b.set_number)
-        .map<SetEntry>((s) => ({
-          id: s.id,
-          setNumber: s.set_number,
-          weightKg: Number(s.weight_kg ?? 0),
-          reps: s.reps ?? 0,
-          rpe: Number(s.rpe ?? 0),
-          done: s.completed,
-          isWarmup: s.is_warmup,
-          restSeconds: s.rest_seconds,
-          notes: s.notes,
-          methodSegment: s.method_segment ?? null,
-          methodSegmentConfig: serializeMethodSegmentConfig(
-            parseMethodSegmentConfig(s.method_segment_config),
-          ),
-        })),
+        .map<SetEntry>((s) => {
+          const weightKg = Number(s.weight_kg ?? 0);
+          const reps = s.reps ?? 0;
+          const rpe = s.rpe == null ? null : Number(s.rpe);
+          assertValidWorkoutSetWrite({
+            weightKg,
+            reps,
+            rpe,
+            restSeconds: s.rest_seconds,
+          });
+          return {
+            id: s.id,
+            setNumber: s.set_number,
+            weightKg,
+            reps,
+            rpe,
+            done: s.completed,
+            isWarmup: s.is_warmup,
+            restSeconds: s.rest_seconds,
+            notes: s.notes,
+            methodSegment: s.method_segment ?? null,
+            methodSegmentConfig: serializeMethodSegmentConfig(
+              parseMethodSegmentConfig(s.method_segment_config),
+            ),
+          };
+        }),
     }));
 
   return {
@@ -825,15 +990,55 @@ export async function getActiveWorkout(): Promise<ActiveWorkout | null> {
   return row ? mapActiveWorkout(row) : null;
 }
 
-export async function getWorkout(id: string): Promise<ActiveWorkout | null> {
-  const res = await supabase
+export async function getWorkout(
+  id: string,
+  options: RepositoryRequestOptions = {},
+): Promise<ActiveWorkout | null> {
+  const request = supabase
     .from("workout_sessions")
     .select(FULL_SESSION_SELECT)
     .eq("id", id)
     .maybeSingle()
     .returns<FullSessionRow | null>();
+  const res = await withRequestSignal(request, options.signal);
   if (res.error) throw asIronDeskError(new Error(res.error.message));
   return res.data ? mapActiveWorkout(res.data) : null;
+}
+
+/** Lightweight direct lookup used to reconcile a queued terminal mutation. */
+export async function getWorkoutSessionState(
+  sessionId: string,
+  options: RepositoryRequestOptions = {},
+): Promise<WorkoutSessionState | null> {
+  const request = supabase
+    .from("workout_sessions")
+    .select("id, status, started_at, completed_at")
+    .eq("id", sessionId)
+    .maybeSingle()
+    .returns<{
+      id: string;
+      status: string;
+      started_at: string;
+      completed_at: string | null;
+    } | null>();
+  const res = await withRequestSignal(request, options.signal);
+  if (res.error)
+    throw asPostgrestIronDeskError(
+      res.error,
+      "workout-session-state-read",
+      "IronDesk could not verify that workout's current state.",
+    );
+  if (!res.data) return null;
+  const status = res.data.status as WorkoutSessionStatus;
+  if (!(["draft", "active", "completed", "cancelled"] as const).includes(status)) {
+    throw new IronDeskError("That workout returned an invalid status.", "database");
+  }
+  return {
+    id: res.data.id,
+    status,
+    startedAt: res.data.started_at,
+    completedAt: res.data.completed_at,
+  };
 }
 
 export async function startWorkout(input: {
@@ -888,13 +1093,15 @@ export async function addSessionExercise(
     targetReps?: string | null;
   },
   identity?: { id: string; position: number },
+  options: RepositoryRequestOptions = {},
 ): Promise<string> {
   let nextPosition = identity?.position;
   if (nextPosition === undefined) {
-    const existing = await supabase
+    const existingRequest = supabase
       .from("session_exercises")
       .select("position")
       .eq("session_id", sessionId);
+    const existing = await withRequestSignal(existingRequest, options.signal);
     if (existing.error)
       throw asPostgrestIronDeskError(
         existing.error,
@@ -903,7 +1110,7 @@ export async function addSessionExercise(
       );
     nextPosition = (existing.data ?? []).reduce((max, row) => Math.max(max, row.position), -1) + 1;
   }
-  const res = await supabase
+  const insertRequest = supabase
     .from("session_exercises")
     .insert({
       ...(identity ? { id: identity.id } : {}),
@@ -918,13 +1125,15 @@ export async function addSessionExercise(
     })
     .select("id")
     .single();
+  const res = await withRequestSignal(insertRequest, options.signal);
   if (!res.error && res.data) return res.data.id;
   if (res.error?.code === "23505" && identity) {
-    const confirmed = await supabase
+    const confirmRequest = supabase
       .from("session_exercises")
       .select("id")
       .eq("id", identity.id)
       .maybeSingle();
+    const confirmed = await withRequestSignal(confirmRequest, options.signal);
     if (confirmed.error)
       throw asPostgrestIronDeskError(
         confirmed.error,
@@ -940,8 +1149,12 @@ export async function addSessionExercise(
   );
 }
 
-export async function removeSessionExercise(sessionExerciseId: string): Promise<void> {
-  const { error } = await supabase.from("session_exercises").delete().eq("id", sessionExerciseId);
+export async function removeSessionExercise(
+  sessionExerciseId: string,
+  options: RepositoryRequestOptions = {},
+): Promise<void> {
+  const request = supabase.from("session_exercises").delete().eq("id", sessionExerciseId);
+  const { error } = await withRequestSignal(request, options.signal);
   if (error)
     throw asPostgrestIronDeskError(
       error,
@@ -967,12 +1180,14 @@ export async function substituteSessionExercise(
     muscle?: string | null;
     equipment?: string | null;
   },
+  options: RepositoryRequestOptions = {},
 ): Promise<void> {
-  const current = await supabase
+  const currentRequest = supabase
     .from("session_exercises")
     .select("exercise_id, original_exercise_id")
     .eq("id", sessionExerciseId)
     .maybeSingle();
+  const current = await withRequestSignal(currentRequest, options.signal);
   if (current.error)
     throw asPostgrestIronDeskError(
       current.error,
@@ -982,7 +1197,7 @@ export async function substituteSessionExercise(
   if (!current.data)
     throw new IronDeskError("That exercise is no longer in this workout.", "not_found");
   const original = current.data?.original_exercise_id ?? current.data?.exercise_id ?? null;
-  const updated = await supabase
+  const updateRequest = supabase
     .from("session_exercises")
     .update({
       exercise_id: replacement.exerciseId,
@@ -994,6 +1209,7 @@ export async function substituteSessionExercise(
     .eq("id", sessionExerciseId)
     .select("id")
     .maybeSingle();
+  const updated = await withRequestSignal(updateRequest, options.signal);
   if (updated.error)
     throw asPostgrestIronDeskError(
       updated.error,
@@ -1007,22 +1223,25 @@ export async function substituteSessionExercise(
 export async function addSet(
   sessionExerciseId: string,
   input: {
-    weightKg?: number;
-    reps?: number;
-    rpe?: number;
+    weightKg?: number | null;
+    reps?: number | null;
+    rpe?: number | null;
     isWarmup?: boolean;
     restSeconds?: number | null;
     methodSegment?: string | null;
     methodSegmentConfig?: MethodSegmentConfig | null;
   },
   identity?: { id: string; setNumber: number },
+  options: RepositoryRequestOptions = {},
 ): Promise<string> {
+  assertValidWorkoutSetWrite(input);
   let nextNumber = identity?.setNumber;
   if (nextNumber === undefined) {
-    const existing = await supabase
+    const existingRequest = supabase
       .from("workout_sets")
       .select("set_number")
       .eq("session_exercise_id", sessionExerciseId);
+    const existing = await withRequestSignal(existingRequest, options.signal);
     if (existing.error)
       throw asPostgrestIronDeskError(
         existing.error,
@@ -1031,7 +1250,7 @@ export async function addSet(
       );
     nextNumber = (existing.data ?? []).reduce((max, row) => Math.max(max, row.set_number), 0) + 1;
   }
-  const res = await supabase
+  const insertRequest = supabase
     .from("workout_sets")
     .insert({
       ...(identity ? { id: identity.id } : {}),
@@ -1047,13 +1266,15 @@ export async function addSet(
     })
     .select("id")
     .single();
+  const res = await withRequestSignal(insertRequest, options.signal);
   if (!res.error && res.data) return res.data.id;
   if (res.error?.code === "23505" && identity) {
-    const confirmed = await supabase
+    const confirmRequest = supabase
       .from("workout_sets")
       .select("id")
       .eq("id", identity.id)
       .maybeSingle();
+    const confirmed = await withRequestSignal(confirmRequest, options.signal);
     if (confirmed.error)
       throw asPostgrestIronDeskError(
         confirmed.error,
@@ -1085,7 +1306,9 @@ export async function updateSet(
     methodSegment?: string | null;
     methodSegmentConfig?: MethodSegmentConfig | null;
   },
+  options: RepositoryRequestOptions = {},
 ): Promise<void> {
+  assertValidWorkoutSetWrite(patch);
   const payload: Database["public"]["Tables"]["workout_sets"]["Update"] = {};
   if (patch.methodSegment !== undefined)
     payload["method_segment"] = normalizeSegmentId(patch.methodSegment);
@@ -1106,12 +1329,13 @@ export async function updateSet(
       : null;
   }
   if (!Object.keys(payload).length) return;
-  const updated = await supabase
+  const request = supabase
     .from("workout_sets")
     .update(payload)
     .eq("id", setId)
     .select("id")
     .maybeSingle();
+  const updated = await withRequestSignal(request, options.signal);
   if (updated.error)
     throw asPostgrestIronDeskError(
       updated.error,
@@ -1122,8 +1346,12 @@ export async function updateSet(
     throw new IronDeskError("That set could not be verified after saving.", "conflict");
 }
 
-export async function deleteSet(setId: string): Promise<void> {
-  const { error } = await supabase.from("workout_sets").delete().eq("id", setId);
+export async function deleteSet(
+  setId: string,
+  options: RepositoryRequestOptions = {},
+): Promise<void> {
+  const request = supabase.from("workout_sets").delete().eq("id", setId);
+  const { error } = await withRequestSignal(request, options.signal);
   if (error)
     throw asPostgrestIronDeskError(
       error,
@@ -1140,6 +1368,7 @@ export async function updateSessionMeta(
     notes?: string | null;
     perceivedEffort?: number | null;
   },
+  options: RepositoryRequestOptions = {},
 ): Promise<void> {
   const payload: Database["public"]["Tables"]["workout_sessions"]["Update"] = {};
   if (patch.title !== undefined) payload["title"] = patch.title;
@@ -1147,12 +1376,13 @@ export async function updateSessionMeta(
   if (patch.notes !== undefined) payload["notes"] = patch.notes;
   if (patch.perceivedEffort !== undefined) payload["perceived_effort"] = patch.perceivedEffort;
   if (!Object.keys(payload).length) return;
-  const updated = await supabase
+  const request = supabase
     .from("workout_sessions")
     .update(payload)
     .eq("id", sessionId)
     .select("id")
     .maybeSingle();
+  const updated = await withRequestSignal(request, options.signal);
   if (updated.error)
     throw asPostgrestIronDeskError(
       updated.error,
@@ -1169,35 +1399,135 @@ export interface WorkoutSummary {
   sets: number;
   reps: number;
   tonnageKg: number;
-  avgRpe: number;
+  /** Null means no completed set has a valid entered RPE. */
+  avgRpe: number | null;
+}
+
+function terminalConflictFromRpc(
+  error: RpcFailure,
+  sessionId: string,
+  requestedStatus: WorkoutTerminalStatus,
+): WorkoutTerminalConflictError | null {
+  if (
+    error.code !== "P0001" ||
+    typeof error.message !== "string" ||
+    !error.message.includes("workout_terminal_conflict")
+  )
+    return null;
+  let actualStatus = "another terminal state";
+  if (typeof error.details === "string") {
+    try {
+      const detail = JSON.parse(error.details) as unknown;
+      if (isPlainRecord(detail) && typeof detail["actual"] === "string") {
+        actualStatus = detail["actual"].slice(0, 40);
+      }
+    } catch {
+      // The stable code/message pair is sufficient to classify the conflict.
+    }
+  }
+  return new WorkoutTerminalConflictError({
+    sessionId,
+    requestedStatus,
+    actualStatus,
+    ...(error.details === undefined ? {} : { details: error.details }),
+    ...(error.hint === undefined ? {} : { hint: error.hint }),
+  });
+}
+
+function throwTerminalRpcError(
+  error: RpcFailure,
+  sessionId: string,
+  requestedStatus: WorkoutTerminalStatus,
+): never {
+  const conflict = terminalConflictFromRpc(error, sessionId, requestedStatus);
+  if (conflict) throw conflict;
+  if (error.code === "P0002") {
+    throw new IronDeskError("That workout is no longer available.", "not_found");
+  }
+  if (error.code === "22023" || error.code === "23514") {
+    throw new IronDeskError(
+      error.message?.trim() || "That workout terminal request is invalid.",
+      "validation",
+    );
+  }
+  if (error.code === "42501") {
+    throw new IronDeskError("Your session expired. Sign in again.", "unauthenticated");
+  }
+  throw asPostgrestIronDeskError(
+    error,
+    "workout-session-terminal-transition",
+    `IronDesk could not mark that workout ${requestedStatus}.`,
+  );
+}
+
+function parseWorkoutTerminalTransition(
+  data: unknown,
+  expectedSessionId: string,
+  expectedStatus: WorkoutTerminalStatus,
+): WorkoutTerminalTransition {
+  if (
+    !isPlainRecord(data) ||
+    data["session_id"] !== expectedSessionId ||
+    data["status"] !== expectedStatus ||
+    (typeof data["completed_at"] !== "string" && data["completed_at"] !== null) ||
+    data["applied"] !== true ||
+    typeof data["replayed"] !== "boolean" ||
+    typeof data["recovered"] !== "boolean" ||
+    typeof data["requires_timestamp_repair"] !== "boolean" ||
+    data["requires_timestamp_repair"] !== (data["completed_at"] === null)
+  ) {
+    throw new IronDeskError("IronDesk could not verify the workout's terminal state.", "database");
+  }
+  return {
+    sessionId: expectedSessionId,
+    status: expectedStatus,
+    completedAt: data["completed_at"],
+    applied: true,
+    replayed: data["replayed"],
+    recovered: data["recovered"],
+    requiresTimestampRepair: data["requires_timestamp_repair"],
+  };
+}
+
+async function transitionWorkoutSessionTerminal(
+  sessionId: string,
+  status: WorkoutTerminalStatus,
+  completedAt: string,
+  options: WorkoutTerminalTransitionOptions,
+): Promise<WorkoutTerminalTransition> {
+  const { data, error } = await callRepositoryRpc<unknown>(
+    "transition_workout_session_terminal",
+    {
+      _session_id: sessionId,
+      _terminal_status: status,
+      _completed_at: completedAt,
+      _allow_cancelled_recovery: options.recoverCancelled === true,
+    },
+    options.signal,
+  );
+  if (error) throwTerminalRpcError(error, sessionId, status);
+  return parseWorkoutTerminalTransition(data, sessionId, status);
 }
 
 export async function markWorkoutFinished(
   sessionId: string,
   completedAt = new Date().toISOString(),
-): Promise<void> {
-  const updated = await supabase
-    .from("workout_sessions")
-    .update({ status: "completed", completed_at: completedAt })
-    .eq("id", sessionId)
-    .select("id")
-    .maybeSingle();
-  if (updated.error)
-    throw asPostgrestIronDeskError(
-      updated.error,
-      "workout-session-finish",
-      "IronDesk could not finish that workout.",
-    );
-  if (!updated.data) throw new IronDeskError("That workout is no longer available.", "not_found");
+  options: WorkoutTerminalTransitionOptions = {},
+): Promise<WorkoutTerminalTransition> {
+  return transitionWorkoutSessionTerminal(sessionId, "completed", completedAt, options);
 }
 
-export async function getWorkoutSummary(sessionId: string): Promise<WorkoutSummary> {
-  const res = await supabase
+export async function getWorkoutSummary(
+  sessionId: string,
+  options: RepositoryRequestOptions = {},
+): Promise<WorkoutSummary> {
+  const request = supabase
     .from("workout_sessions")
     .select(FULL_SESSION_SELECT)
     .eq("id", sessionId)
     .single()
     .returns<FullSessionRow>();
+  const res = await withRequestSignal(request, options.signal);
   const row = unwrap(res);
   const totals = sessionTotals(row);
   return {
@@ -1207,32 +1537,25 @@ export async function getWorkoutSummary(sessionId: string): Promise<WorkoutSumma
     sets: totals.sets,
     reps: totals.reps,
     tonnageKg: totals.tonnageKg,
-    avgRpe: totals.avgRpe,
+    avgRpe: totals.avgRpe === 0 ? null : totals.avgRpe,
   };
 }
 
-export async function finishWorkout(sessionId: string): Promise<WorkoutSummary> {
-  await markWorkoutFinished(sessionId);
-  return getWorkoutSummary(sessionId);
+export async function finishWorkout(
+  sessionId: string,
+  completedAt = new Date().toISOString(),
+  options: WorkoutTerminalTransitionOptions = {},
+): Promise<WorkoutSummary> {
+  await markWorkoutFinished(sessionId, completedAt, options);
+  return getWorkoutSummary(sessionId, options);
 }
 
 export async function cancelWorkout(
   sessionId: string,
   completedAt = new Date().toISOString(),
-): Promise<void> {
-  const updated = await supabase
-    .from("workout_sessions")
-    .update({ status: "cancelled", completed_at: completedAt })
-    .eq("id", sessionId)
-    .select("id")
-    .maybeSingle();
-  if (updated.error)
-    throw asPostgrestIronDeskError(
-      updated.error,
-      "workout-session-cancel",
-      "IronDesk could not cancel that workout.",
-    );
-  if (!updated.data) throw new IronDeskError("That workout is no longer available.", "not_found");
+  options: RepositoryRequestOptions = {},
+): Promise<WorkoutTerminalTransition> {
+  return transitionWorkoutSessionTerminal(sessionId, "cancelled", completedAt, options);
 }
 
 // --------------------------------------------------------------------- coach
@@ -2333,12 +2656,15 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
  * validated and bounded before it is stored, so a hand-crafted payload cannot
  * widen the engine's safety limits.
  */
-export async function setSessionExerciseMethod(input: {
-  sessionExerciseId: string;
-  methodId: string | null;
-  config?: MethodConfig;
-}): Promise<void> {
-  const updated = await supabase
+export async function setSessionExerciseMethod(
+  input: {
+    sessionExerciseId: string;
+    methodId: string | null;
+    config?: MethodConfig;
+  },
+  options: RepositoryRequestOptions = {},
+): Promise<void> {
+  const request = supabase
     .from("session_exercises")
     .update({
       training_method_id: input.methodId,
@@ -2347,6 +2673,7 @@ export async function setSessionExerciseMethod(input: {
     .eq("id", input.sessionExerciseId)
     .select("id")
     .maybeSingle();
+  const updated = await withRequestSignal(request, options.signal);
   if (updated.error)
     throw asPostgrestIronDeskError(
       updated.error,
@@ -2358,6 +2685,274 @@ export async function setSessionExerciseMethod(input: {
 }
 
 /* --------------------------------------- IronDesk Black specialization blocks */
+
+export interface BlackWorkoutApplicationSetInput {
+  /** Stable client-generated primary key retained across retries. */
+  id: string;
+  setNumber: number;
+  weightKg: number | null;
+  reps: number | null;
+  rpe: number | null;
+  restSeconds: number | null;
+  methodSegment: string | null;
+  methodSegmentConfig: MethodSegmentConfig;
+  isWarmup?: boolean;
+}
+
+export interface BlackWorkoutApplicationTargetInput {
+  sessionExerciseId: string;
+  methodConfig: MethodConfig;
+  sets: readonly BlackWorkoutApplicationSetInput[];
+}
+
+export interface BlackWorkoutApplicationInput {
+  /** Stable request identity retained across retries. */
+  applicationId: string;
+  sessionId: string;
+  windowId: string;
+  targetRegion: string;
+  /** ISO Monday (`YYYY-MM-DD`) for the workout's UTC week. */
+  weekStart: string;
+  prescriptions: readonly BlackExercisePrescription[];
+  targets: readonly BlackWorkoutApplicationTargetInput[];
+}
+
+export interface BlackWorkoutApplicationResult {
+  applicationId: string;
+  exposureId: string;
+  sessionId: string;
+  windowId: string;
+  applied: true;
+  replayed: boolean;
+  exerciseCount: number;
+  setCount: number;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function assertUuid(value: string, label: string): void {
+  if (!UUID_PATTERN.test(value)) {
+    throw new IronDeskError(`${label} must be a stable UUID.`, "validation");
+  }
+}
+
+function assertIsoMonday(value: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new IronDeskError("Black week start must use YYYY-MM-DD.", "validation");
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new IronDeskError("Black week start must be a real calendar date.", "validation");
+  }
+  if (parsed.getUTCDay() !== 1) {
+    throw new IronDeskError("Black week start must be an ISO Monday.", "validation");
+  }
+}
+
+function throwBlackApplicationRpcError(
+  error: RpcFailure,
+  input: BlackWorkoutApplicationInput,
+): never {
+  if (
+    error.code === "P0001" &&
+    typeof error.message === "string" &&
+    error.message.includes("black_application_id_conflict")
+  ) {
+    throw new IronDeskError(
+      "That IronDesk Black application id is already attached to a different request.",
+      "conflict",
+    );
+  }
+  if (error.code === "P0002") {
+    throw new IronDeskError(
+      "That workout or IronDesk Black window is no longer available.",
+      "not_found",
+    );
+  }
+  if (error.code === "22023") {
+    throw new IronDeskError(
+      error.message?.trim() || "That IronDesk Black plan is invalid.",
+      "validation",
+    );
+  }
+  if (error.code === "23505" || error.code === "23514") {
+    const applicationIdCollision =
+      error.code === "23505" && error.details?.includes("black_exposures_pkey");
+    throw new IronDeskError(
+      applicationIdCollision
+        ? "That IronDesk Black application id is already in use."
+        : error.code === "23505"
+          ? `${input.targetRegion} already has a conflicting IronDesk Black application for the week of ${input.weekStart}.`
+          : error.message?.trim() || "That workout can no longer accept this IronDesk Black plan.",
+      "conflict",
+    );
+  }
+  if (error.code === "42501") {
+    throw new IronDeskError("Your session expired. Sign in again.", "unauthenticated");
+  }
+  throw asPostgrestIronDeskError(
+    error,
+    "irondesk-black-plan-apply",
+    "IronDesk could not apply that Black plan.",
+  );
+}
+
+function prepareBlackApplication(input: BlackWorkoutApplicationInput): {
+  prescriptions: BlackExercisePrescription[];
+  targets: Array<{
+    sessionExerciseId: string;
+    methodConfig: Record<string, unknown>;
+    sets: Array<{
+      id: string;
+      setNumber: number;
+      weightKg: number | null;
+      reps: number | null;
+      rpe: number | null;
+      restSeconds: number | null;
+      methodSegment: string | null;
+      methodSegmentConfig: Record<string, unknown>;
+      isWarmup: boolean;
+    }>;
+  }>;
+} {
+  assertUuid(input.applicationId, "Black application id");
+  assertUuid(input.sessionId, "Workout id");
+  assertUuid(input.windowId, "Black window id");
+  assertIsoMonday(input.weekStart);
+  if (!input.targetRegion.trim() || input.targetRegion.trim().length > 120) {
+    throw new IronDeskError("Black target region is invalid.", "validation");
+  }
+  if (input.prescriptions.length < 1 || input.prescriptions.length > 5) {
+    throw new IronDeskError("A Black plan must contain one to five prescriptions.", "validation");
+  }
+  const prescriptions = parseBlackPrescriptions(input.prescriptions);
+  if (prescriptions.length !== input.prescriptions.length) {
+    throw new IronDeskError("A Black prescription is incomplete or unsupported.", "validation");
+  }
+  if (input.targets.length !== prescriptions.length) {
+    throw new IronDeskError(
+      "Every Black prescription must have exactly one workout target.",
+      "validation",
+    );
+  }
+
+  const seenExerciseIds = new Set<string>();
+  const seenSetIds = new Set<string>();
+  const targets = input.targets.map((target) => {
+    assertUuid(target.sessionExerciseId, "Black workout exercise id");
+    if (seenExerciseIds.has(target.sessionExerciseId)) {
+      throw new IronDeskError("A Black workout exercise was repeated.", "validation");
+    }
+    seenExerciseIds.add(target.sessionExerciseId);
+    if (target.sets.length < 1 || target.sets.length > 20) {
+      throw new IronDeskError("Each Black movement must contain one to twenty sets.", "validation");
+    }
+    const methodConfig = serializeMethodConfig(target.methodConfig);
+    if (methodConfig["blackWindowId"] !== input.windowId) {
+      throw new IronDeskError(
+        "A Black movement has the wrong specialization window.",
+        "validation",
+      );
+    }
+    const seenSetNumbers = new Set<number>();
+    const sets = target.sets.map((set) => {
+      assertUuid(set.id, "Black set id");
+      if (seenSetIds.has(set.id)) {
+        throw new IronDeskError("A Black set id was repeated.", "validation");
+      }
+      seenSetIds.add(set.id);
+      if (!Number.isInteger(set.setNumber) || set.setNumber < 1 || set.setNumber > 100) {
+        throw new IronDeskError(
+          "Black set number must be a whole number from 1 to 100.",
+          "validation",
+        );
+      }
+      if (seenSetNumbers.has(set.setNumber)) {
+        throw new IronDeskError("A Black set number was repeated for one movement.", "validation");
+      }
+      seenSetNumbers.add(set.setNumber);
+      assertValidWorkoutSetWrite({
+        weightKg: set.weightKg,
+        reps: set.reps,
+        rpe: set.rpe,
+        restSeconds: set.restSeconds,
+      });
+      const methodSegmentConfig = serializeMethodSegmentConfig(set.methodSegmentConfig);
+      if (
+        methodSegmentConfig["methodId"] !== "irondesk-black" ||
+        methodSegmentConfig["blackWindowId"] !== input.windowId
+      ) {
+        throw new IronDeskError("A Black set has the wrong method or window.", "validation");
+      }
+      return {
+        id: set.id,
+        setNumber: set.setNumber,
+        weightKg: set.weightKg,
+        reps: set.reps,
+        rpe: set.rpe,
+        restSeconds: set.restSeconds,
+        methodSegment: normalizeSegmentId(set.methodSegment),
+        methodSegmentConfig,
+        isWarmup: set.isWarmup === true,
+      };
+    });
+    return { sessionExerciseId: target.sessionExerciseId, methodConfig, sets };
+  });
+  return { prescriptions, targets };
+}
+
+/** Validates the complete retry-safe Black payload before it enters the local outbox. */
+export function validateBlackWorkoutApplication(input: BlackWorkoutApplicationInput): void {
+  prepareBlackApplication(input);
+}
+
+/**
+ * Applies every Black method/set mutation and the weekly exposure receipt in
+ * one authenticated transaction. Reuse the same application/set ids on retry.
+ */
+export async function applyBlackWorkoutPlan(
+  input: BlackWorkoutApplicationInput,
+  options: RepositoryRequestOptions = {},
+): Promise<BlackWorkoutApplicationResult> {
+  const prepared = prepareBlackApplication(input);
+  const { data, error } = await callRepositoryRpc<unknown>(
+    "apply_irondesk_black_plan",
+    {
+      _application_id: input.applicationId,
+      _session_id: input.sessionId,
+      _window_id: input.windowId,
+      _target_region: input.targetRegion,
+      _week_start: input.weekStart,
+      _prescriptions: prepared.prescriptions,
+      _targets: prepared.targets,
+    },
+    options.signal,
+  );
+  if (error) throwBlackApplicationRpcError(error, input);
+  if (
+    !isPlainRecord(data) ||
+    data["application_id"] !== input.applicationId ||
+    data["exposure_id"] !== input.applicationId ||
+    data["session_id"] !== input.sessionId ||
+    data["window_id"] !== input.windowId ||
+    data["applied"] !== true ||
+    typeof data["replayed"] !== "boolean" ||
+    typeof data["exercise_count"] !== "number" ||
+    typeof data["set_count"] !== "number"
+  ) {
+    throw new IronDeskError("IronDesk could not verify the applied Black plan.", "database");
+  }
+  return {
+    applicationId: input.applicationId,
+    exposureId: input.applicationId,
+    sessionId: input.sessionId,
+    windowId: input.windowId,
+    applied: true,
+    replayed: data["replayed"],
+    exerciseCount: data["exercise_count"],
+    setCount: data["set_count"],
+  };
+}
 
 function mapBlackWindow(row: {
   id: string;

@@ -36,6 +36,7 @@ import type {
 } from "./rows";
 import type { ImportedDashboardActivity } from "./imported-data-adapter";
 import { dayKeyForInstant, formatDayKey } from "./dates";
+import { averageValidRpe } from "./workout-values";
 
 const ZONES: ZoneKey[] = ["light", "moderate", "vigorous", "peak"];
 
@@ -74,8 +75,7 @@ export function sessionTotals(row: FullSessionRow): SessionTotals {
   let sets = 0;
   let reps = 0;
   let tonnage = 0;
-  let rpeSum = 0;
-  let rpeCount = 0;
+  const recordedRpes: unknown[] = [];
   let topSet: SessionTotals["topSet"] = null;
   let bestE1rm = 0;
   const parts = new Set<string>();
@@ -87,10 +87,7 @@ export function sessionTotals(row: FullSessionRow): SessionTotals {
       sets += 1;
       reps += s.reps ?? 0;
       tonnage += (s.weight_kg ?? 0) * (s.reps ?? 0);
-      if (s.rpe != null) {
-        rpeSum += Number(s.rpe);
-        rpeCount += 1;
-      }
+      recordedRpes.push(s.rpe);
       const e1rm = estimate1rm(Number(s.weight_kg ?? 0), s.reps ?? 0);
       if (e1rm > bestE1rm) {
         bestE1rm = e1rm;
@@ -106,11 +103,12 @@ export function sessionTotals(row: FullSessionRow): SessionTotals {
   const end = row.completed_at ? new Date(row.completed_at).getTime() : Date.now();
   const durationMin = Math.max(0, Math.round((end - new Date(row.started_at).getTime()) / 60000));
 
+  const avgRpe = averageValidRpe(recordedRpes);
   return {
     sets,
     reps,
     tonnageKg: round(tonnage),
-    avgRpe: rpeCount ? round(rpeSum / rpeCount, 1) : 0,
+    avgRpe: avgRpe == null ? 0 : round(avgRpe, 1),
     durationMin,
     topSet,
     bestE1rm,

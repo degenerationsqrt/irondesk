@@ -66,6 +66,41 @@ describe("idempotent workout row inserts", () => {
   });
 });
 
+describe("workout set write validation", () => {
+  it("persists a blank RPE as null", async () => {
+    const single = vi.fn().mockResolvedValue({ data: { id: "set-null-rpe" }, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    mocks.from.mockReturnValue({ insert });
+
+    await expect(
+      addSet(
+        "session-exercise-1",
+        { weightKg: 100, reps: 5, rpe: null },
+        { id: "set-null-rpe", setNumber: 1 },
+      ),
+    ).resolves.toBe("set-null-rpe");
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ rpe: null }));
+  });
+
+  it.each([0, 8.25, 10.5, 11.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "blocks invalid RPE %s before any Supabase request",
+    async (rpe) => {
+      await expect(
+        addSet(
+          "session-exercise-1",
+          { weightKg: 100, reps: 5, rpe },
+          { id: "00000000-0000-4000-a000-000000000010", setNumber: 2 },
+        ),
+      ).rejects.toMatchObject({
+        code: "validation",
+        message: "RPE must be blank or a number from 1 to 10 in 0.5 increments.",
+      });
+      expect(mocks.from).not.toHaveBeenCalled();
+    },
+  );
+});
+
 beforeEach(() => {
   mocks.from.mockReset();
   mocks.getSession.mockReset();

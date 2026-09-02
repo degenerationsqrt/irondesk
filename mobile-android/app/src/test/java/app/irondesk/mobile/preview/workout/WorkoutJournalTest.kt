@@ -4,10 +4,13 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -38,7 +41,7 @@ class WorkoutJournalTest {
         title = "Lower Strength",
     )
 
-    private fun set(eventId: String = "mutation-1", number: Int = 1) = SetLogged(
+    private fun set(eventId: String = "mutation-1", number: Int = 1, rpe: Double? = 8.0) = SetLogged(
         eventId = eventId,
         sessionId = "session-1",
         occurredAtEpochMillis = 2_000L + number,
@@ -47,12 +50,81 @@ class WorkoutJournalTest {
         setNumber = number,
         weightKg = 100.0,
         reps = 5,
-        rpe = 8.0,
+        rpe = rpe,
     )
+
+    private fun legacyVersionOneJournal(): ByteArray = ByteArrayOutputStream().use { bytes ->
+        DataOutputStream(bytes).use { out ->
+            fun writeString(value: String) {
+                val encoded = value.toByteArray(Charsets.UTF_8)
+                out.writeInt(encoded.size)
+                out.write(encoded)
+            }
+
+            out.writeInt(0x4952444B)
+            out.writeInt(1)
+            out.writeInt(2)
+
+            out.writeByte(1)
+            writeString("session-1:start")
+            writeString("session-1")
+            out.writeLong(1_000)
+            writeString("Lower Strength")
+
+            out.writeByte(2)
+            writeString("mutation-1")
+            writeString("session-1")
+            out.writeLong(2_001)
+            writeString("back-squat")
+            writeString("Back Squat")
+            out.writeInt(1)
+            out.writeDouble(100.0)
+            out.writeInt(5)
+            out.writeDouble(8.0)
+        }
+        bytes.toByteArray()
+    }
 
     @Test fun `binary codec round trips a valid workout`() {
         val events = listOf(started(), set(), SessionFinished("finish-1", "session-1", 3_000))
         assertEquals(events, WorkoutEventBinaryCodec.decode(WorkoutEventBinaryCodec.encode(events)))
+    }
+
+    @Test fun `binary codec preserves a blank optional RPE`() {
+        val events = listOf(started(), set(rpe = null))
+        val decoded = WorkoutEventBinaryCodec.decode(WorkoutEventBinaryCodec.encode(events))
+        assertEquals(null, (decoded[1] as SetLogged).rpe)
+    }
+
+    @Test fun `binary codec continues to read the version one journal`() {
+        val decoded = WorkoutEventBinaryCodec.decode(legacyVersionOneJournal())
+        assertEquals(8.0, (decoded[1] as SetLogged).rpe)
+    }
+
+    @Test fun `reducer enforces the shared optional half-step RPE scale`() {
+        listOf(null, 1.0, 1.5, 10.0).forEach { rpe ->
+            assertEquals(rpe, WorkoutReducer.reduce(listOf(started(), set(rpe = rpe)))!!.sets.single().rpe)
+        }
+        listOf(0.0, 8.25, 10.5, 11.5, Double.NaN, Double.POSITIVE_INFINITY).forEach { rpe ->
+            assertThrows(IllegalArgumentException::class.java) {
+                WorkoutReducer.reduce(listOf(started(), set(rpe = rpe)))
+            }
+        }
+    }
+
+    @Test fun `reducer enforces reps and canonical kilogram limits`() {
+        assertEquals(0, WorkoutReducer.reduce(listOf(started(), set().copy(reps = 0)))!!.sets.single().reps)
+        assertEquals(500, WorkoutReducer.reduce(listOf(started(), set().copy(reps = 500)))!!.sets.single().reps)
+        listOf(-1, 501).forEach { reps ->
+            assertThrows(IllegalArgumentException::class.java) {
+                WorkoutReducer.reduce(listOf(started(), set().copy(reps = reps)))
+            }
+        }
+        listOf(-0.1, 1_000.01, Double.NaN, Double.POSITIVE_INFINITY).forEach { weightKg ->
+            assertThrows(IllegalArgumentException::class.java) {
+                WorkoutReducer.reduce(listOf(started(), set().copy(weightKg = weightKg)))
+            }
+        }
     }
 
     @Test fun `journal restores an encrypted active workout`() {

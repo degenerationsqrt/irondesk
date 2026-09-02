@@ -43,9 +43,15 @@ object WorkoutReducer {
                     require(event.exerciseId.isNotBlank()) { "exercise id is required" }
                     require(event.exerciseName.isNotBlank()) { "exercise name is required" }
                     require(event.setNumber > 0) { "set number must be positive" }
-                    require(event.weightKg.isFinite() && event.weightKg >= 0) { "weight is invalid" }
-                    require(event.reps > 0) { "reps must be positive" }
-                    require(event.rpe.isFinite() && event.rpe in 0.0..10.0) { "RPE must be 0 through 10" }
+                    require(WorkoutValueValidation.isValidWeightKg(event.weightKg)) {
+                        "weight must be 0 through 1,000 kg"
+                    }
+                    require(WorkoutValueValidation.isValidReps(event.reps)) {
+                        "reps must be a whole number from 0 through 500"
+                    }
+                    require(WorkoutValueValidation.isValidRpe(event.rpe)) {
+                        "RPE must be blank or 1 through 10 in 0.5 increments"
+                    }
                     current.copy(
                         sets = current.sets + LoggedSet(
                             mutationId = event.eventId,
