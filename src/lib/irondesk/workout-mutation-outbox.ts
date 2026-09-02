@@ -934,6 +934,13 @@ function diagnosticCode(error: IronDeskError): string {
   return error.diagnostic?.code?.trim().toUpperCase() ?? "";
 }
 
+const RETRYABLE_CONNECTIVITY_MESSAGE =
+  /failed to fetch|network(?:error| request)?|load failed|offline|timed? ?out|connection (?:lost|reset|refused)|fetch failed/i;
+
+function hasExplicitConnectivityMessage(...values: Array<string | null | undefined>): boolean {
+  return values.some((value) => value != null && RETRYABLE_CONNECTIVITY_MESSAGE.test(value));
+}
+
 /** Only connectivity/availability failures are automatically replayed. */
 export function isRetryableWorkoutMutationError(error: unknown): boolean {
   if (error instanceof WorkoutMutationTimeoutError) return true;
@@ -941,7 +948,9 @@ export function isRetryableWorkoutMutationError(error: unknown): boolean {
   if (error instanceof IronDeskError) {
     if (error.code !== "database") return false;
     const code = diagnosticCode(error);
-    if (!code) return false;
+    if (!code) {
+      return hasExplicitConnectivityMessage(error.diagnostic?.details, error.diagnostic?.hint);
+    }
     return (
       code.startsWith("08") ||
       code === "40001" ||
@@ -956,14 +965,7 @@ export function isRetryableWorkoutMutationError(error: unknown): boolean {
       code === "PGRST003"
     );
   }
-  const message = safeErrorMessage(error).toLowerCase();
-  if (
-    /failed to fetch|network(?:error| request)?|load failed|offline|timed? ?out|connection (?:lost|reset|refused)|fetch failed/.test(
-      message,
-    )
-  )
-    return true;
-  return false;
+  return hasExplicitConnectivityMessage(safeErrorMessage(error));
 }
 
 function retryDelayMs(attempts: number): number {

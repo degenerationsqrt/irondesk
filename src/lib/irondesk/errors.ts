@@ -64,7 +64,12 @@ export function asPostgrestIronDeskError(
   const diagnostic: DatabaseDiagnostic = {
     operation: safeOperation(operation),
     code: boundedText(record["code"], 40),
-    details: boundedText(record["details"]),
+    // postgrest-js reports browser fetch failures as an error-shaped response
+    // whose database code is blank. Its stack normally lives in `details`, but
+    // some runtimes provide only `message`; retain that fallback so the outbox
+    // can distinguish an explicit connectivity failure from an arbitrary
+    // code-less database error without exposing either value in UI copy.
+    details: boundedText(record["details"]) ?? boundedText(record["message"]),
     hint: boundedText(record["hint"]),
   };
   return new IronDeskError(
