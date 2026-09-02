@@ -13,8 +13,8 @@ import appCss from "../styles.css?url";
 import { AuthGate } from "../components/irondesk/auth-gate";
 import { PwaProvider } from "../components/irondesk/pwa-manager";
 import { AuthProvider } from "../lib/auth/auth-provider";
+import { WorkoutMutationQueueProvider } from "../lib/irondesk/use-workout-mutation-queue";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-
 
 function NotFoundComponent() {
   return (
@@ -154,13 +154,14 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <PwaProvider>
         <AuthProvider>
-          <AuthGate>
-            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-            <Outlet />
-          </AuthGate>
+          <WorkoutMutationQueueProvider>
+            <AuthGate>
+              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+              <Outlet />
+            </AuthGate>
+          </WorkoutMutationQueueProvider>
         </AuthProvider>
       </PwaProvider>
     </QueryClientProvider>
   );
 }
-

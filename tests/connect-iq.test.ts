@@ -213,6 +213,16 @@ describe("Connect IQ event schema", () => {
         events: [{ ...setEvent, payload: { weight_kg: 1_001 } }],
       }).success,
     ).toBe(false);
+    expect(
+      connectIqEventsRequestSchema.safeParse({
+        events: [{ ...setEvent, payload: { rpe: 8.25 } }],
+      }).success,
+    ).toBe(false);
+    expect(
+      connectIqEventsRequestSchema.safeParse({
+        events: [{ ...setEvent, payload: { rpe: null } }],
+      }).success,
+    ).toBe(true);
     expect(connectIqEventsRequestSchema.safeParse({ events: [setEvent, setEvent] }).success).toBe(
       false,
     );
@@ -304,6 +314,12 @@ describe("Connect IQ active-workout ownership", () => {
       toConnectIqSnapshot(session(), "user-1"),
     );
 
+    const invalidRpe = toConnectIqSnapshot(session(), "user-1");
+    invalidRpe.workout!.exercises.find((exercise) => exercise.sets.length)!.sets[0]!.rpe = 8.25;
+    expect(() => assertConnectIqSnapshotExecutable(invalidRpe)).toThrow(
+      /RPE must be blank or a number from 1 to 10 in 0.5 increments/,
+    );
+
     const titleBoundary = toConnectIqSnapshot(session(), "user-1");
     titleBoundary.workout!.title = "x".repeat(CONNECT_IQ_SNAPSHOT_LIMITS.maxTitleChars);
     expect(() => assertConnectIqSnapshotExecutable(titleBoundary)).not.toThrow();
@@ -313,7 +329,7 @@ describe("Connect IQ active-workout ownership", () => {
     );
 
     const tooManyExercises = toConnectIqSnapshot(session(), "user-1");
-    const exercise = tooManyExercises.workout!.exercises[0]!;
+    const exercise = tooManyExercises.workout!.exercises.find((item) => item.sets.length)!;
     tooManyExercises.workout!.exercises = Array.from(
       { length: CONNECT_IQ_SNAPSHOT_LIMITS.maxExercises + 1 },
       () => ({ ...exercise, sets: [] }),
@@ -364,7 +380,7 @@ describe("Connect IQ active-workout ownership", () => {
 
   it("enforces the 24 KB UTF-8 response budget without truncating text", () => {
     const oversized = toConnectIqSnapshot(session(), "user-1");
-    const set = oversized.workout!.exercises[0]!.sets[0]!;
+    const set = oversized.workout!.exercises.find((exercise) => exercise.sets.length)!.sets[0]!;
     oversized.workout!.title = "漢".repeat(CONNECT_IQ_SNAPSHOT_LIMITS.maxTitleChars);
     oversized.workout!.focus = "漢".repeat(CONNECT_IQ_SNAPSHOT_LIMITS.maxFocusChars);
     oversized.workout!.exercises = Array.from(

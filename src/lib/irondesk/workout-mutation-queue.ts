@@ -1,4 +1,4 @@
-import { executeWorkoutMutation } from "./workout-mutation-executor";
+import { executeWorkoutMutation, preflightWorkoutMutationLane } from "./workout-mutation-executor";
 import {
   WorkoutMutationOutbox,
   createBrowserWorkoutMutationStore,
@@ -11,6 +11,7 @@ export function getWorkoutMutationOutbox(): WorkoutMutationOutbox {
     browserOutbox = new WorkoutMutationOutbox(
       createBrowserWorkoutMutationStore(),
       executeWorkoutMutation,
+      { preflightLane: preflightWorkoutMutationLane },
     );
   }
   return browserOutbox;

@@ -265,7 +265,7 @@ private fun MobilePreview(journal: WorkoutJournal) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("${"%.1f".format(set.weightKg)} kg")
                                 Text("${set.reps} reps")
-                                Text("RPE ${"%.1f".format(set.rpe)}")
+                                Text(set.rpe?.let { "RPE ${"%.1f".format(it)}" } ?: "RPE —")
                             }
                         }
                     }

@@ -19,6 +19,7 @@ import {
 import { useState, type ReactNode } from "react";
 
 import { PwaInstallButton } from "@/components/irondesk/pwa-manager";
+import { WorkoutSyncRecovery } from "@/components/irondesk/workout-sync-recovery";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery } from "@/lib/irondesk/queries";
 
@@ -288,6 +289,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <MobileNav pathname={pathname} />
+      <WorkoutSyncRecovery />
     </div>
   );
 }

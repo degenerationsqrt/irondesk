@@ -4,6 +4,7 @@ import {
   buildDashboard,
   buildProgress,
   buildRecovery,
+  sessionTotals,
   toHistorySession,
 } from "../src/lib/irondesk/derive";
 import type { ImportedDashboardActivity } from "../src/lib/irondesk/imported-data-adapter";
@@ -94,6 +95,22 @@ function imported(
 }
 
 describe("analytics truthfulness", () => {
+  it("averages only valid non-null RPE values from completed working sets", () => {
+    const workout = session("2026-08-28T17:00:00.000Z");
+    const original = workout.session_exercises[0]!.workout_sets[0]!;
+    workout.session_exercises[0]!.workout_sets = [
+      { ...original, id: "valid-rpe", rpe: 8 },
+      { ...original, id: "blank-rpe", rpe: null },
+      { ...original, id: "high-rpe", rpe: 11.5 },
+      { ...original, id: "fraction-rpe", rpe: 8.25 },
+      { ...original, id: "nan-rpe", rpe: Number.NaN },
+      { ...original, id: "warmup-rpe", rpe: 10, is_warmup: true },
+      { ...original, id: "incomplete-rpe", rpe: 10, completed: false },
+    ];
+
+    expect(sessionTotals(workout).avgRpe).toBe(8);
+  });
+
   it("does not call a session Light when no RPE was recorded or count an empty session", () => {
     const empty = session("2026-08-28T17:00:00.000Z", false);
     expect(toHistorySession(empty).intensityAvailable).toBe(false);

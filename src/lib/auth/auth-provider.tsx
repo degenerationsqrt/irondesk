@@ -133,11 +133,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    const userId = session?.user.id ?? null;
     await supabase.auth.signOut();
-    if (userId) clearQueuedWorkoutMutationsForUser(userId);
+    // A normal sign-out must not discard an offline workout. The outbox is
+    // user-scoped and resumes only when the same identity signs back in.
     setSession(null);
-  }, [session?.user.id]);
+  }, []);
 
   const deleteAccount = useCallback(
     async ({ password, confirmation }: { password: string; confirmation: string }) => {
