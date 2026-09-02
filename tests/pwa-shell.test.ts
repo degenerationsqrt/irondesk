@@ -179,6 +179,13 @@ describe("IronDesk PWA manifest", () => {
 });
 
 describe("PWA safety and lifecycle wiring", () => {
+  it("uses the offline-finalization hotfix cache epoch", () => {
+    const worker = readFileSync(join(root, "public", "sw.js"), "utf8");
+    expect(worker).toContain('const SHELL_VERSION = "2026-09-02-6"');
+    expect(worker).toContain("const SHELL_CACHE = `${CACHE_PREFIX}shell-${SHELL_VERSION}`");
+    expect(worker).toContain("const STATIC_CACHE = `${CACHE_PREFIX}static-${SHELL_VERSION}`");
+  });
+
   it("caches only a verified anonymous workout shell and keeps API/auth responses out", () => {
     const worker = readFileSync(join(root, "public", "sw.js"), "utf8");
     expect(worker).toContain('const OFFLINE_URL = "/offline.html"');
