@@ -107,7 +107,7 @@ export function sessionTotals(row: FullSessionRow): SessionTotals {
   return {
     sets,
     reps,
-    tonnageKg: round(tonnage),
+    tonnageKg: round(tonnage, 2),
     avgRpe: avgRpe == null ? 0 : round(avgRpe, 1),
     durationMin,
     topSet,
