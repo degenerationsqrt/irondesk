@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { IronDeskError } from "../src/lib/irondesk/errors";
+import { IronDeskError, asPostgrestIronDeskError } from "../src/lib/irondesk/errors";
 import {
   BrowserWorkoutMutationStore,
   MemoryWorkoutMutationStore,
@@ -753,6 +753,118 @@ describe("workout mutation outbox", () => {
     await queue.flush("user-a");
     expect(queue.terminalReceipt("finish-1")).toMatchObject({ status: "applied", summary });
     expect(store.read()).toEqual([]);
+  });
+
+  it("keeps an offline reloaded Finish pending when PostgREST returns a code-less fetch failure", async () => {
+    const storage = new TestStorage();
+    const firstStore = new BrowserWorkoutMutationStore(storage);
+    const firstQueue = new WorkoutMutationOutbox(firstStore, vi.fn(), {
+      isOnline: () => false,
+      createId: () => "offline-reload-finish",
+      now: () => new Date("2026-09-02T12:00:00.000Z"),
+    });
+    const summary = {
+      title: "Strength Session",
+      durationMin: 10,
+      sets: 1,
+      reps: 10,
+      tonnageKg: 45.3592,
+      avgRpe: null,
+    };
+
+    await firstQueue.enqueue(
+      "user-a",
+      "session-1",
+      {
+        kind: "session.finish",
+        sessionId: "session-1",
+        completedAt: "2026-09-02T12:00:00.000Z",
+      },
+      { terminalSummary: summary },
+    );
+
+    const reloadedStore = new BrowserWorkoutMutationStore(storage);
+    const executor = vi.fn<WorkoutMutationExecutor>();
+    const reloadedQueue = new WorkoutMutationOutbox(reloadedStore, executor, {
+      // navigator.onLine can remain true briefly after an offline reload. The
+      // actual Supabase request is the authoritative connectivity signal.
+      isOnline: () => true,
+      now: () => new Date("2026-09-02T12:00:01.000Z"),
+      preflightLane: async () => {
+        throw asPostgrestIronDeskError(
+          {
+            code: "",
+            message: "TypeError: Failed to fetch",
+            details: "",
+            hint: "",
+          },
+          "workout-session-state-read",
+          "IronDesk could not verify that workout's current state.",
+        );
+      },
+    });
+
+    await reloadedQueue.flush("user-a");
+
+    expect(executor).not.toHaveBeenCalled();
+    expect(reloadedStore.read()).toMatchObject([
+      {
+        id: "offline-reload-finish",
+        state: "pending",
+        attempts: 1,
+        nextAttemptAt: "2026-09-02T12:00:02.000Z",
+      },
+    ]);
+    expect(reloadedQueue.terminalReceipt("offline-reload-finish")).toMatchObject({
+      status: "queued",
+      completionState: "completed_locally_sync_pending",
+      conflictState: null,
+      summary,
+    });
+    expect(reloadedQueue.snapshot("user-a")).toMatchObject({
+      pendingCount: 1,
+      blockedCount: 0,
+      issues: [],
+    });
+  });
+
+  it("does not retry an arbitrary code-less PostgREST TypeError", async () => {
+    const store = new MemoryWorkoutMutationStore();
+    const queue = new WorkoutMutationOutbox(store, vi.fn(), {
+      isOnline: () => true,
+      createId: () => "non-network-finish",
+      preflightLane: async () => {
+        throw asPostgrestIronDeskError(
+          {
+            code: "",
+            message: "TypeError: Cannot read properties of undefined",
+            details: "TypeError: Cannot read properties of undefined",
+            hint: "",
+          },
+          "workout-session-state-read",
+          "IronDesk could not verify that workout's current state.",
+        );
+      },
+    });
+
+    await queue.enqueue(
+      "user-a",
+      "session-1",
+      {
+        kind: "session.finish",
+        sessionId: "session-1",
+        completedAt: "2026-09-02T12:00:00.000Z",
+      },
+      { requireAcknowledgment: true },
+    );
+
+    expect(store.read()).toMatchObject([
+      {
+        id: "non-network-finish",
+        state: "blocked",
+        issueCode: "save_failed",
+      },
+    ]);
   });
 
   it("allows only an acknowledged terminal receipt to be dismissed", async () => {
