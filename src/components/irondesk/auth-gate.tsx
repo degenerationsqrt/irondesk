@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from "react";
 import { AppShell } from "@/components/irondesk/app-shell";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery } from "@/lib/irondesk/queries";
+import { useWorkoutMutationQueue } from "@/lib/irondesk/use-workout-mutation-queue";
 
 /** Routes rendered outside the app shell and outside the auth gate. */
 /** OAuth consent handles its own session redirect, so it renders outside the gate. */
@@ -36,6 +37,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { ready, user, demo } = useAuth();
+  const mutationQueue = useWorkoutMutationQueue();
 
   const isPublic = PUBLIC_PATHS.includes(pathname);
   const bare = BARE_PATHS.includes(pathname);
@@ -47,6 +49,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const needsOnboarding =
     Boolean(user) && Boolean(account) && !account?.profile?.onboarding_completed;
+  const hasLocalWorkoutTerminal =
+    pathname === "/workout" &&
+    mutationQueue.terminalReceipts.some(
+      (receipt) =>
+        receipt.status === "queued" ||
+        receipt.status === "in_flight" ||
+        receipt.status === "blocked",
+    );
 
   useEffect(() => {
     if (!ready) return;
@@ -71,7 +81,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (bare) return <>{children}</>;
   if (!ready) return <Splash label="Restoring session…" />;
   if (!user && !demo) return <Splash label="Redirecting to sign in…" />;
-  if (user && accountPending) return <Splash label="Loading your athlete profile…" />;
+  if (user && accountPending && !hasLocalWorkoutTerminal)
+    return <Splash label="Loading your athlete profile…" />;
   if (user && needsOnboarding) return <Splash label="Opening setup…" />;
 
   return <AppShell>{children}</AppShell>;

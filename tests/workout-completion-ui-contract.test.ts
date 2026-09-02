@@ -107,6 +107,16 @@ describe("workout completion UI contract", () => {
         },
       ],
     });
+
+    const workout = source("src/routes/workout.tsx");
+    const offlineSelection = between(
+      workout,
+      "function WorkoutPage()",
+      "function WorkoutServerData",
+    );
+    expect(offlineSelection).toContain("newestPendingTerminalReceipt");
+    expect(offlineSelection).toContain("<PendingWorkoutCompletion");
+    expect(offlineSelection).not.toContain("useModeData(");
   });
 
   it("locks into the pending summary as soon as durable Finish is accepted", () => {
@@ -181,22 +191,28 @@ describe("workout completion UI contract", () => {
 
   it("can restore a pending terminal screen even when no active workout is returned", () => {
     const workout = source("src/routes/workout.tsx");
-    const routeSelection = between(
+    const offlineSelection = between(
       workout,
       "function WorkoutPage()",
+      "function WorkoutServerData",
+    );
+    const serverSelection = between(
+      workout,
+      "function WorkoutServerData",
       "function PendingWorkoutCompletion",
     );
+    const authGate = source("src/components/irondesk/auth-gate.tsx");
 
-    expect(routeSelection).toContain(
+    expect(offlineSelection).toContain(
       "const pendingTerminal = newestPendingTerminalReceipt(mutationQueue.terminalReceipts)",
     );
-    expect(routeSelection).toContain(
-      "if (pendingTerminal && (!active || pendingTerminal.sessionId !== active.id))",
-    );
-    expect(routeSelection.indexOf("if (pendingTerminal")).toBeLessThan(
-      routeSelection.indexOf("if (!active) return <WorkoutStart"),
-    );
-    expect(routeSelection).toContain("<PendingWorkoutCompletion");
+    expect(offlineSelection).toContain("if (pendingTerminal)");
+    expect(offlineSelection).toContain("<PendingWorkoutCompletion");
+    expect(offlineSelection).not.toContain("useModeData(");
+    expect(serverSelection).toContain("useModeData(workoutQuery)");
+    expect(serverSelection).toContain("useModeData(exercisesQuery)");
+    expect(authGate).toContain("const hasLocalWorkoutTerminal");
+    expect(authGate).toMatch(/accountPending\s*&&\s*!hasLocalWorkoutTerminal/);
   });
 });
 

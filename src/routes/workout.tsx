@@ -276,14 +276,13 @@ class DeferredWorkoutMutationError extends Error {
 const previewCardioSave = async () => undefined;
 
 function WorkoutPage() {
-  const mode = useServiceMode();
-  const active = useModeData(workoutQuery);
-  const library = useModeData(exercisesQuery);
   const mutationQueue = useWorkoutMutationQueue();
   const pendingTerminal = newestPendingTerminalReceipt(mutationQueue.terminalReceipts);
-  const appliedFinish = newestAppliedFinishReceipt(mutationQueue.terminalReceipts);
 
-  if (pendingTerminal && (!active || pendingTerminal.sessionId !== active.id)) {
+  // A durable terminal receipt is the offline source of truth. Render it before
+  // any suspense-backed account/workout reads so an offline reload never waits
+  // on Supabase before showing the locally completed summary.
+  if (pendingTerminal) {
     return (
       <PendingWorkoutCompletion
         key={pendingTerminal.itemId}
@@ -292,6 +291,20 @@ function WorkoutPage() {
       />
     );
   }
+
+  return <WorkoutServerData mutationQueue={mutationQueue} />;
+}
+
+function WorkoutServerData({
+  mutationQueue,
+}: {
+  mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
+}) {
+  const mode = useServiceMode();
+  const active = useModeData(workoutQuery);
+  const library = useModeData(exercisesQuery);
+  const appliedFinish = newestAppliedFinishReceipt(mutationQueue.terminalReceipts);
+
   if (!active && appliedFinish) {
     return (
       <PendingWorkoutCompletion

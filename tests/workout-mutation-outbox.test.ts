@@ -1025,6 +1025,64 @@ describe("workout mutation outbox", () => {
     expect(queue.snapshot("user-a").flushing).toBe(false);
   });
 
+  it("releases a lane whose executor ignores abort and drains the next lane after 15 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-02T12:00:00.000Z"));
+      const store = new MemoryWorkoutMutationStore();
+      let online = false;
+      let operation = 0;
+      const calls: string[] = [];
+      const executor = vi.fn<WorkoutMutationExecutor>((mutation, _userId, _signal) => {
+        if (mutation.kind !== "set.update") return Promise.resolve();
+        calls.push(mutation.setId);
+        // Deliberately do not observe AbortSignal and never settle. The outbox
+        // must still release its worker through its own timeout race.
+        if (mutation.setId === "set-stalled") return new Promise<void>(() => undefined);
+        return Promise.resolve();
+      });
+      const queue = new WorkoutMutationOutbox(store, executor, {
+        isOnline: () => online,
+        createId: () => `never-settles-${++operation}`,
+        requestTimeoutMs: 15_000,
+      });
+
+      await queue.enqueue("user-a", "session-stalled", {
+        kind: "set.update",
+        setId: "set-stalled",
+        patch: { reps: 8 },
+      });
+      await queue.enqueue("user-a", "session-ready", {
+        kind: "set.update",
+        setId: "set-ready",
+        patch: { reps: 9 },
+      });
+
+      online = true;
+      const draining = queue.flush("user-a");
+      await vi.advanceTimersByTimeAsync(15_000);
+      await draining;
+
+      expect(calls).toEqual(["set-stalled", "set-ready"]);
+      expect(store.read()).toMatchObject([
+        {
+          id: "never-settles-1",
+          sessionId: "session-stalled",
+          attempts: 1,
+          state: "pending",
+          nextAttemptAt: "2026-09-02T12:00:16.000Z",
+        },
+      ]);
+      expect(queue.snapshot("user-a")).toMatchObject({
+        flushing: false,
+        pendingCount: 1,
+        nextAttemptAt: "2026-09-02T12:00:16.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["active", "session.finish", true, "applied"],
     ["completed", "session.finish", true, "applied"],
