@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const migration = readFileSync(
   join(
     process.cwd(),
-    "supabase/migrations/20260902053028_irondesk_terminal_and_black_application.sql",
+    "supabase/migrations/20260902073743_irondesk_terminal_and_black_application.sql",
   ),
   "utf8",
 );
