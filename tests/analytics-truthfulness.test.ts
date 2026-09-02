@@ -7,6 +7,7 @@ import {
   sessionTotals,
   toHistorySession,
 } from "../src/lib/irondesk/derive";
+import { fromKg, toKg } from "../src/lib/irondesk/units";
 import type { ImportedDashboardActivity } from "../src/lib/irondesk/imported-data-adapter";
 import type { FullSessionRow, RecoveryRow } from "../src/lib/irondesk/rows";
 
@@ -95,6 +96,16 @@ function imported(
 }
 
 describe("analytics truthfulness", () => {
+  it("preserves persisted load precision in authoritative imperial tonnage", () => {
+    const workout = session("2026-08-28T17:00:00.000Z");
+    workout.session_exercises[0]!.workout_sets[0]!.weight_kg = toKg(50, "imperial");
+
+    const totals = sessionTotals(workout);
+
+    expect(totals.tonnageKg).toBe(113.4);
+    expect(fromKg(totals.tonnageKg, "imperial")).toBe(250);
+  });
+
   it("averages only valid non-null RPE values from completed working sets", () => {
     const workout = session("2026-08-28T17:00:00.000Z");
     const original = workout.session_exercises[0]!.workout_sets[0]!;
