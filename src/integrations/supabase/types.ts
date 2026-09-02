@@ -1752,6 +1752,18 @@ export type Database = {
         }
         Returns: Json
       }
+      apply_irondesk_black_plan: {
+        Args: {
+          _application_id: string
+          _prescriptions: Json
+          _session_id: string
+          _target_region: string
+          _targets: Json
+          _week_start: string
+          _window_id: string
+        }
+        Returns: Json
+      }
       bootstrap_current_user: {
         Args: { _display_name?: string }
         Returns: undefined
@@ -1797,6 +1809,15 @@ export type Database = {
       start_library_workout: {
         Args: { _acknowledged?: boolean; _template_id: string }
         Returns: string
+      }
+      transition_workout_session_terminal: {
+        Args: {
+          _allow_cancelled_recovery?: boolean
+          _completed_at: string
+          _session_id: string
+          _terminal_status: string
+        }
+        Returns: Json
       }
     }
     Enums: {
