@@ -5,7 +5,7 @@
  * Versioned static files referenced by that anonymous shell are cached with it so a durable local
  * Finish receipt can render after an offline reload. Bump SHELL_VERSION whenever this changes.
  */
-const SHELL_VERSION = "2026-09-02-7";
+const SHELL_VERSION = "2026-09-03-1";
 const CACHE_PREFIX = "irondesk-pwa-";
 const SHELL_CACHE = `${CACHE_PREFIX}shell-${SHELL_VERSION}`;
 const STATIC_CACHE = `${CACHE_PREFIX}static-${SHELL_VERSION}`;
