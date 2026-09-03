@@ -9,6 +9,7 @@ import {
   Dumbbell,
   HeartPulse,
   History,
+  House,
   LayoutDashboard,
   Library,
   LogOut,
@@ -36,6 +37,7 @@ export const navItems: NavItem[] = [
   { to: "/", label: "Today", short: "Today", icon: LayoutDashboard },
   { to: "/workout", label: "Workout", short: "Train", icon: Dumbbell },
   { to: "/program", label: "My Program", short: "Program", icon: ClipboardList },
+  { to: "/home-workouts", label: "Home Workouts", short: "Home", icon: House },
   { to: "/history", label: "History", short: "Log", icon: History },
   { to: "/exercises", label: "Exercises", short: "Library", icon: Library },
   { to: "/progress", label: "Progress", short: "Trends", icon: BarChart3 },
@@ -46,8 +48,8 @@ export const navItems: NavItem[] = [
   { to: "/settings", label: "Settings", short: "Setup", icon: Settings },
 ];
 
-/** Bottom nav shows the highest-value five routes; rest live in the "more" row. */
-const mobilePrimary = ["/", "/workout", "/program", "/history", "/progress"];
+/** Keep the no-gym library one tap away, including while another workout is active. */
+const mobilePrimary = ["/", "/workout", "/program", "/home-workouts", "/history", "/progress"];
 
 export function IronDeskLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -191,13 +193,13 @@ function Sidebar({ pathname }: { pathname: string }) {
       <nav className="flex-1 overflow-y-auto px-6 py-4">
         <p className="label-eyebrow mb-2">Training</p>
         <div className="flex flex-col gap-0.5">
-          {navItems.slice(0, 5).map((item) => (
+          {navItems.slice(0, 6).map((item) => (
             <NavLink key={item.to} item={item} active={isActive(pathname, item.to)} />
           ))}
         </div>
         <p className="label-eyebrow mt-5 mb-2">Intelligence</p>
         <div className="flex flex-col gap-0.5">
-          {navItems.slice(5).map((item) => (
+          {navItems.slice(6).map((item) => (
             <NavLink key={item.to} item={item} active={isActive(pathname, item.to)} />
           ))}
         </div>
@@ -213,7 +215,7 @@ function MobileNav({ pathname }: { pathname: string }) {
   const items = navItems.filter((i) => mobilePrimary.includes(i.to));
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-6">
         {items.map((item) => {
           const active = isActive(pathname, item.to);
           const Icon = item.icon;

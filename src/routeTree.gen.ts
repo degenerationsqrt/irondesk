@@ -16,6 +16,7 @@ import { Route as CoachRouteImport } from './routes/coach'
 import { Route as ConnectionsRouteImport } from './routes/connections'
 import { Route as HealthConnectRouteImport } from './routes/health-connect'
 import { Route as HistoryRouteImport } from './routes/history'
+import { Route as HomeWorkoutsRouteImport } from './routes/home-workouts'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as NutritionRouteImport } from './routes/nutrition'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
@@ -73,6 +74,11 @@ const HealthConnectRoute = HealthConnectRouteImport.update({
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
   path: '/history',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HomeWorkoutsRoute = HomeWorkoutsRouteImport.update({
+  id: '/home-workouts',
+  path: '/home-workouts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const McpRoute = McpRouteImport.update({
@@ -209,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/connections': typeof ConnectionsRoute
   '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
+  '/home-workouts': typeof HomeWorkoutsRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
@@ -241,6 +248,7 @@ export interface FileRoutesByTo {
   '/connections': typeof ConnectionsRoute
   '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
+  '/home-workouts': typeof HomeWorkoutsRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
@@ -274,6 +282,7 @@ export interface FileRoutesById {
   '/connections': typeof ConnectionsRoute
   '/health-connect': typeof HealthConnectRoute
   '/history': typeof HistoryRoute
+  '/home-workouts': typeof HomeWorkoutsRoute
   '/mcp': typeof McpRoute
   '/nutrition': typeof NutritionRoute
   '/onboarding': typeof OnboardingRoute
@@ -308,6 +317,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/health-connect'
     | '/history'
+    | '/home-workouts'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
@@ -340,6 +350,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/health-connect'
     | '/history'
+    | '/home-workouts'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
@@ -372,6 +383,7 @@ export interface FileRouteTypes {
     | '/connections'
     | '/health-connect'
     | '/history'
+    | '/home-workouts'
     | '/mcp'
     | '/nutrition'
     | '/onboarding'
@@ -405,6 +417,7 @@ export interface RootRouteChildren {
   ConnectionsRoute: typeof ConnectionsRoute
   HealthConnectRoute: typeof HealthConnectRoute
   HistoryRoute: typeof HistoryRoute
+  HomeWorkoutsRoute: typeof HomeWorkoutsRoute
   McpRoute: typeof McpRoute
   NutritionRoute: typeof NutritionRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -479,6 +492,13 @@ declare module '@tanstack/react-router' {
       path: '/history'
       fullPath: '/history'
       preLoaderRoute: typeof HistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/home-workouts': {
+      id: '/home-workouts'
+      path: '/home-workouts'
+      fullPath: '/home-workouts'
+      preLoaderRoute: typeof HomeWorkoutsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/mcp': {
@@ -653,6 +673,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectionsRoute: ConnectionsRoute,
   HealthConnectRoute: HealthConnectRoute,
   HistoryRoute: HistoryRoute,
+  HomeWorkoutsRoute: HomeWorkoutsRoute,
   McpRoute: McpRoute,
   NutritionRoute: NutritionRoute,
   OnboardingRoute: OnboardingRoute,

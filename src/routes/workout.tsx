@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Check,
   CloudOff,
+  House,
   Loader2,
   Minus,
   Pause,
@@ -565,6 +566,25 @@ function WorkoutStart({ library, live }: { library: Exercise[]; live: boolean })
 
       {/* Assigned work first: the program decides the order, free training does not. */}
       <AssignedWorkoutCard />
+
+      <SectionCard title="No-Gym Workouts" eyebrow="Train anywhere">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+          <div>
+            <p className="text-sm font-semibold">
+              Twelve bodyweight sessions. No weights required.
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Choose strength, plyometrics, sprinting, change of direction, or jump-rope work and
+              follow the on-screen checklist.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to="/home-workouts">
+              <House className="size-4" /> Browse home workouts
+            </Link>
+          </Button>
+        </div>
+      </SectionCard>
 
       {error && (
         <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
