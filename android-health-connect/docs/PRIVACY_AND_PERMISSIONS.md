@@ -29,7 +29,7 @@ listed and skipped while authorized types remain usable.
 | `READ_ACTIVE_CALORIES_BURNED` |                On | Add active-energy totals to fitness history and enrich selected workout summaries.                                                  |
 | `READ_DISTANCE`               |               Off | Add optional distance records and enrich selected workout summaries.                                                                |
 | `READ_EXERCISE`               |                On | Import Health Connect exercise sessions into workout/activity history.                                                              |
-| `WRITE_EXERCISE`              | Separate/optional | Write previewed completed IronDesk workouts with names, times, types and session notes; no estimated sensor data. |
+| `WRITE_EXERCISE`              | Separate/optional | Write previewed completed IronDesk workouts with names, times, types and notes containing performed exercises and logged sets/reps/loads/RPE; no estimated sensor data. |
 | `READ_HEALTH_DATA_HISTORY`    | Separate/optional | Read more than the standard recent window for a user-selected 90-day or one-year import, only when the provider supports it.        |
 
 The app also declares `INTERNET` solely for user-initiated pairing, sync, and unlink requests over
@@ -50,7 +50,9 @@ because the app does not inspect network state.
 
 Workout export is a separate direction: the paired device downloads completed account sessions into
 memory, the athlete previews them, grants exercise write access, and explicitly writes them to
-Health Connect. Other apps the athlete authorizes may read those records. Stable client IDs and
+Health Connect. Notes include performed exercise names and completed set details in the athlete's
+weight units, including logged repetitions, loads, RPE and warm-up labels. Long notes are shortened
+with an explicit marker. Other apps the athlete authorizes may read those records and notes. Stable client IDs and
 versions prevent duplicate retries. Own exports are excluded from inbound imports. Removing a
 workout or account does not delete Health Connect copies; the athlete manages those in Health Connect.
 

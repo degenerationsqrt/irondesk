@@ -52,9 +52,10 @@ function PrivacyPage() {
           your selection, those types can include exercise sessions, steps, sleep, resting heart
           rate, heart-rate variability, weight, active calories and distance. Separately, you can
           grant exercise write permission, preview completed IronDesk workouts, and write their
-          names, times, types and session notes to Health Connect. Other apps with your Health
-          Connect permission may read those exported workouts. Calories and heart rate are not
-          estimated or written by this export.
+          names, times, types and session notes to Health Connect. Those notes include a summary of
+          performed exercises and completed sets, including logged reps, loads, RPE and warm-up
+          labels. Other apps with your Health Connect permission may read those exported workouts
+          and notes. Calories and heart rate are not estimated or written by this export.
         </p>
         <p className="mt-2">
           Reading, previewing and syncing are initiated by you. IronDesk Health does not read health
