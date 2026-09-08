@@ -144,10 +144,14 @@ function HealthConnectSetupPage() {
           <li>Select Write workouts to Health Connect, then check Exercise in Health Connect.</li>
         </ol>
         <p className="mt-2">
-          Names, start/end times, workout types and session notes are exported. Individual sets,
-          reps, weights, calories and heart-rate samples are not exported. Repeat writes reuse the
-          same workout records. Source workouts from other apps are left alone. Deletions in
-          IronDesk do not remove exported copies; manage those in Health Connect.
+          Names, start/end times and workout types are exported. Session notes include a readable
+          breakdown of performed exercises and completed sets, with logged reps, loads, RPE and
+          warm-up labels in your IronDesk weight units. Long breakdowns are marked as shortened; the
+          full workout remains in IronDesk. Calories, heart-rate samples and timed exercise segments
+          are not exported. Other apps may not display session notes. Preview again and write to
+          update an existing export with the latest details. Repeat writes reuse the same workout
+          records. Deletions in IronDesk do not remove exported copies; manage those in Health
+          Connect.
         </p>
       </section>
 
