@@ -103,7 +103,7 @@ internal object HealthAccessPolicy {
 }
 
 /**
- * Read-only Health Connect access.
+ * User-initiated Health Connect reads and optional completed-workout writes.
  *
  * Nothing here transmits data: records are read into memory and handed to
  * [HealthMapper]. The user then either writes a file or presses Sync Now,
@@ -156,6 +156,18 @@ class HealthRepository(context: Context) {
 
     suspend fun grantedPermissions(): Set<String> =
         client?.permissionController?.getGrantedPermissions() ?: emptySet()
+
+    val workoutWritePermission: String = HealthPermission.getWritePermission(ExerciseSessionRecord::class)
+
+    /** Only called after the user previews and explicitly chooses to write these workouts. */
+    suspend fun writeWorkouts(workouts: List<IronDeskWorkout>, onBatchWritten: (Int) -> Unit) {
+        val session = client ?: error("Health Connect is unavailable.")
+        for (batch in workouts.chunked(100)) {
+            check(workoutWritePermission in grantedPermissions()) { "Allow exercise write access before sending workouts." }
+            session.insertRecords(batch.map { it.toRecord() })
+            onBatchWritten(batch.size)
+        }
+    }
 
     suspend fun hasHistoryAccess(): Boolean =
         historySupported && grantedPermissions().contains(historyPermission)
@@ -238,7 +250,9 @@ class HealthRepository(context: Context) {
                 emptyList()
             },
             distance = if (authorized.distance) read(DistanceRecord::class, from, to) else emptyList(),
-            sessions = if (authorized.sessions) read(ExerciseSessionRecord::class, from, to) else emptyList(),
+            sessions = if (authorized.sessions) {
+                read(ExerciseSessionRecord::class, from, to).filterNot { IronDeskWorkout.isOwnExport(it.metadata) }
+            } else emptyList(),
         )
     }
 

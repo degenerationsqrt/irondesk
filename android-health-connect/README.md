@@ -10,7 +10,7 @@ HTTPS or export the same payload as JSON.
 **Private-beta engineering build — not a public download.**
 
 - Package: `app.irondesk.health`
-- Version: `1.1.0-beta.2` (`versionCode 11002`)
+- Version: `1.2.0-beta.1` (`versionCode 12001`)
 - Android: min SDK 28 (Android 9), target/compile SDK 36 (Android 16)
 - Distribution: no signed APK or AAB is committed or produced by CI
 - Production endpoint: `https://irondeskpro.com`
@@ -44,7 +44,11 @@ Play/privacy preparation are documented in
   Connect permissions.
 - Disables Android cloud backup and device transfer for tokens and queued health payloads.
 
-The companion is read-only: it declares no Health Connect write permission.
+The companion optionally writes completed IronDesk workouts as Health Connect exercise sessions.
+This requires separately granted `WRITE_EXERCISE` permission and an explicit preview/write action.
+Stable client IDs and versions prevent retry duplicates; own exports are excluded from inbound imports.
+The paired-device `GET /api/public/health-connect/workouts` endpoint must be deployed before use.
+See [Workout export](docs/WORKOUT_EXPORT.md) for the contract, setup, and verification checklist.
 
 ## Build and verify locally
 

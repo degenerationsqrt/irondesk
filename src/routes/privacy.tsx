@@ -48,15 +48,23 @@ function PrivacyPage() {
       <section>
         <h2>Android Health Connect data</h2>
         <p className="mt-2">
-          IronDesk Health requests read-only access only to the record types you approve. Depending
-          on your selection, those types can include exercise sessions, steps, sleep, resting heart
-          rate, heart-rate variability, weight, active calories and distance. The companion never
-          writes to Health Connect.
+          IronDesk Health requests read access only to the record types you approve. Depending on
+          your selection, those types can include exercise sessions, steps, sleep, resting heart
+          rate, heart-rate variability, weight, active calories and distance. Separately, you can
+          grant exercise write permission, preview completed IronDesk workouts, and write their
+          names, times, types and session notes to Health Connect. Other apps with your Health
+          Connect permission may read those exported workouts. Calories and heart rate are not
+          estimated or written by this export.
         </p>
         <p className="mt-2">
           Reading, previewing and syncing are initiated by you. IronDesk Health does not read health
           data in a background job. A failed user-initiated sync may be kept in a small encrypted
           retry queue on the phone and retried the next time you select Sync now.
+        </p>
+        <p className="mt-2">
+          Workout export previews are held in memory. Repeat exports use stable workout identifiers
+          to avoid duplicates. Deleting an IronDesk workout or account does not delete its exported
+          Health Connect copy; manage those records directly in Health Connect.
         </p>
       </section>
 

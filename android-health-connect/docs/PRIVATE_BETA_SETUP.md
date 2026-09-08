@@ -41,7 +41,7 @@ If the maintainer provides a direct APK:
    match the values the maintainer published through the private test channel.
 2. Install the signed APK. Android may ask you to allow that one installer to install unknown
    apps; turn that allowance back off after installation.
-3. Open **IronDesk Health** and confirm the header shows `PRIVATE BETA · 1.1.0-beta.2`.
+3. Open **IronDesk Health** and confirm the header shows `PRIVATE BETA · 1.2.0-beta.1`.
 
 Do not install an unsigned build, an APK from an unverified message, or the legacy
 `IronDesk-0.9.0-debug.apk`.
@@ -50,7 +50,7 @@ Do not install an unsigned build, an APK from an unverified message, or the lega
 
 ### Updating an existing installation for irondeskpro.com
 
-Version `1.1.0-beta.2` sends pairing and sync requests directly to `https://irondeskpro.com`.
+Version `1.1.0-beta.2` and later send pairing and sync requests directly to `https://irondeskpro.com`.
 The old Lovable hostname redirects to the new domain; the HTTP client removes device
 authorization when following a redirect across hosts, which can make a paired phone fail sync.
 
@@ -76,6 +76,9 @@ The code is single-use and expires after 15 minutes. Generate a new code if it e
 a pairing code to another person.
 
 ## 4. Choose and grant data access
+
+For the optional reverse direction, see [Send completed workouts to Health Connect](WORKOUT_EXPORT.md).
+It has its own preview and exercise-write permission; inbound read access below is separate.
 
 1. In **Health Connect access**, select only the record types you want IronDesk to import.
 2. Select **Grant selected access**.
