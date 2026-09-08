@@ -66,7 +66,7 @@ jobs:
           test -f "$aab"
 
           badging="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$apk")"
-          grep -F "package: name='app.irondesk.health' versionCode='11001' versionName='1.1.0-beta.1'" <<<"$badging"
+          grep -F "package: name='app.irondesk.health' versionCode='12001' versionName='1.2.0-beta.1'" <<<"$badging"
           grep -F "targetSdkVersion:'36'" <<<"$badging"
 
           if unzip -Z1 "$apk" | grep -Eq '^META-INF/[^/]+\.(RSA|DSA|EC)$'; then
@@ -79,8 +79,8 @@ jobs:
           fi
 
           mkdir -p beta-artifacts
-          cp "$apk" beta-artifacts/irondesk-health-1.1.0-beta.1-UNSIGNED.apk
-          cp "$aab" beta-artifacts/irondesk-health-1.1.0-beta.1-UNSIGNED.aab
+          cp "$apk" beta-artifacts/irondesk-health-1.2.0-beta.1-UNSIGNED.apk
+          cp "$aab" beta-artifacts/irondesk-health-1.2.0-beta.1-UNSIGNED.aab
           (cd beta-artifacts && sha256sum * > SHA256SUMS.txt)
           printf '%s\n' \
             'NOT INSTALLABLE: CI verification artifacts are intentionally unsigned.' \
@@ -90,7 +90,7 @@ jobs:
       - name: Upload unsigned verification artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: irondesk-health-1.1.0-beta.1-unsigned
+          name: irondesk-health-1.2.0-beta.1-unsigned
           path: android-health-connect/beta-artifacts/
           if-no-files-found: error
           retention-days: 14

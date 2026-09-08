@@ -36,6 +36,7 @@ import { Route as ApiAccountDeleteRouteImport } from './routes/api/account/delet
 import { Route as ApiPublicHealthConnectIngestRouteImport } from './routes/api/public/health-connect/ingest'
 import { Route as ApiPublicHealthConnectPairRouteImport } from './routes/api/public/health-connect/pair'
 import { Route as ApiPublicHealthConnectUnpairRouteImport } from './routes/api/public/health-connect/unpair'
+import { Route as ApiPublicHealthConnectWorkoutsRouteImport } from './routes/api/public/health-connect/workouts'
 import { Route as ApiPublicConnectIqV1PairRouteImport } from './routes/api/public/connect-iq/v1/pair'
 import { Route as ApiPublicConnectIqV1UnpairRouteImport } from './routes/api/public/connect-iq/v1/unpair'
 import { Route as ApiPublicConnectIqV1WorkoutEventsRouteImport } from './routes/api/public/connect-iq/v1/workout-events'
@@ -182,6 +183,12 @@ const ApiPublicHealthConnectUnpairRoute =
     path: '/api/public/health-connect/unpair',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicHealthConnectWorkoutsRoute =
+  ApiPublicHealthConnectWorkoutsRouteImport.update({
+    id: '/api/public/health-connect/workouts',
+    path: '/api/public/health-connect/workouts',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicConnectIqV1PairRoute =
   ApiPublicConnectIqV1PairRouteImport.update({
     id: '/api/public/connect-iq/v1/pair',
@@ -235,6 +242,7 @@ export interface FileRoutesByFullPath {
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
+  '/api/public/health-connect/workouts': typeof ApiPublicHealthConnectWorkoutsRoute
   '/api/public/connect-iq/v1/pair': typeof ApiPublicConnectIqV1PairRoute
   '/api/public/connect-iq/v1/unpair': typeof ApiPublicConnectIqV1UnpairRoute
   '/api/public/connect-iq/v1/workout-events': typeof ApiPublicConnectIqV1WorkoutEventsRoute
@@ -268,6 +276,7 @@ export interface FileRoutesByTo {
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
+  '/api/public/health-connect/workouts': typeof ApiPublicHealthConnectWorkoutsRoute
   '/api/public/connect-iq/v1/pair': typeof ApiPublicConnectIqV1PairRoute
   '/api/public/connect-iq/v1/unpair': typeof ApiPublicConnectIqV1UnpairRoute
   '/api/public/connect-iq/v1/workout-events': typeof ApiPublicConnectIqV1WorkoutEventsRoute
@@ -302,6 +311,7 @@ export interface FileRoutesById {
   '/api/public/health-connect/ingest': typeof ApiPublicHealthConnectIngestRoute
   '/api/public/health-connect/pair': typeof ApiPublicHealthConnectPairRoute
   '/api/public/health-connect/unpair': typeof ApiPublicHealthConnectUnpairRoute
+  '/api/public/health-connect/workouts': typeof ApiPublicHealthConnectWorkoutsRoute
   '/api/public/connect-iq/v1/pair': typeof ApiPublicConnectIqV1PairRoute
   '/api/public/connect-iq/v1/unpair': typeof ApiPublicConnectIqV1UnpairRoute
   '/api/public/connect-iq/v1/workout-events': typeof ApiPublicConnectIqV1WorkoutEventsRoute
@@ -337,6 +347,7 @@ export interface FileRouteTypes {
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
+    | '/api/public/health-connect/workouts'
     | '/api/public/connect-iq/v1/pair'
     | '/api/public/connect-iq/v1/unpair'
     | '/api/public/connect-iq/v1/workout-events'
@@ -370,6 +381,7 @@ export interface FileRouteTypes {
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
+    | '/api/public/health-connect/workouts'
     | '/api/public/connect-iq/v1/pair'
     | '/api/public/connect-iq/v1/unpair'
     | '/api/public/connect-iq/v1/workout-events'
@@ -403,6 +415,7 @@ export interface FileRouteTypes {
     | '/api/public/health-connect/ingest'
     | '/api/public/health-connect/pair'
     | '/api/public/health-connect/unpair'
+    | '/api/public/health-connect/workouts'
     | '/api/public/connect-iq/v1/pair'
     | '/api/public/connect-iq/v1/unpair'
     | '/api/public/connect-iq/v1/workout-events'
@@ -437,6 +450,7 @@ export interface RootRouteChildren {
   ApiPublicHealthConnectIngestRoute: typeof ApiPublicHealthConnectIngestRoute
   ApiPublicHealthConnectPairRoute: typeof ApiPublicHealthConnectPairRoute
   ApiPublicHealthConnectUnpairRoute: typeof ApiPublicHealthConnectUnpairRoute
+  ApiPublicHealthConnectWorkoutsRoute: typeof ApiPublicHealthConnectWorkoutsRoute
   ApiPublicConnectIqV1PairRoute: typeof ApiPublicConnectIqV1PairRoute
   ApiPublicConnectIqV1UnpairRoute: typeof ApiPublicConnectIqV1UnpairRoute
   ApiPublicConnectIqV1WorkoutEventsRoute: typeof ApiPublicConnectIqV1WorkoutEventsRoute
@@ -634,6 +648,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicHealthConnectUnpairRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/health-connect/workouts': {
+      id: '/api/public/health-connect/workouts'
+      path: '/api/public/health-connect/workouts'
+      fullPath: '/api/public/health-connect/workouts'
+      preLoaderRoute: typeof ApiPublicHealthConnectWorkoutsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/connect-iq/v1/pair': {
       id: '/api/public/connect-iq/v1/pair'
       path: '/api/public/connect-iq/v1/pair'
@@ -694,6 +715,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPublicHealthConnectIngestRoute: ApiPublicHealthConnectIngestRoute,
   ApiPublicHealthConnectPairRoute: ApiPublicHealthConnectPairRoute,
   ApiPublicHealthConnectUnpairRoute: ApiPublicHealthConnectUnpairRoute,
+  ApiPublicHealthConnectWorkoutsRoute: ApiPublicHealthConnectWorkoutsRoute,
   ApiPublicConnectIqV1PairRoute: ApiPublicConnectIqV1PairRoute,
   ApiPublicConnectIqV1UnpairRoute: ApiPublicConnectIqV1UnpairRoute,
   ApiPublicConnectIqV1WorkoutEventsRoute:

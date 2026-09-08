@@ -42,13 +42,14 @@ class PrivacyActivity : ComponentActivity() {
                         Text(
                             "Where it goes: nowhere until you act. You either export a file you choose the location of, " +
                                 "or press Sync Now to send the records to your own IronDesk account over HTTPS. There is " +
-                                "no background collection, no advertising, no analytics and no third-party sharing.",
+                                "no background collection, no advertising and no analytics. You can separately preview " +
+                                "completed IronDesk workouts and write them to Health Connect, where other apps with your permission can read them.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
                             "How it is authorised: pairing exchanges a one-time code from IronDesk for a device token " +
-                                "stored encrypted on this phone. It grants nothing except the ability to add health " +
-                                "records to your own account, and you can revoke it from IronDesk at any time.",
+                                "stored encrypted on this phone. It can add health records to your account and download " +
+                                "your completed workouts for optional Health Connect export. Revoke it from IronDesk at any time.",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
@@ -62,7 +63,9 @@ class PrivacyActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            "This app never writes to Health Connect and never reads a record type you did not approve.",
+                            "Exercise write permission is optional and requested separately. Only workouts you choose " +
+                                "to send are written. No other Health Connect data is changed. Removing this app or an IronDesk " +
+                                "workout does not remove exported records; manage those in Health Connect.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         TextButton(
@@ -70,7 +73,7 @@ class PrivacyActivity : ComponentActivity() {
                                 startActivity(
                                     Intent(
                                         Intent.ACTION_VIEW,
-                                        "https://irondeskpro.lovable.app/privacy".toUri(),
+                                        "https://irondeskpro.com/privacy".toUri(),
                                     ),
                                 )
                             },

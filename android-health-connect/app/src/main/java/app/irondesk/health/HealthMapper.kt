@@ -43,7 +43,7 @@ object HealthMapper {
             metrics += point(it.metadata, "hc:dist", "distance", it.endTime, it.distance.inMeters, "m", zone)
         }
 
-        val activities = snapshot.sessions.map { session ->
+        val activities = snapshot.sessions.filterNot { IronDeskWorkout.isOwnExport(it.metadata) }.map { session ->
             val type = ExerciseTypes.label(session.exerciseType)
             ActivityPoint(
                 externalId = "hc:sess:${session.metadata.id}",

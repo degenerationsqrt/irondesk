@@ -12,13 +12,13 @@ android {
         applicationId = "app.irondesk.health"
         minSdk = 28
         targetSdk = 36
-        versionCode = 11001
-        versionName = "1.1.0-beta.1"
+        versionCode = 12001
+        versionName = "1.2.0-beta.1"
 
         // The IronDesk deployment this app pairs with. Override with
         // -PirondeskBaseUrl=... for a self-hosted or preview deployment.
         val baseUrl = (project.findProperty("irondeskBaseUrl") as String?)
-            ?: "https://irondeskpro.lovable.app"
+            ?: "https://irondeskpro.com"
         buildConfigField("String", "IRONDESK_BASE_URL", "\"$baseUrl\"")
     }
 

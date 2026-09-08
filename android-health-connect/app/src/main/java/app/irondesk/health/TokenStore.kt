@@ -66,7 +66,7 @@ class PlainStore(context: Context, name: String) : SecureStore {
 /**
  * Holds the pairing result. Only a device token lives here — never IronDesk
  * account credentials. The token authorises adding health records to one
- * account and nothing else, and it is revocable from either side.
+ * account and read completed workouts for optional export. It is revocable from either side.
  */
 class TokenVault(private val store: SecureStore) {
 

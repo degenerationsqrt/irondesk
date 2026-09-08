@@ -116,6 +116,9 @@ private fun CompanionApp() {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var queued by remember { mutableIntStateOf(queue.size) }
+    var workoutPreview by remember { mutableStateOf<WorkoutExportPreview?>(null) }
+    var workoutRange by remember { mutableStateOf(RangeOption.MONTH) }
+    var workoutExportStatus by remember { mutableStateOf<String?>(null) }
 
     val selectedPermissions = health.permissionsFor(selection)
     val missingSelectedPermissions = selectedPermissions - grantedPermissions
@@ -302,7 +305,7 @@ private fun CompanionApp() {
                                 withContext(Dispatchers.IO) { client.unpair(token) }
                             }
                             vault.clear(); queue.clear(); queued = 0
-                            paired = false; payload = null; snapshot = null; summary = null
+                            paired = false; payload = null; snapshot = null; summary = null; workoutPreview = null
                             status = when (outcome) {
                                 SyncClient.UnpairOutcome.REVOKED_NOW ->
                                     "Device unlinked. IronDesk will no longer accept data from this phone."
@@ -322,22 +325,103 @@ private fun CompanionApp() {
                 },
                 onForgetLocally = {
                     vault.clear(); queue.clear(); queued = 0
-                    paired = false; payload = null; snapshot = null; summary = null
+                    paired = false; payload = null; snapshot = null; summary = null; workoutPreview = null
                     status = "Cleared this phone. The link still exists in IronDesk until you remove it there."
                 },
             )
 
-            SectionCard("Health Connect access") {
+            SectionCard("IronDesk workouts → Health Connect") {
+                Text(
+                    "Send completed workouts from irondeskpro.com to Health Connect. Preview first, then write " +
+                        "exercise sessions with their names, times, types and session notes. No calories or heart rate are estimated.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = IronDesk.Muted,
+                )
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RangeOption.entries.forEach { option ->
+                        FilterChip(
+                            selected = workoutRange == option,
+                            onClick = { workoutRange = option; workoutPreview = null; workoutExportStatus = null },
+                            enabled = !busy,
+                            label = { Text("${option.days} days") },
+                        )
+                    }
+                }
+                OutlinedButton(
+                    enabled = !busy && health.available,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        val token = vault.token
+                        if (token != null) scope.launch {
+                            busy = true; error = null; workoutPreview = null; workoutExportStatus = null
+                            try {
+                                val to = Instant.now()
+                                workoutPreview = withContext(Dispatchers.IO) {
+                                    client.previewWorkouts(token, to.minus(Duration.ofDays(workoutRange.days.toLong())), to)
+                                }
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not preview IronDesk workouts."
+                            } finally { busy = false }
+                        }
+                    },
+                ) { Text("Preview IronDesk workouts") }
+                workoutPreview?.let { preview ->
+                    Text("${preview.workouts.size} completed workout(s) ready.")
+                    preview.workouts.take(10).forEach { workout ->
+                        Text(
+                            "${workout.title} · ${formatTime(workout.start.toEpochMilli())} · " +
+                                "${Duration.between(workout.start, workout.end).toMinutes()} min",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (preview.workouts.size > 10) Text("And ${preview.workouts.size - 10} more in this range.")
+                    if (preview.skipped > 0) Text("${preview.skipped} workout(s) skipped because their timing is incomplete.", color = IronDesk.Amber)
+                    Text(
+                        "Repeated writes update the same IronDesk records without creating extra copies. " +
+                            "Other apps' workouts are left alone. Deleting a workout in IronDesk does not delete its Health Connect copy.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = IronDesk.Muted,
+                    )
+                    if (health.workoutWritePermission !in grantedPermissions) {
+                        Button(
+                            onClick = { permissionLauncher.launch(setOf(health.workoutWritePermission)) },
+                            enabled = !busy && preview.workouts.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Allow writing workouts") }
+                    }
+                    Button(
+                        enabled = !busy && preview.workouts.isNotEmpty() && health.workoutWritePermission in grantedPermissions,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch {
+                                busy = true; error = null; workoutExportStatus = null
+                                var written = 0
+                                try {
+                                    health.writeWorkouts(preview.workouts) { count -> written += count }
+                                    workoutExportStatus = "$written workout(s) synced to Health Connect. " +
+                                        "Existing copies were retained or updated. Check Exercise in Health Connect to view them."
+                                } catch (e: Exception) {
+                                    error = "$written workout(s) processed before the write stopped. " +
+                                        "${e.message ?: "Health Connect could not finish."} You can retry without duplicating these workouts."
+                                } finally { busy = false; refreshPermissions() }
+                            }
+                        },
+                    ) { Text("Write ${preview.workouts.size} workout(s) to Health Connect") }
+                }
+                workoutExportStatus?.let { Text(it, color = IronDesk.Green) }
+            }
+
+            SectionCard("Health Connect → IronDesk") {
                 Text(
                     when {
-                        selectedPermissions.isEmpty() -> "Choose at least one record type. Nothing is written back."
+                        selectedPermissions.isEmpty() -> "Choose at least one record type to import."
                         missingSelectedPermissions.isEmpty() ->
                             "Read access granted for all ${selectedPermissions.size} selected record types."
                         authorizedSelectedCount > 0 ->
                             "$authorizedSelectedCount of ${selectedPermissions.size} selected record types are " +
                                 "authorized. Types without access are skipped safely."
                         else ->
-                            "Choose the health records to import, then grant read-only access. Nothing is written back."
+                            "Choose the health records to import, then grant read access. Workout writing is controlled separately above."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (selectedPermissions.isNotEmpty() && missingSelectedPermissions.isEmpty()) {

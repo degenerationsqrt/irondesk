@@ -7,10 +7,11 @@ behavior must agree exactly before submission.
 
 ## Product purpose
 
-IronDesk Health is a read-only, athlete-initiated connector. It lets an adult athlete bring selected
+IronDesk Health is an athlete-initiated connector. It lets an adult athlete bring selected
 fitness, recovery, and body-metric records from Android Health Connect into that athlete's own
 IronDesk training journal. It is not a medical device, does not diagnose or treat a condition, does
-not write to Health Connect, and does not operate in the background.
+not operate in the background. Optional exercise writing sends completed IronDesk sessions to Health
+Connect only after a separate permission grant, preview, and explicit write action.
 
 ## Requested Health Connect access
 
@@ -28,11 +29,12 @@ listed and skipped while authorized types remain usable.
 | `READ_ACTIVE_CALORIES_BURNED` |                On | Add active-energy totals to fitness history and enrich selected workout summaries.                                                  |
 | `READ_DISTANCE`               |               Off | Add optional distance records and enrich selected workout summaries.                                                                |
 | `READ_EXERCISE`               |                On | Import Health Connect exercise sessions into workout/activity history.                                                              |
+| `WRITE_EXERCISE`              | Separate/optional | Write previewed completed IronDesk workouts with names, times, types and session notes; no estimated sensor data. |
 | `READ_HEALTH_DATA_HISTORY`    | Separate/optional | Read more than the standard recent window for a user-selected 90-day or one-year import, only when the provider supports it.        |
 
 The app also declares `INTERNET` solely for user-initiated pairing, sync, and unlink requests over
 HTTPS. It does not declare location, contacts, camera, microphone, advertising ID, background
-Health Connect access, or any Health Connect write permission. `ACCESS_NETWORK_STATE` was removed
+Health Connect access, or any write permission other than `WRITE_EXERCISE`. `ACCESS_NETWORK_STATE` was removed
 because the app does not inspect network state.
 
 ## Data flow and user control
@@ -45,6 +47,12 @@ because the app does not inspect network state.
 6. **Sync now** sends the prepared payload over HTTPS to the paired athlete's IronDesk account.
 7. **Export JSON file instead** sends the payload only to a location selected through Android's
    system document picker.
+
+Workout export is a separate direction: the paired device downloads completed account sessions into
+memory, the athlete previews them, grants exercise write access, and explicitly writes them to
+Health Connect. Other apps the athlete authorizes may read those records. Stable client IDs and
+versions prevent duplicate retries. Own exports are excluded from inbound imports. Removing a
+workout or account does not delete Health Connect copies; the athlete manages those in Health Connect.
 
 There is no scheduled/background read, background upload, advertising, analytics SDK, sale of
 health data, or sharing with a third-party advertising/data-broker service in this companion.
@@ -116,7 +124,7 @@ Before every Play submission, compare these four surfaces line by line:
 - the Health Apps declaration and per-permission justifications.
 
 The public policy URL currently linked in the app is
-`https://irondeskpro.lovable.app/privacy`. Verify that the deployed page contains
+`https://irondeskpro.com/privacy`. Verify that the deployed page contains
 the Health Connect details, deletion instructions, and current contact identity before signing a
 release. The same URL must be accessible without an account, geofencing, or a PDF viewer.
 

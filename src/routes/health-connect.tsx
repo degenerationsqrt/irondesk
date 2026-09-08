@@ -19,7 +19,7 @@ export const Route = createFileRoute("/health-connect")({
   component: HealthConnectSetupPage,
 });
 
-const BETA_VERSION = "1.1.0-beta.1";
+const BETA_VERSION = "1.2.0-beta.1";
 const configuredBetaDownloadUrl = import.meta.env["VITE_HEALTH_CONNECT_DOWNLOAD_URL"]?.trim();
 const betaDownloadUrl = configuredBetaDownloadUrl?.startsWith("https://")
   ? configuredBetaDownloadUrl
@@ -29,7 +29,7 @@ function HealthConnectSetupPage() {
   return (
     <LegalPageShell
       title="IronDesk Health for Android"
-      subtitle={`Private beta ${BETA_VERSION} · Android Health Connect · Read-only, manual sync`}
+      subtitle={`Private beta ${BETA_VERSION} · Android Health Connect · Manual import and workout export`}
     >
       <section>
         <div className="flex items-start gap-3">
@@ -121,10 +121,10 @@ function HealthConnectSetupPage() {
         <div className="mt-2 flex items-start gap-2">
           <ShieldCheck className="mt-0.5 size-5 shrink-0 text-success" />
           <p>
-            The companion requests read-only access for the types you select. It has no Health
-            Connect write permission, no advertising SDK and no background health-data upload. A
-            failed user-initiated sync can remain in a small Android Keystore-encrypted retry queue
-            until you select Sync now again.
+            The companion requests read access for the types you select and separately offers
+            exercise write permission for completed IronDesk workouts. It has no advertising SDK and
+            no background health-data upload. A failed user-initiated sync can remain in a small
+            Android Keystore-encrypted retry queue until you select Sync now again.
           </p>
         </div>
         <p className="mt-3">
@@ -133,7 +133,26 @@ function HealthConnectSetupPage() {
       </section>
 
       <section>
-        <h2>Export instead of syncing</h2>
+        <h2>Send IronDesk workouts to Health Connect</h2>
+        <ol className="mt-2">
+          <li>Complete and sync your workout to your account on irondeskpro.com.</li>
+          <li>
+            In the companion, open IronDesk workouts → Health Connect and choose a date range.
+          </li>
+          <li>Select Preview IronDesk workouts and review the completed sessions.</li>
+          <li>Select Allow writing workouts and grant Android exercise write permission.</li>
+          <li>Select Write workouts to Health Connect, then check Exercise in Health Connect.</li>
+        </ol>
+        <p className="mt-2">
+          Names, start/end times, workout types and session notes are exported. Individual sets,
+          reps, weights, calories and heart-rate samples are not exported. Repeat writes reuse the
+          same workout records. Source workouts from other apps are left alone. Deletions in
+          IronDesk do not remove exported copies; manage those in Health Connect.
+        </p>
+      </section>
+
+      <section>
+        <h2>Export a JSON file instead of importing</h2>
         <p className="mt-2">
           Export JSON file instead writes the previewed payload through Android&apos;s system file
           picker. Uploading that file to IronDesk retains import evidence, but the file archive is
