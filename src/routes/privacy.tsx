@@ -20,7 +20,7 @@ function PrivacyPage() {
   return (
     <LegalPageShell
       title="Privacy Policy"
-      subtitle="Effective August 30, 2026 · Applies to the IronDesk web app and IronDesk Health Android companion."
+      subtitle="Updated September 8, 2026 · Applies to the IronDesk web app and IronDesk Health Android companion."
     >
       <section>
         <h2>What IronDesk processes</h2>
