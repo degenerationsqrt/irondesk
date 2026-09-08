@@ -10,7 +10,7 @@ You need:
 
 - An Android 9 or newer phone. Android 14+ includes Health Connect in the operating system;
   Android 13 and lower use the Health Connect app from Google Play.
-- An IronDesk account you can sign into at `https://irondeskpro.lovable.app`.
+- An IronDesk account you can sign into at `https://irondeskpro.com`.
 - A tracker source that already writes records into Health Connect. Samsung Health is one
   example.
 - The signed `app.irondesk.health` beta supplied by the maintainer.
@@ -41,12 +41,29 @@ If the maintainer provides a direct APK:
    match the values the maintainer published through the private test channel.
 2. Install the signed APK. Android may ask you to allow that one installer to install unknown
    apps; turn that allowance back off after installation.
-3. Open **IronDesk Health** and confirm the header shows `PRIVATE BETA · 1.1.0-beta.1`.
+3. Open **IronDesk Health** and confirm the header shows `PRIVATE BETA · 1.1.0-beta.2`.
 
 Do not install an unsigned build, an APK from an unverified message, or the legacy
 `IronDesk-0.9.0-debug.apk`.
 
 ## 3. Pair your phone
+
+### Updating an existing installation for irondeskpro.com
+
+Version `1.1.0-beta.2` sends pairing and sync requests directly to `https://irondeskpro.com`.
+The old Lovable hostname redirects to the new domain; the HTTP client removes device
+authorization when following a redirect across hosts, which can make a paired phone fail sync.
+
+Install the update over the existing companion using the same package and signing certificate
+(debug over debug, or the same signed beta identity). Do not uninstall or clear app storage:
+the existing device token and encrypted outbox are retained by an in-place update. If Android
+rejects the update, check the package and signing identity before taking any reset action.
+
+If the phone still shows its linked device, try **Sync now** first, then refresh **Connections &
+Imports** on `https://irondeskpro.com` and verify the last-sync time. Generate a new pairing code
+only if the companion is unpaired or the updated app reports that the device token was revoked.
+
+### Pairing a new or unpaired phone
 
 1. Sign into IronDesk in a browser.
 2. Open **Connections & Imports**.

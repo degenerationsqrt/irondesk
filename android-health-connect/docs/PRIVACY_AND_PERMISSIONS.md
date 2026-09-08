@@ -116,7 +116,7 @@ Before every Play submission, compare these four surfaces line by line:
 - the Health Apps declaration and per-permission justifications.
 
 The public policy URL currently linked in the app is
-`https://irondeskpro.lovable.app/privacy`. Verify that the deployed page contains
+`https://irondeskpro.com/privacy`. Verify that the deployed page contains
 the Health Connect details, deletion instructions, and current contact identity before signing a
 release. The same URL must be accessible without an account, geofencing, or a PDF viewer.
 

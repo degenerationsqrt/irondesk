@@ -9,8 +9,8 @@ person/date for each gate in the release ticket.
 - [ ] Work from the canonical `degenerationsqrt/irondesk` repository and expected release commit.
 - [ ] Confirm the only intended Android package is `app.irondesk.health`; do not package the legacy
       untracked `android/` Capacitor project.
-- [ ] Confirm `versionName` is `1.1.0-beta.1`, `versionCode` is `11001`, and target/compile SDK are 36.
-- [ ] Confirm the default endpoint is exactly `https://irondeskpro.lovable.app` and no preview,
+- [ ] Confirm `versionName` is `1.1.0-beta.2`, `versionCode` is `11002`, and target/compile SDK are 36.
+- [ ] Confirm the default endpoint is exactly `https://irondeskpro.com` and no preview,
       localhost, plain-HTTP, or secret-bearing URL appears in the release resources/classes.
 - [ ] Verify the production pair, ingest, unpair, linked-device, and account-deletion endpoints are
       deployed against the intended Supabase project.
@@ -21,8 +21,8 @@ person/date for each gate in the release ticket.
 
 - [ ] Run `.github/workflows/android-health-connect.yml` at the exact release commit.
 - [ ] Confirm lint has zero errors and every JVM test passes.
-- [ ] Confirm CI metadata checks report package `app.irondesk.health`, version code `11001`, version
-      name `1.1.0-beta.1`, and target SDK 36.
+- [ ] Confirm CI metadata checks report package `app.irondesk.health`, version code `11002`, version
+      name `1.1.0-beta.2`, and target SDK 36.
 - [ ] Confirm CI uploads only clearly labeled unsigned, short-lived verification artifacts and does
       not publish a GitHub release or Play build.
 - [ ] Save the CI run URL in the release ticket.
@@ -48,16 +48,16 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 - [ ] If direct sideload testing is approved, build a signed APK from the same commit and signing
       identity. Do not distribute a debug-signed APK.
 - [ ] Name direct artifacts unambiguously, for example
-      `IronDesk-Health-1.1.0-beta.1-signed.apk`; never reuse the legacy
+      `IronDesk-Health-1.1.0-beta.2-signed.apk`; never reuse the legacy
       `IronDesk-0.9.0-debug.apk` name.
 
 Inspect the exact signed APK, not an earlier local output:
 
 ```powershell
 $buildTools = "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.0.0"
-& "$buildTools\aapt.exe" dump badging .\IronDesk-Health-1.1.0-beta.1-signed.apk
-& "$buildTools\apksigner.bat" verify --verbose --print-certs .\IronDesk-Health-1.1.0-beta.1-signed.apk
-Get-FileHash .\IronDesk-Health-1.1.0-beta.1-signed.apk -Algorithm SHA256
+& "$buildTools\aapt.exe" dump badging .\IronDesk-Health-1.1.0-beta.2-signed.apk
+& "$buildTools\apksigner.bat" verify --verbose --print-certs .\IronDesk-Health-1.1.0-beta.2-signed.apk
+Get-FileHash .\IronDesk-Health-1.1.0-beta.2-signed.apk -Algorithm SHA256
 ```
 
 - [ ] Package/version/SDK values match the release ticket.

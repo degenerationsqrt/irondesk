@@ -70,7 +70,7 @@ class PrivacyActivity : ComponentActivity() {
                                 startActivity(
                                     Intent(
                                         Intent.ACTION_VIEW,
-                                        "https://irondeskpro.lovable.app/privacy".toUri(),
+                                        "https://irondeskpro.com/privacy".toUri(),
                                     ),
                                 )
                             },

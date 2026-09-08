@@ -10,10 +10,10 @@ HTTPS or export the same payload as JSON.
 **Private-beta engineering build — not a public download.**
 
 - Package: `app.irondesk.health`
-- Version: `1.1.0-beta.1` (`versionCode 11001`)
+- Version: `1.1.0-beta.2` (`versionCode 11002`)
 - Android: min SDK 28 (Android 9), target/compile SDK 36 (Android 16)
 - Distribution: no signed APK or AAB is committed or produced by CI
-- Production endpoint: `https://irondeskpro.lovable.app`
+- Production endpoint: `https://irondeskpro.com`
 
 The older GitHub asset `IronDesk-0.9.0-debug.apk` is the legacy full Capacitor app
 (`com.irondesk.app`). It is **not** this Health Connect companion and must not be offered as the
