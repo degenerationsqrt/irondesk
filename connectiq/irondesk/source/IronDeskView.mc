@@ -658,8 +658,41 @@ class IronDeskView extends WatchUi.View {
             return;
         }
         var display = IronDeskMath.kgToDisplay(numberValue(set["weight_kg"], 0.0));
-        display = clamp(display + delta, 0.0, 9999.0);
+        display = clamp(display + delta, 0.0, IronDeskMath.maxDisplayWeight());
         set["weight_kg"] = IronDeskMath.displayToKg(display);
+        persistCheckpoint();
+        WatchUi.requestUpdate();
+    }
+
+    function currentWeightDisplay() {
+        if (!_state.equals("active")) {
+            return null;
+        }
+        var set = currentSet();
+        if (set == null || set["weight_kg"] == null) {
+            return null;
+        }
+        return IronDeskMath.kgToDisplay(set["weight_kg"]);
+    }
+
+    function currentWeightLabel() {
+        return IronDeskMath.formatDisplayWeight(currentWeightDisplay()) + " " + IronDeskMath.unitLabel();
+    }
+
+    function setCurrentWeightDisplay(displayWeight) {
+        if (!_state.equals("active")) {
+            return;
+        }
+        var set = currentSet();
+        if (set == null) {
+            return;
+        }
+        if (displayWeight == null) {
+            set["weight_kg"] = null;
+        } else {
+            var safeDisplay = clamp(displayWeight, 0.0, IronDeskMath.maxDisplayWeight());
+            set["weight_kg"] = IronDeskMath.displayToKg(safeDisplay);
+        }
         persistCheckpoint();
         WatchUi.requestUpdate();
     }
@@ -1350,7 +1383,7 @@ class IronDeskView extends WatchUi.View {
         }
 
         var reps = set["reps"] == null ? "--" : set["reps"].toString();
-        var weight = set["weight_kg"] == null ? "--" : IronDeskMath.kgToDisplay(set["weight_kg"]).toString();
+        var weight = set["weight_kg"] == null ? "--" : IronDeskMath.formatDisplayWeight(IronDeskMath.kgToDisplay(set["weight_kg"]));
         var rpe = set["rpe"] == null ? "--" : set["rpe"].toString();
         dc.setColor(COLOR_PRIMARY, Graphics.COLOR_TRANSPARENT);
         dc.drawText(width / 2, height * 0.42, Graphics.FONT_LARGE, reps + " reps", Graphics.TEXT_JUSTIFY_CENTER);
@@ -1368,7 +1401,10 @@ class IronDeskView extends WatchUi.View {
         if (!_storageOkay) {
             message = "STORAGE FULL - finish or sync";
         } else if (_state.equals("active")) {
-            message = "UP/DOWN reps  SELECT done  MENU edit";
+            dc.setColor(COLOR_MUTED, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(dc.getWidth() / 2, dc.getHeight() * 0.78, Graphics.FONT_XTINY, "UP/DN reps   START done", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.drawText(dc.getWidth() / 2, dc.getHeight() * 0.87, Graphics.FONT_XTINY, "HOLD MENU weight/RPE", Graphics.TEXT_JUSTIFY_CENTER);
+            return;
         } else if (_state.equals("ready")) {
             message = _message;
         } else if (_state.equals("loading")) {

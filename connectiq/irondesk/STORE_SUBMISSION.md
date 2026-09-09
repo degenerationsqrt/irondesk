@@ -43,7 +43,7 @@ IronDesk does not create programs, bypass workout-release gates, or start a sess
 2. Open **Connections** and generate a Garmin pairing code.
 3. In Garmin Connect or the Connect IQ Store app, enter the one-time code in the IronDesk app settings. The production URL is prefilled.
 4. Open IronDesk from the watch activity list and select **START**.
-5. Use Up/Down for reps, Menu for load/RPE, and Select to confirm a set.
+5. Use Up/Down for reps, hold Menu and choose **Edit weight** for a dedicated load editor, and Select to confirm a set. The weight editor uses Up/Down for repeated changes, Select to save, Back to cancel, and hold Menu to toggle coarse/fine increments.
 6. Finish to save the Garmin FIT activity and synchronize IronDesk.
 
 ## Permissions and data disclosure
