@@ -70,8 +70,7 @@ class IronDeskMenu extends WatchUi.Menu2 {
             return;
         }
         if (view.canEditCurrentSet()) {
-            addItem(new WatchUi.MenuItem("Weight +", "+ 0.5", :weightUp, {}));
-            addItem(new WatchUi.MenuItem("Weight -", "- 0.5", :weightDown, {}));
+            addItem(new WatchUi.MenuItem("Edit weight", view.currentWeightLabel(), :editWeight, {}));
             addItem(new WatchUi.MenuItem("RPE +", "+ 0.5", :rpeUp, {}));
             addItem(new WatchUi.MenuItem("RPE -", "- 0.5", :rpeDown, {}));
         }
@@ -100,10 +99,11 @@ class IronDeskMenuDelegate extends WatchUi.Menu2InputDelegate {
 
     function onSelect(item) {
         var id = item.getId();
-        if (id == :weightUp) {
-            _view.adjustWeight(0.5);
-        } else if (id == :weightDown) {
-            _view.adjustWeight(-0.5);
+        if (id == :editWeight) {
+            WatchUi.popView(WatchUi.SLIDE_DOWN);
+            var editor = new IronDeskWeightEditor(_view);
+            WatchUi.pushView(editor, new IronDeskWeightEditorDelegate(editor), WatchUi.SLIDE_UP);
+            return;
         } else if (id == :rpeUp) {
             _view.adjustRpe(0.5);
         } else if (id == :rpeDown) {

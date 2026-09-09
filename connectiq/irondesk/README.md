@@ -8,7 +8,7 @@ This directory contains the native IronDesk Connect IQ device app. It is a separ
 2. In IronDesk **Connections**, generate a Garmin pairing code.
 3. In Garmin Connect or the Connect IQ Store app, open IronDesk app settings and enter the pairing code. The production IronDesk server is prefilled.
 4. Launch IronDesk from the watch activity list. The app downloads and caches the active session.
-5. Select to start the strength FIT activity. Up/down changes reps; the menu changes load/RPE, syncs, finishes, or discards.
+5. Select to start the strength FIT activity. Up/down changes reps. Hold Menu and choose **Edit weight** to open the on-watch weight editor; use up/down for repeated changes, Select to save, Back to cancel, and hold Menu to toggle coarse/fine increments. The workout menu also changes RPE, syncs, finishes, or discards.
 6. Each confirmed set is stored locally first and sent to IronDesk with an idempotent event ID. Temporary connectivity loss does not stop the workout.
 7. Finishing saves the Garmin FIT activity and queues the IronDesk completion event.
 
@@ -53,5 +53,6 @@ See `STORE_SUBMISSION.md` for the release gates, proposed listing, permission di
 - The first release operates on an already-active IronDesk session; it cannot bypass program enrollment or warning acknowledgments.
 - The release default is `https://irondeskpro.lovable.app`. The server setting remains editable for controlled development or support migrations, and origin-bound cached data is never silently sent to a replacement server.
 - Manual set confirmation is authoritative. Garmin's strength sub-sport tag does not provide automatic exercise or rep recognition.
+- Weight editing stays in the user's Garmin unit system while the editor is open. Coarse steps are 5 lb or 2.5 kg, fine steps are 0.5 lb/kg, and only the saved result is converted to canonical kilograms for IronDesk.
 - The app records one Garmin lap per confirmed set but does not yet add custom FIT developer fields.
 - Real-device behavior, store settings delivery, optical HR, vibration, Bluetooth interruption, and Garmin Connect FIT presentation must be verified on the user's actual watch before public submission.

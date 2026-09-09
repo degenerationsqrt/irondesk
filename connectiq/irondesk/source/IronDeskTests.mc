@@ -2,6 +2,26 @@ import Toybox.Lang;
 import Toybox.Activity;
 import Toybox.Test;
 
+class IronDeskTestWeightHost {
+    var initialWeight;
+    var savedWeight;
+    var saveCount = 0;
+
+    function initialize(weight) {
+        initialWeight = weight;
+        savedWeight = null;
+    }
+
+    function currentWeightDisplay() {
+        return initialWeight;
+    }
+
+    function setCurrentWeightDisplay(weight) {
+        savedWeight = weight;
+        saveCount += 1;
+    }
+}
+
 (:test)
 function testRoundToHalf(logger as Test.Logger) as Boolean {
     var passed = IronDeskMath.roundToHalf(1.24) == 1.0
@@ -9,6 +29,90 @@ function testRoundToHalf(logger as Test.Logger) as Boolean {
         && IronDeskMath.roundToHalf(101.75) == 102.0;
     if (!passed) {
         logger.error("Half-unit rounding did not match the workout editor contract.");
+    }
+    return passed;
+}
+
+(:test)
+function testWeightEditorUsesPracticalUnitSteps(logger as Test.Logger) as Boolean {
+    var passed = IronDeskMath.weightStepForUnits(true, false) == 5.0
+        && IronDeskMath.weightStepForUnits(false, false) == 2.5
+        && IronDeskMath.weightStepForUnits(true, true) == 0.5
+        && IronDeskMath.weightStepForUnits(false, true) == 0.5;
+    if (!passed) {
+        logger.error("Weight editor steps did not match the unit contract.");
+    }
+    return passed;
+}
+
+(:test)
+function testWeightEditorPreservesUnsetZeroAndBounds(logger as Test.Logger) as Boolean {
+    var maxLb = IronDeskMath.maxDisplayWeightForUnits(true);
+    var maxKg = IronDeskMath.maxDisplayWeightForUnits(false);
+    var unsetUp = IronDeskMath.stepDisplayWeight(null, 1, 5.0, maxLb);
+    var unsetDown = IronDeskMath.stepDisplayWeight(null, -1, 5.0, maxLb);
+    var zeroDown = IronDeskMath.stepDisplayWeight(0.0, -1, 5.0, maxLb);
+    var capped = IronDeskMath.stepDisplayWeight(maxKg, 1, 2.5, maxKg);
+    var passed = maxLb == 2204.5
+        && maxKg == 1000.0
+        && unsetUp == 5.0
+        && unsetDown == 0.0
+        && zeroDown == null
+        && capped == 1000.0;
+    if (!passed) {
+        logger.error("Weight editor lost null/zero semantics or exceeded server bounds.");
+    }
+    return passed;
+}
+
+(:test)
+function testWeightEditorFormatsHalfUnits(logger as Test.Logger) as Boolean {
+    var passed = IronDeskMath.formatDisplayWeight(null).equals("--")
+        && IronDeskMath.formatDisplayWeight(0.0).equals("0")
+        && IronDeskMath.formatDisplayWeight(15.0).equals("15")
+        && IronDeskMath.formatDisplayWeight(15.5).equals("15.5");
+    if (!passed) {
+        logger.error("Weight editor formatting exposed an unexpected value.");
+    }
+    return passed;
+}
+
+(:test)
+function testWeightEditorCommitsOnlyChangedDraft(logger as Test.Logger) as Boolean {
+    var untouchedHost = new IronDeskTestWeightHost(15.0);
+    var untouchedEditor = new IronDeskWeightEditor(untouchedHost);
+    untouchedEditor.save();
+
+    var toggleHost = new IronDeskTestWeightHost(15.0);
+    var toggleEditor = new IronDeskWeightEditor(toggleHost);
+    toggleEditor.toggleStep();
+    toggleEditor.save();
+
+    var roundTripHost = new IronDeskTestWeightHost(15.0);
+    var roundTripEditor = new IronDeskWeightEditor(roundTripHost);
+    roundTripEditor.increase();
+    roundTripEditor.decrease();
+    roundTripEditor.save();
+
+    var cancelledHost = new IronDeskTestWeightHost(15.0);
+    var cancelledEditor = new IronDeskWeightEditor(cancelledHost);
+    cancelledEditor.increase();
+    cancelledEditor.cancel();
+    cancelledEditor.save();
+
+    var changedHost = new IronDeskTestWeightHost(null);
+    var changedEditor = new IronDeskWeightEditor(changedHost);
+    changedEditor.increase();
+    changedEditor.save();
+
+    var passed = untouchedHost.saveCount == 0
+        && toggleHost.saveCount == 0
+        && roundTripHost.saveCount == 0
+        && cancelledHost.saveCount == 0
+        && changedHost.saveCount == 1
+        && changedHost.savedWeight == 5.0;
+    if (!passed) {
+        logger.error("Weight editor committed an unchanged/cancelled draft or lost a real edit.");
     }
     return passed;
 }
