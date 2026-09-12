@@ -222,7 +222,7 @@ function ConnectionsPage() {
             savedMappings={savedMappings}
           />
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <SectionCard
               title="Import history"
               eyebrow="Batches"
@@ -278,7 +278,7 @@ function ConnectionsPage() {
               )}
             </SectionCard>
 
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               <SectionCard title="Imported data" eyebrow="Totals">
                 <div>
                   <DataRow label="Activities" value={totals.data?.activities ?? 0} />
