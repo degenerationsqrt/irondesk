@@ -217,12 +217,12 @@ function HistoryPage() {
           }
         />
       ) : view === "cards" ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((s) => (
             <button
               key={s.id}
               onClick={() => setOpenId(s.id)}
-              className="panel p-4 text-left transition-colors hover:border-primary/40"
+              className="panel min-w-0 p-4 text-left transition-colors hover:border-primary/40"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
