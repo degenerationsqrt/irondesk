@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ToolContext } from "@lovable.dev/mcp-js";
+import type { Database } from "../../integrations/supabase/types";
 
 type RuntimeGlobals = typeof globalThis & {
   Deno?: { env?: { get?: (name: string) => string | undefined } };
@@ -45,14 +46,16 @@ function supabasePublishableKey(): string {
   }
   const legacy = configuredEnv(["SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"]);
   if (legacy) return legacy;
-  throw new Error("SUPABASE_PUBLISHABLE_KEY, SUPABASE_PUBLISHABLE_KEYS, or SUPABASE_ANON_KEY is required");
+  throw new Error(
+    "SUPABASE_PUBLISHABLE_KEY, SUPABASE_PUBLISHABLE_KEYS, or SUPABASE_ANON_KEY is required",
+  );
 }
 
 /** Forwards the verified bearer token so RLS runs as the signed-in athlete. */
 export function supabaseForUser(ctx: ToolContext) {
   const token = ctx.getToken();
   if (!token) throw new Error("supabaseForUser requires a verified OAuth token");
-  return createClient(supabaseProjectUrl(), supabasePublishableKey(), {
+  return createClient<Database>(supabaseProjectUrl(), supabasePublishableKey(), {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -60,7 +63,12 @@ export function supabaseForUser(ctx: ToolContext) {
 
 export function unauthenticated() {
   return {
-    content: [{ type: "text" as const, text: "Not authenticated. Connect this MCP server to your IronDesk account." }],
+    content: [
+      {
+        type: "text" as const,
+        text: "Not authenticated. Connect this MCP server to your IronDesk account.",
+      },
+    ],
     isError: true,
   };
 }

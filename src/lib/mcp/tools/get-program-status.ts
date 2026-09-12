@@ -21,12 +21,20 @@ export default defineTool({
       .order("created_at", { ascending: false });
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
 
-    const { data: upcoming } = await supabase
+    const { data: upcoming, error: upcomingError } = await supabase
       .from("scheduled_workouts")
       .select("id, scheduled_for, status, enrollment_id, position")
       .in("status", ["planned", "in_progress"])
       .order("scheduled_for", { ascending: true })
       .limit(10);
+    if (upcomingError) {
+      return {
+        content: [
+          { type: "text", text: `Could not load upcoming sessions: ${upcomingError.message}` },
+        ],
+        isError: true,
+      };
+    }
 
     const payload = { enrollments: enrollments ?? [], upcoming: upcoming ?? [] };
     return {

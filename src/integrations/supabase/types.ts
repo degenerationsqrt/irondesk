@@ -1794,6 +1794,10 @@ export type Database = {
         Args: { _enrollment_id?: string }
         Returns: string
       }
+      patch_recovery_entry: {
+        Args: { _day: string; _patch: Json }
+        Returns: Json
+      }
       resume_program_enrollment: {
         Args: { _enrollment_id?: string }
         Returns: string

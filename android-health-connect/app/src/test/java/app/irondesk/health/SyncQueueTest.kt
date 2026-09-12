@@ -4,9 +4,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.IOException
 
 class SyncQueueTest {
 
@@ -43,13 +45,14 @@ class SyncQueueTest {
         assertEquals(0, q.size)
     }
 
-    @Test fun `cap drops the oldest batches`() {
+    @Test fun `full outbox refuses new batches without deleting unsent health data`() {
         val q = queue(max = 2)
         q.enqueue("{\"a\":1}", at = 1_000)
         q.enqueue("{\"a\":2}", at = 2_000)
-        q.enqueue("{\"a\":3}", at = 3_000)
+        assertThrows(IOException::class.java) { q.enqueue("{\"a\":3}", at = 3_000) }
         assertEquals(2, q.size)
-        assertEquals(listOf("{\"a\":2}", "{\"a\":3}"), q.entries().map { it.read() })
+        assertEquals(listOf("{\"a\":1}", "{\"a\":2}"), q.entries().map { it.read() })
+        assertFalse(q.enqueue("{\"a\":2}", at = 4_000))
     }
 
     @Test fun `clear empties the outbox`() {
@@ -84,5 +87,14 @@ class SyncQueueTest {
 
         assertEquals(1, q.size)
         assertNull(q.entries().single().read())
+    }
+
+    @Test fun `encryption failure is reported and never creates an outbox entry`() {
+        val q = SyncQueue(temp.newFolder(), codec = object : Codec {
+            override fun encode(plain: String): String? = null
+            override fun decode(blob: String): String? = null
+        })
+        assertThrows(IOException::class.java) { q.enqueue("health data") }
+        assertEquals(0, q.size)
     }
 }

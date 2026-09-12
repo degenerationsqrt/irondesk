@@ -181,9 +181,7 @@ class HealthRepository(context: Context) {
      */
     private suspend fun <T : Record> read(type: KClass<T>, from: Instant, to: Instant): List<T> {
         val session = client ?: return emptyList()
-        val all = mutableListOf<T>()
-        var pageToken: String? = null
-        do {
+        return readCompletePages(MAX_RECORDS_PER_TYPE) { pageToken ->
             val response = session.readRecords(
                 ReadRecordsRequest(
                     recordType = type,
@@ -192,10 +190,8 @@ class HealthRepository(context: Context) {
                     pageToken = pageToken,
                 ),
             )
-            all += response.records
-            pageToken = response.pageToken
-        } while (pageToken != null && all.size < MAX_RECORDS_PER_TYPE)
-        return all
+            RecordPage(response.records, response.pageToken)
+        }
     }
 
     /**

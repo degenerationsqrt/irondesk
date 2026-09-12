@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 
 import { AppShell } from "@/components/irondesk/app-shell";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth/auth-provider";
 import { accountQuery } from "@/lib/irondesk/queries";
 import { useWorkoutMutationQueue } from "@/lib/irondesk/use-workout-mutation-queue";
@@ -42,7 +43,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const isPublic = PUBLIC_PATHS.includes(pathname);
   const bare = BARE_PATHS.includes(pathname);
 
-  const { data: account, isPending: accountPending } = useQuery({
+  const {
+    data: account,
+    isPending: accountPending,
+    isError: accountFailed,
+    isFetching: accountFetching,
+    refetch: retryAccount,
+  } = useQuery({
     ...accountQuery,
     enabled: Boolean(user) && ready,
   });
@@ -83,6 +90,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (!user && !demo) return <Splash label="Redirecting to sign in…" />;
   if (user && accountPending && !hasLocalWorkoutTerminal)
     return <Splash label="Loading your athlete profile…" />;
+  if (user && !account && accountFailed && !hasLocalWorkoutTerminal)
+    return (
+      <div className="grid-fade flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-md space-y-4 text-center" role="alert">
+          <h1 className="text-xl font-semibold">Your athlete profile could not be loaded</h1>
+          <p className="text-sm text-muted-foreground">
+            Reconnect and try again to load your preferences and training data.
+          </p>
+          <Button disabled={accountFetching} onClick={() => void retryAccount()}>
+            {accountFetching ? "Loading…" : "Try again"}
+          </Button>
+        </div>
+      </div>
+    );
   if (user && needsOnboarding) return <Splash label="Opening setup…" />;
 
   return <AppShell>{children}</AppShell>;
