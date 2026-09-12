@@ -92,10 +92,10 @@
       {
         "name": "log_recovery",
         "title": "Log recovery entry",
-        "description": "Create or update the signed-in athlete's recovery entry for a day: sleep, resting HR, HRV, soreness, fatigue, stress and readiness.",
+        "description": "Create or update the signed-in athlete's recovery entry for a day: sleep, resting HR, HRV, fatigue, stress and readiness. Omitted fields keep existing real values; untouched sample values are discarded. An empty note clears the note.",
         "annotations": {
           "readOnlyHint": false,
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false
         },
@@ -104,35 +104,48 @@
           "properties": {
             "day": {
               "type": "string",
-              "description": "ISO date (YYYY-MM-DD). Defaults to today."
+              "description": "ISO date (YYYY-MM-DD). Defaults to today in your profile timezone."
             },
             "sleep_hours": {
               "type": "number",
-              "description": "Hours slept."
+              "minimum": 0,
+              "maximum": 24,
+              "description": "Hours slept, 0-24."
             },
             "resting_hr": {
               "type": "integer",
-              "description": "Resting heart rate in bpm."
+              "minimum": 25,
+              "maximum": 140,
+              "description": "Resting heart rate, 25-140 bpm."
             },
             "hrv_ms": {
               "type": "integer",
-              "description": "HRV in milliseconds."
+              "minimum": 5,
+              "maximum": 300,
+              "description": "HRV, 5-300 milliseconds."
             },
             "readiness": {
               "type": "integer",
-              "description": "Readiness score 0-100."
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Readiness score, 0-100."
             },
             "fatigue": {
               "type": "integer",
-              "description": "Fatigue rating 1-10."
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Fatigue rating, 1-10."
             },
             "stress": {
               "type": "integer",
-              "description": "Stress rating 1-10."
+              "minimum": 1,
+              "maximum": 10,
+              "description": "Stress rating, 1-10."
             },
             "note": {
               "type": "string",
-              "description": "Short free-text note."
+              "maxLength": 500,
+              "description": "Note, up to 500 characters."
             }
           },
           "additionalProperties": false,
@@ -155,23 +168,31 @@
           "properties": {
             "weight_kg": {
               "type": "number",
-              "description": "Body weight in kilograms."
+              "minimum": 20,
+              "maximum": 400,
+              "description": "Body weight, 20-400 kilograms."
             },
             "body_fat_percent": {
               "type": "number",
-              "description": "Body fat percentage."
+              "minimum": 2,
+              "maximum": 70,
+              "description": "Body fat, 2-70 percent."
             },
             "waist_cm": {
               "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 999.9,
               "description": "Waist measurement in centimeters."
             },
             "recorded_at": {
               "type": "string",
-              "description": "ISO timestamp. Defaults to now."
+              "format": "date-time",
+              "description": "ISO timestamp with a timezone (Z or an offset). Defaults to now."
             },
             "note": {
               "type": "string",
-              "description": "Short note."
+              "maxLength": 500,
+              "description": "Note, up to 500 characters."
             }
           },
           "additionalProperties": false,
