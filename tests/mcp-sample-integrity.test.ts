@@ -91,19 +91,12 @@ describe("MCP sample-data isolation", () => {
     profileQuery.select.mockReturnValue(profileQuery);
     profileQuery.eq.mockReturnValue(profileQuery);
 
-    const recoveryQuery = {
-      upsert: vi.fn(),
-      select: vi.fn(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: { id: "recovery-1", day: "2026-08-28" },
-        error: null,
-      }),
-    };
-    recoveryQuery.upsert.mockReturnValue(recoveryQuery);
-    recoveryQuery.select.mockReturnValue(recoveryQuery);
-
-    const from = vi.fn((table: string) => (table === "profiles" ? profileQuery : recoveryQuery));
-    mocks.supabaseForUser.mockReturnValue({ from });
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: "recovery-1", day: "2026-08-28" },
+      error: null,
+    });
+    const from = vi.fn(() => profileQuery);
+    mocks.supabaseForUser.mockReturnValue({ from, rpc });
 
     await logRecoveryTool.handler(
       {
@@ -120,15 +113,9 @@ describe("MCP sample-data isolation", () => {
     );
 
     expect(profileQuery.eq).toHaveBeenCalledWith("id", "user-1");
-    expect(recoveryQuery.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        user_id: "user-1",
-        day: "2026-08-28",
-        source: "manual",
-        is_sample: false,
-        sleep_hours: 7.5,
-      }),
-      { onConflict: "user_id,day" },
-    );
+    expect(rpc).toHaveBeenCalledWith("patch_recovery_entry", {
+      _day: "2026-08-28",
+      _patch: { sleep_hours: 7.5 },
+    });
   });
 });

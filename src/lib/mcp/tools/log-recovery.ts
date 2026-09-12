@@ -1,27 +1,19 @@
 import { defineTool } from "@lovable.dev/mcp-js";
-import { z } from "zod";
 
 import { dayKeyForInstant } from "../../irondesk/dates";
 import { supabaseForUser, unauthenticated } from "../supabase";
+import { invalidInput, recoveryInput } from "../validation";
 
 export default defineTool({
   name: "log_recovery",
   title: "Log recovery entry",
   description:
-    "Create or update the signed-in athlete's recovery entry for a day: sleep, resting HR, HRV, soreness, fatigue, stress and readiness.",
-  inputSchema: {
-    day: z.string().optional().describe("ISO date (YYYY-MM-DD). Defaults to today."),
-    sleep_hours: z.number().optional().describe("Hours slept."),
-    resting_hr: z.number().int().optional().describe("Resting heart rate in bpm."),
-    hrv_ms: z.number().int().optional().describe("HRV in milliseconds."),
-    readiness: z.number().int().optional().describe("Readiness score 0-100."),
-    fatigue: z.number().int().optional().describe("Fatigue rating 1-10."),
-    stress: z.number().int().optional().describe("Stress rating 1-10."),
-    note: z.string().optional().describe("Short free-text note."),
-  },
+    "Create or update the signed-in athlete's recovery entry for a day: sleep, resting HR, HRV, fatigue, stress and readiness. Omitted fields keep existing real values; untouched sample values are discarded. An empty note clears the note.",
+  inputSchema: recoveryInput.shape,
   annotations: {
     readOnlyHint: false,
-    destructiveHint: false,
+    // Existing measurements and notes can be replaced by this update.
+    destructiveHint: true,
     idempotentHint: true,
     openWorldHint: false,
   },
@@ -29,9 +21,21 @@ export default defineTool({
     if (!ctx.isAuthenticated()) return unauthenticated();
     const userId = ctx.getUserId();
     if (!userId) return unauthenticated();
+    const parsed = recoveryInput.safeParse(input);
+    if (!parsed.success) return invalidInput(parsed.error);
+    const { day: requestedDay, note, ...measurements } = parsed.data;
+    const providedMeasurements = Object.fromEntries(
+      Object.entries(measurements).filter(([, value]) => value !== undefined),
+    );
+    if (Object.keys(providedMeasurements).length === 0 && note === undefined) {
+      return {
+        content: [{ type: "text", text: "Provide at least one recovery measurement or note." }],
+        isError: true,
+      };
+    }
     const supabase = supabaseForUser(ctx);
 
-    let day = input.day?.slice(0, 10);
+    let day = requestedDay;
     if (!day) {
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
@@ -42,30 +46,17 @@ export default defineTool({
         return { content: [{ type: "text", text: profileError.message }], isError: true };
       day = dayKeyForInstant(new Date(), profile?.timezone);
     }
-    const clamp = (v: number | undefined, min: number, max: number) =>
-      v === undefined ? undefined : Math.min(Math.max(v, min), max);
-
-    const row = {
-      user_id: userId,
-      day,
-      // MCP entry is still a user-directed manual check-in. `mcp` is not a
-      // permitted recovery_entries.source value in the checked-in schema.
-      source: "manual",
-      is_sample: false,
-      sleep_hours: input.sleep_hours,
-      resting_hr: clamp(input.resting_hr, 20, 220),
-      hrv_ms: clamp(input.hrv_ms, 1, 400),
-      readiness: clamp(input.readiness, 0, 100),
-      fatigue: clamp(input.fatigue, 1, 10),
-      stress: clamp(input.stress, 1, 10),
-      note: input.note?.trim().slice(0, 500) || null,
+    const patch = {
+      ...providedMeasurements,
+      ...(note !== undefined ? { note: note || null } : {}),
     };
 
-    const { data, error } = await supabase
-      .from("recovery_entries")
-      .upsert(row, { onConflict: "user_id,day" })
-      .select("id, day, sleep_hours, resting_hr, hrv_ms, readiness, fatigue, stress, note")
-      .maybeSingle();
+    // The database merges under its row lock and resets untouched sample data
+    // when a demonstration entry is replaced with the athlete's first check-in.
+    const { data, error } = await supabase.rpc("patch_recovery_entry", {
+      _day: day,
+      _patch: patch,
+    });
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     return {
       content: [{ type: "text", text: JSON.stringify(data, null, 2) }],

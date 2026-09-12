@@ -15,7 +15,10 @@ import {
 import type { ProgramEnrollment } from "../src/lib/irondesk/types";
 
 const read = (name: string) =>
-  JSON.parse(readFileSync(`content/workouts/legacy-beta/${name}`, "utf8")) as Record<string, unknown>;
+  JSON.parse(readFileSync(`content/workouts/legacy-beta/${name}`, "utf8")) as Record<
+    string,
+    unknown
+  >;
 
 const templates = read("workout-templates.json").templates as {
   sourceKey: string;
@@ -63,10 +66,17 @@ describe("legacy-beta content contract", () => {
 
 describe("release gating", () => {
   it("keeps non-public programs behind an acknowledgment", () => {
-    expect(requiresAcknowledgment({ releaseGate: "public", requiresAcknowledgment: false })).toBe(false);
-    expect(requiresAcknowledgment({ releaseGate: "coach_review", requiresAcknowledgment: false })).toBe(true);
+    expect(requiresAcknowledgment({ releaseGate: "public", requiresAcknowledgment: false })).toBe(
+      false,
+    );
     expect(
-      requiresAcknowledgment({ releaseGate: "blocked_pending_source_review", requiresAcknowledgment: false }),
+      requiresAcknowledgment({ releaseGate: "coach_review", requiresAcknowledgment: false }),
+    ).toBe(true);
+    expect(
+      requiresAcknowledgment({
+        releaseGate: "blocked_pending_source_review",
+        requiresAcknowledgment: false,
+      }),
     ).toBe(true);
   });
 
@@ -124,9 +134,30 @@ function enrollment(overrides: Partial<ProgramEnrollment> = {}): ProgramEnrollme
       slots,
     },
     schedule: [
-      { id: "s1", sequenceIndex: 1, position: 1, status: "completed", scheduledFor: null, sessionId: "sess-1" },
-      { id: "s2", sequenceIndex: 2, position: 2, status: "planned", scheduledFor: null, sessionId: null },
-      { id: "s3", sequenceIndex: 3, position: 3, status: "planned", scheduledFor: null, sessionId: null },
+      {
+        id: "s1",
+        sequenceIndex: 1,
+        position: 1,
+        status: "completed",
+        scheduledFor: null,
+        sessionId: "sess-1",
+      },
+      {
+        id: "s2",
+        sequenceIndex: 2,
+        position: 2,
+        status: "planned",
+        scheduledFor: null,
+        sessionId: null,
+      },
+      {
+        id: "s3",
+        sequenceIndex: 3,
+        position: 3,
+        status: "planned",
+        scheduledFor: null,
+        sessionId: null,
+      },
     ],
     ...overrides,
   };
@@ -152,6 +183,27 @@ describe("schedule state", () => {
     expect(slotState(2, e, 3)).toBe("in_progress");
   });
 
+  it.each(["cancelled", "expired"] as const)(
+    "preserves %s work instead of claiming completion or readiness to start",
+    (status) => {
+      const e = enrollment();
+      e.schedule[0]!.status = status;
+      e.schedule[1]!.status = status;
+      expect(slotState(1, e, 3)).toBe(status);
+      expect(slotState(2, e, 3)).toBe(status);
+      expect(programProgress(e).completed).toBe(0);
+    },
+  );
+
+  it("does not invent completion for earlier planned or missing schedule rows", () => {
+    const e = enrollment();
+    e.schedule[0]!.status = "planned";
+    expect(slotState(1, e, 3)).toBe("unrecorded");
+    e.schedule.shift();
+    expect(slotState(1, e, 3)).toBe("unrecorded");
+    expect(programProgress(e).completed).toBe(0);
+  });
+
   it("computes cycle progress from completed plus skipped work", () => {
     const e = enrollment();
     expect(programProgress(e)).toEqual({ slotCount: 3, completed: 1, skipped: 0, percent: 33 });
@@ -164,10 +216,38 @@ describe("schedule state", () => {
       currentCycle: 2,
       currentPosition: 1,
       schedule: [
-        { id: "s1", sequenceIndex: 1, position: 1, status: "completed", scheduledFor: null, sessionId: "a" },
-        { id: "s2", sequenceIndex: 2, position: 2, status: "completed", scheduledFor: null, sessionId: "b" },
-        { id: "s3", sequenceIndex: 3, position: 3, status: "completed", scheduledFor: null, sessionId: "c" },
-        { id: "s4", sequenceIndex: 4, position: 1, status: "planned", scheduledFor: null, sessionId: null },
+        {
+          id: "s1",
+          sequenceIndex: 1,
+          position: 1,
+          status: "completed",
+          scheduledFor: null,
+          sessionId: "a",
+        },
+        {
+          id: "s2",
+          sequenceIndex: 2,
+          position: 2,
+          status: "completed",
+          scheduledFor: null,
+          sessionId: "b",
+        },
+        {
+          id: "s3",
+          sequenceIndex: 3,
+          position: 3,
+          status: "completed",
+          scheduledFor: null,
+          sessionId: "c",
+        },
+        {
+          id: "s4",
+          sequenceIndex: 4,
+          position: 1,
+          status: "planned",
+          scheduledFor: null,
+          sessionId: null,
+        },
       ],
     });
     expect(programProgress(e)).toEqual({ slotCount: 3, completed: 0, skipped: 0, percent: 0 });

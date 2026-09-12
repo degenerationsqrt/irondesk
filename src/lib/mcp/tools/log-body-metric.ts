@@ -1,29 +1,40 @@
 import { defineTool } from "@lovable.dev/mcp-js";
-import { z } from "zod";
 
 import { supabaseForUser, unauthenticated } from "../supabase";
+import { bodyMetricInput, invalidInput } from "../validation";
 
 export default defineTool({
   name: "log_body_metric",
   title: "Log body metric",
   description:
     "Record a body measurement (weight in kg, body-fat percent, waist in cm) for the signed-in athlete.",
-  inputSchema: {
-    weight_kg: z.number().optional().describe("Body weight in kilograms."),
-    body_fat_percent: z.number().optional().describe("Body fat percentage."),
-    waist_cm: z.number().optional().describe("Waist measurement in centimeters."),
-    recorded_at: z.string().optional().describe("ISO timestamp. Defaults to now."),
-    note: z.string().optional().describe("Short note."),
-  },
+  inputSchema: bodyMetricInput.shape,
   // Each call appends a new measurement row, so it is explicitly non-idempotent.
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
   handler: async (input, ctx) => {
     if (!ctx.isAuthenticated()) return unauthenticated();
     const userId = ctx.getUserId();
     if (!userId) return unauthenticated();
-    if (input.weight_kg === undefined && input.body_fat_percent === undefined && input.waist_cm === undefined) {
+    const parsed = bodyMetricInput.safeParse(input);
+    if (!parsed.success) return invalidInput(parsed.error);
+    const measurement = parsed.data;
+    if (
+      measurement.weight_kg === undefined &&
+      measurement.body_fat_percent === undefined &&
+      measurement.waist_cm === undefined
+    ) {
       return {
-        content: [{ type: "text", text: "Provide at least one of weight_kg, body_fat_percent or waist_cm." }],
+        content: [
+          {
+            type: "text",
+            text: "Provide at least one of weight_kg, body_fat_percent or waist_cm.",
+          },
+        ],
         isError: true,
       };
     }
@@ -32,11 +43,11 @@ export default defineTool({
       .from("body_metrics")
       .insert({
         user_id: userId,
-        weight_kg: input.weight_kg,
-        body_fat_percent: input.body_fat_percent,
-        waist_cm: input.waist_cm,
-        recorded_at: input.recorded_at ?? new Date().toISOString(),
-        note: input.note?.trim().slice(0, 500) || null,
+        weight_kg: measurement.weight_kg ?? null,
+        body_fat_percent: measurement.body_fat_percent ?? null,
+        waist_cm: measurement.waist_cm ?? null,
+        recorded_at: measurement.recorded_at ?? new Date().toISOString(),
+        note: measurement.note || null,
       })
       .select("id, recorded_at, weight_kg, body_fat_percent, waist_cm, note")
       .maybeSingle();

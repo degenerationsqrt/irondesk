@@ -143,12 +143,8 @@ class SyncClient(private val baseUrl: String = BuildConfig.IRONDESK_BASE_URL) {
         return execute(request)
     }
 
-    private fun execute(request: Request): JSONObject {
-        val response = try {
-            http.newCall(request).execute()
-        } catch (io: IOException) {
-            throw TransientException("No connection to IronDesk (${io.message ?: "network error"}).")
-        }
+    private fun execute(request: Request): JSONObject = try {
+        val response = http.newCall(request).execute()
 
         response.use {
             val text = it.body?.string().orEmpty()
@@ -165,10 +161,14 @@ class SyncClient(private val baseUrl: String = BuildConfig.IRONDESK_BASE_URL) {
                     else -> throw SyncException(detail ?: "IronDesk returned HTTP ${it.code}.")
                 }
             }
-            return runCatching { JSONObject(text) }.getOrElse {
+            runCatching { JSONObject(text) }.getOrElse {
                 throw TransientException("IronDesk returned an unreadable response. Please retry.")
             }
         }
+    } catch (io: IOException) {
+        // A connection can also fail while reading the response body after the
+        // server accepted the batch. Keep that payload for an idempotent retry.
+        throw TransientException("No connection to IronDesk (${io.message ?: "network error"}).")
     }
 
     private companion object {

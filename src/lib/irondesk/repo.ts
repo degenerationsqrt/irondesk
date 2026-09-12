@@ -300,6 +300,8 @@ export async function getAccount(retry = true): Promise<AccountContext> {
     supabase.from("user_equipment").select("equipment_id"),
   ]);
   if (profileRes.error) throw asIronDeskError(new Error(profileRes.error.message));
+  if (prefsRes.error) throw asIronDeskError(new Error(prefsRes.error.message));
+  if (equipRes.error) throw asIronDeskError(new Error(equipRes.error.message));
   // Idempotent bootstrap: a fresh auth user has no profile/preferences rows yet.
   if (!profileRes.data && retry) {
     const { data: user } = await supabase.auth.getUser();
@@ -565,6 +567,7 @@ export async function getNutrition(day?: string): Promise<NutritionDay | null> {
     .select("*")
     .eq("nutrition_day_id", row.id)
     .order("created_at");
+  if (mealsRes.error) throw asIronDeskError(new Error(mealsRes.error.message));
   return buildNutrition(row, (mealsRes.data ?? []) as MealRow[], account.preferences);
 }
 
@@ -578,6 +581,7 @@ export async function ensureNutritionDay(day?: string): Promise<string> {
     .select("id, is_sample")
     .eq("day", effectiveDay)
     .maybeSingle();
+  if (existing.error) throw asIronDeskError(new Error(existing.error.message));
   if (existing.data?.id && existing.data.is_sample) {
     throw new IronDeskError(
       "Sample nutrition occupies today. Remove sample data in Settings before logging real meals.",
@@ -619,7 +623,16 @@ export async function addMeal(input: {
     items: input.items ?? [],
   });
   if (ins.error) throw asIronDeskError(new Error(ins.error.message));
-  await recalcNutritionTotals(dayId);
+  try {
+    await recalcNutritionTotals(dayId);
+  } catch (cause) {
+    const failure = asIronDeskError(cause);
+    throw new IronDeskError(
+      `The meal was saved, but daily totals could not be refreshed. Review your meals before adding it again. ${failure.message}`,
+      failure.code,
+      failure.diagnostic,
+    );
+  }
 }
 
 export async function setHydration(ml: number): Promise<void> {
@@ -636,10 +649,11 @@ async function recalcNutritionTotals(dayId: string): Promise<void> {
     .from("meals")
     .select("calories, protein_g, carbs_g, fat_g")
     .eq("nutrition_day_id", dayId);
+  if (meals.error) throw asIronDeskError(new Error(meals.error.message));
   const rows = meals.data ?? [];
   const sum = (key: "calories" | "protein_g" | "carbs_g" | "fat_g") =>
     rows.reduce((s, m) => s + (m[key] ?? 0), 0);
-  await supabase
+  const { error } = await supabase
     .from("nutrition_days")
     .update({
       calories: sum("calories"),
@@ -648,6 +662,7 @@ async function recalcNutritionTotals(dayId: string): Promise<void> {
       fat_g: sum("fat_g"),
     })
     .eq("id", dayId);
+  if (error) throw asIronDeskError(new Error(error.message));
 }
 
 // ------------------------------------------------------------------ recovery
@@ -807,6 +822,8 @@ export async function getExercises(): Promise<Exercise[]> {
     supabase.from("exercise_favorites").select("exercise_id"),
     loadExerciseHistory(),
   ]);
+  if (libRes.error) throw asIronDeskError(new Error(libRes.error.message));
+  if (favRes.error) throw asIronDeskError(new Error(favRes.error.message));
   const favorites = new Set((favRes.data ?? []).map((f) => f.exercise_id));
   return (libRes.data ?? []).map((row) =>
     buildExercise(row, favorites.has(row.id), history.get(row.id) ?? []),
@@ -820,6 +837,7 @@ export async function getExercise(id: string): Promise<Exercise | null> {
     loadExerciseHistory(),
   ]);
   if (rowRes.error) throw asIronDeskError(new Error(rowRes.error.message));
+  if (favRes.error) throw asIronDeskError(new Error(favRes.error.message));
   if (!rowRes.data) return null;
   return buildExercise(rowRes.data as ExerciseRow, !!favRes.data, history.get(id) ?? []);
 }
@@ -2597,6 +2615,7 @@ export async function getProgressionContext(): Promise<ProgressionContext> {
       .maybeSingle(),
   ]);
   if (setsRes.error) throw asIronDeskError(new Error(setsRes.error.message));
+  if (recoveryRes.error) throw asIronDeskError(new Error(recoveryRes.error.message));
 
   const performance: PerformanceMap = {};
   const directSets: DirectSetRecord[] = [];

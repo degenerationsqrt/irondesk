@@ -114,14 +114,27 @@ function metricRecord(
 function derivedAdmin(options?: {
   existingRecovery?: Array<{ id: string; day: string; source: string }>;
   existingWeights?: Array<{ id: string; recorded_at: string }>;
+  recoveryReadError?: { code: string };
+  weightReadError?: { code: string };
+  recoveryWriteError?: { code: string };
+  recoveryUpdated?: boolean;
 }) {
-  const recoveryUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }));
-  const recoveryInsert = vi.fn(async () => ({ error: null }));
+  const updateSelect = vi.fn(async () => ({
+    data: options?.recoveryUpdated === false ? [] : [{ id: "recovery-1" }],
+    error: options?.recoveryWriteError ?? null,
+  }));
+  const updateFilter = { eq: vi.fn(), select: updateSelect };
+  updateFilter.eq.mockReturnValue(updateFilter);
+  const recoveryUpdate = vi.fn(() => updateFilter);
+  const recoveryInsert = vi.fn(async () => ({ error: options?.recoveryWriteError ?? null }));
   const bodyInsertSelect = vi.fn(async () => ({ data: [{ id: "inserted" }], error: null }));
   const bodyInsert = vi.fn(() => ({ select: bodyInsertSelect }));
   const bodyGte = vi.fn(() => ({
     lte: vi.fn(() => ({
-      order: vi.fn(async () => ({ data: options?.existingWeights ?? [], error: null })),
+      order: vi.fn(async () => ({
+        data: options?.existingWeights ?? [],
+        error: options?.weightReadError ?? null,
+      })),
     })),
   }));
   const from = vi.fn((table: string) => {
@@ -130,7 +143,10 @@ function derivedAdmin(options?: {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
             gte: vi.fn(() => ({
-              lte: vi.fn(async () => ({ data: options?.existingRecovery ?? [], error: null })),
+              lte: vi.fn(async () => ({
+                data: options?.existingRecovery ?? [],
+                error: options?.recoveryReadError ?? null,
+              })),
             })),
           })),
         })),
@@ -151,6 +167,8 @@ function derivedAdmin(options?: {
     bodyGte,
     bodyInsert,
     recoveryUpdate,
+    recoveryInsert,
+    updateFilter,
   };
 }
 
@@ -384,6 +402,53 @@ describe("device sync payload", () => {
 });
 
 describe("device-derived rows", () => {
+  const restingHr = metricRecord("resting_hr", 52, "2026-05-01T15:00:00Z", "UTC", "bpm");
+
+  it("fails closed when existing recovery cannot be checked", async () => {
+    const { admin, recoveryInsert, recoveryUpdate } = derivedAdmin({
+      recoveryReadError: { code: "08006" },
+    });
+    await expect(applyDerivedRows(admin as never, "user-1", [restingHr])).rejects.toThrow(
+      "could not be checked",
+    );
+    expect(recoveryInsert).not.toHaveBeenCalled();
+    expect(recoveryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not count a wearable row that became manual before the write", async () => {
+    const { admin, updateFilter } = derivedAdmin({
+      existingRecovery: [{ id: "recovery-1", day: "2026-05-01", source: "wearable" }],
+      recoveryUpdated: false,
+    });
+    const result = await applyDerivedRows(admin as never, "user-1", [restingHr]);
+    expect(updateFilter.eq.mock.calls).toEqual([
+      ["id", "recovery-1"],
+      ["user_id", "user-1"],
+      ["source", "wearable"],
+    ]);
+    expect(result.recoveryDays).toBe(0);
+  });
+
+  it("reports failed recovery writes and allows a concurrent unique-day winner", async () => {
+    const failed = derivedAdmin({ recoveryWriteError: { code: "08006" } });
+    await expect(applyDerivedRows(failed.admin as never, "user-1", [restingHr])).rejects.toThrow(
+      "could not be written",
+    );
+    const concurrent = derivedAdmin({ recoveryWriteError: { code: "23505" } });
+    expect(
+      (await applyDerivedRows(concurrent.admin as never, "user-1", [restingHr])).recoveryDays,
+    ).toBe(0);
+  });
+
+  it("does not insert bodyweight when the deduplication lookup fails", async () => {
+    const { admin, bodyInsert } = derivedAdmin({ weightReadError: { code: "08006" } });
+    const weight = metricRecord("bodyweight_kg", 82, "2026-05-01T15:00:00Z", "UTC", "kg");
+    await expect(applyDerivedRows(admin as never, "user-1", [weight])).rejects.toThrow(
+      "could not be checked",
+    );
+    expect(bodyInsert).not.toHaveBeenCalled();
+  });
+
   it("updates an existing wearable recovery row with only fields present in the new sync", async () => {
     const { admin, recoveryUpdate } = derivedAdmin({
       existingRecovery: [{ id: "recovery-1", day: "2026-05-01", source: "wearable" }],

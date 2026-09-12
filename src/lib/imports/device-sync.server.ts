@@ -324,7 +324,7 @@ export async function ingestForDevice(
 
     const derived = await applyDerivedRows(admin, device.userId, records);
 
-    await admin
+    const { error: completionError } = await admin
       .from("import_jobs")
       .update({
         status: "completed",
@@ -333,6 +333,7 @@ export async function ingestForDevice(
         duplicate_count: Math.max(0, hashed.length - imported),
       })
       .eq("id", jobId);
+    if (completionError) throw new Error("The sync result could not be saved. Please retry.");
 
     const summary = {
       jobId,
@@ -500,12 +501,13 @@ export async function applyDerivedRows(
   const from = dayKeys[0]!;
   const to = dayKeys[dayKeys.length - 1]!;
 
-  const { data: existingRecovery } = await admin
+  const { data: existingRecovery, error: recoveryReadError } = await admin
     .from("recovery_entries")
     .select("id, day, source")
     .eq("user_id", userId)
     .gte("day", from)
     .lte("day", to);
+  if (recoveryReadError) throw new Error("Existing recovery entries could not be checked.");
   const recoveryByDay = new Map((existingRecovery ?? []).map((row) => [row.day, row]));
 
   let recoveryDays = 0;
@@ -518,12 +520,23 @@ export async function applyDerivedRows(
       const { error } = await admin
         .from("recovery_entries")
         .insert({ user_id: userId, day, source: "wearable", ...patch });
+      // A concurrent manual entry wins the unique user/day constraint.
+      if (error && error.code !== "23505")
+        throw new Error("Recovery entries could not be written.");
       if (!error) recoveryDays += 1;
       continue;
     }
     if (existing.source === "manual") continue; // never overwrite a hand-logged day
-    const { error } = await admin.from("recovery_entries").update(patch).eq("id", existing.id);
-    if (!error) recoveryDays += 1;
+    const { data, error } = await admin
+      .from("recovery_entries")
+      .update(patch)
+      .eq("id", existing.id)
+      .eq("user_id", userId)
+      // Recheck at write time: the athlete may have edited this day since the read.
+      .eq("source", existing.source)
+      .select("id");
+    if (error) throw new Error("Recovery entries could not be updated.");
+    recoveryDays += data?.length ?? 0;
   }
 
   const weightDays = [...days.entries()].filter(
@@ -536,13 +549,14 @@ export async function applyDerivedRows(
     // the same local-day bucketing as the incoming records.
     const searchFrom = `${shiftUtcDay(from, -1)}T00:00:00.000Z`;
     const searchTo = `${shiftUtcDay(to, 1)}T23:59:59.999Z`;
-    const { data: existingWeights } = await admin
+    const { data: existingWeights, error: weightsReadError } = await admin
       .from("body_metrics")
       .select("id, recorded_at")
       .eq("user_id", userId)
       .gte("recorded_at", searchFrom)
       .lte("recorded_at", searchTo)
       .order("recorded_at", { ascending: true });
+    if (weightsReadError) throw new Error("Existing bodyweight entries could not be checked.");
     // A travel sync can contain readings from more than one timezone. Evaluate
     // each stored instant against every requested local day+zone pair instead
     // of applying one batch-wide zone to all days.
@@ -565,7 +579,8 @@ export async function applyDerivedRows(
       }));
     if (inserts.length) {
       const { data, error } = await admin.from("body_metrics").insert(inserts).select("id");
-      if (!error) bodyweightDays = data?.length ?? 0;
+      if (error) throw new Error("Bodyweight entries could not be written.");
+      bodyweightDays = data?.length ?? 0;
     }
   }
 

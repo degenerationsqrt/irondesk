@@ -320,12 +320,15 @@ export function ImportCard({
       });
       setJob(created);
       setStage("done");
-      for (const key of Object.values(importKeys))
-        void queryClient.invalidateQueries({ queryKey: key });
-      void queryClient.invalidateQueries({ queryKey: ["irondesk"] });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The import failed.");
       setStage("preview");
+    } finally {
+      // Failed requests can leave acknowledged chunks attached to the job.
+      // Refresh audit history and totals so partial batches can be reviewed.
+      for (const key of Object.values(importKeys))
+        void queryClient.invalidateQueries({ queryKey: key });
+      void queryClient.invalidateQueries({ queryKey: ["irondesk"] });
     }
   }, [loaded, queryClient, result, sourceType]);
 

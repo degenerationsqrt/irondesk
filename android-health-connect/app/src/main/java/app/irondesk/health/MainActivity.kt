@@ -163,6 +163,7 @@ private fun CompanionApp() {
     fun prepare() {
         scope.launch {
             busy = true; error = null; status = null
+            payload = null; snapshot = null; summary = null
             try {
                 val zone = ZoneId.systemDefault()
                 val effectiveDays = range.effectiveDays(historyGranted)
@@ -221,7 +222,9 @@ private fun CompanionApp() {
                         runCatching { client.sync(token, queuedBody) }
                             .onSuccess { queue.remove(entry); replayed++ }
                             .onFailure { failure ->
-                                if (failure is SyncClient.SyncException) queue.remove(entry) else throw failure
+                                if (failure is SyncClient.SyncException && failure !is SyncClient.RevokedException) {
+                                    queue.remove(entry)
+                                } else throw failure
                             }
                     }
                 }
@@ -230,9 +233,13 @@ private fun CompanionApp() {
                 queued = queue.size
                 status = "Synced ${result.describe()}" + if (replayed > 0) " Also sent $replayed queued batch(es)." else ""
             } catch (transient: SyncClient.TransientException) {
-                withContext(Dispatchers.IO) { queue.enqueue(body) }
+                val retained = runCatching { withContext(Dispatchers.IO) { queue.enqueue(body) } }
                 queued = queue.size
-                error = "${transient.message} Kept this batch in the outbox — press Sync Now again when you're online."
+                error = if (retained.isSuccess) {
+                    "${transient.message} Kept this batch in the outbox — press Sync Now again when you're online."
+                } else {
+                    "${transient.message} ${retained.exceptionOrNull()?.message} This batch is still in the preview; retry Sync Now before closing the app."
+                }
             } catch (t: Throwable) {
                 error = t.message ?: "The sync failed."
             } finally {
@@ -430,7 +437,7 @@ private fun CompanionApp() {
                         IronDesk.Muted
                     },
                 )
-                RecordToggles(selection) { selection = it; payload = null; snapshot = null }
+                RecordToggles(selection, enabled = !busy) { selection = it; payload = null; snapshot = null; summary = null }
                 if (missingSelectedLabels.isNotEmpty()) {
                     Text(
                         "Still needed: ${missingSelectedLabels.joinToString()}.",
@@ -478,7 +485,8 @@ private fun CompanionApp() {
                     RangeOption.entries.forEach { option ->
                         FilterChip(
                             selected = range == option,
-                            onClick = { range = option; payload = null; snapshot = null },
+                            onClick = { range = option; payload = null; snapshot = null; summary = null },
+                            enabled = !busy,
                             label = { Text(option.label) },
                             modifier = Modifier.semantics { contentDescription = "Read the last ${option.days} days" },
                         )
@@ -760,7 +768,7 @@ private fun LinkedDeviceCard(
 }
 
 @Composable
-private fun RecordToggles(selection: Selection, onChange: (Selection) -> Unit) {
+private fun RecordToggles(selection: Selection, enabled: Boolean, onChange: (Selection) -> Unit) {
     val rows = listOf<Triple<String, Boolean, (Boolean) -> Selection>>(
         Triple("Steps", selection.steps) { selection.copy(steps = it) },
         Triple("Sleep", selection.sleep) { selection.copy(sleep = it) },
@@ -776,6 +784,7 @@ private fun RecordToggles(selection: Selection, onChange: (Selection) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(
                     checked = checked,
+                    enabled = enabled,
                     onCheckedChange = { onChange(apply(it)) },
                     modifier = Modifier.semantics { contentDescription = "Include $label" },
                 )

@@ -2,7 +2,13 @@
  * Pure program-delivery rules. Kept free of React and Supabase so the gating
  * and progress maths can be unit-tested and reused by any client.
  */
-import type { Program, ProgramEnrollment, ReleaseGate, ScheduledStatus, WorkoutTemplate } from "./types";
+import type {
+  Program,
+  ProgramEnrollment,
+  ReleaseGate,
+  ScheduledStatus,
+  WorkoutTemplate,
+} from "./types";
 
 export const RELEASE_GATE_LABEL: Record<ReleaseGate, string> = {
   public: "Approved",
@@ -12,7 +18,9 @@ export const RELEASE_GATE_LABEL: Record<ReleaseGate, string> = {
 };
 
 /** Any gate other than `public` requires an explicit warning acknowledgment. */
-export function requiresAcknowledgment(program: Pick<Program, "releaseGate" | "requiresAcknowledgment">): boolean {
+export function requiresAcknowledgment(
+  program: Pick<Program, "releaseGate" | "requiresAcknowledgment">,
+): boolean {
   return program.requiresAcknowledgment || program.releaseGate !== "public";
 }
 
@@ -20,25 +28,39 @@ export function requiresAcknowledgment(program: Pick<Program, "releaseGate" | "r
  * A template is startable as ordinary free training only when the source
  * released it publicly. Legacy Beta prescriptions stay assignment-only.
  */
-export function isFreeStartable(template: Pick<WorkoutTemplate, "libraryStartable" | "releaseGate">): boolean {
+export function isFreeStartable(
+  template: Pick<WorkoutTemplate, "libraryStartable" | "releaseGate">,
+): boolean {
   if (template.libraryStartable === false) return false;
   return (template.releaseGate ?? "public") === "public";
 }
 
-export type SlotState = "completed" | "current" | "in_progress" | "skipped" | "upcoming";
+export type SlotState =
+  | "completed"
+  | "current"
+  | "in_progress"
+  | "skipped"
+  | "cancelled"
+  | "expired"
+  | "unrecorded"
+  | "upcoming";
 
 export const SLOT_STATE_LABEL: Record<SlotState, string> = {
   completed: "Completed",
   current: "Current",
   in_progress: "In progress",
   skipped: "Skipped",
+  cancelled: "Cancelled",
+  expired: "Expired",
+  unrecorded: "No completion recorded",
   upcoming: "Upcoming",
 };
 
 /**
  * Resolves the display state of one ordered slot for the enrollment's current
- * cycle. Positions before the cursor are done (or skipped), the cursor itself
- * is current unless a session is already running against it.
+ * cycle. Completion requires a recorded completed status; advancing the cursor
+ * is not evidence that earlier work was performed. Explicit cancelled/expired
+ * statuses remain visible, including on the current slot.
  */
 export function slotState(
   position: number,
@@ -51,8 +73,10 @@ export function slotState(
   if (status === "completed") return "completed";
   if (status === "skipped") return "skipped";
   if (status === "in_progress") return "in_progress";
+  if (status === "cancelled") return "cancelled";
+  if (status === "expired") return "expired";
   if (position === enrollment.currentPosition) return "current";
-  return position < enrollment.currentPosition ? "completed" : "upcoming";
+  return position < enrollment.currentPosition ? "unrecorded" : "upcoming";
 }
 
 export interface ProgramProgress {

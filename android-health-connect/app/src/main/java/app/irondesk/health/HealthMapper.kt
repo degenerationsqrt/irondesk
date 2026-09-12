@@ -9,10 +9,9 @@ import java.time.ZoneId
  * Turns Health Connect records into the wire model.
  *
  * Steps come pre-aggregated per calendar day (see [StepAggregator]); everything
- * else is one record per source record with a deterministic `hc:` id. Exercise
- * sessions are enriched with the distance and active calories that fall inside
- * the session window, which is the only enrichment possible without asking for
- * broader permissions.
+ * else is one record per source record with a deterministic `hc:` id. Independent
+ * distance/calorie intervals are retained as metrics, never attributed to an
+ * exercise merely because their end timestamp falls inside its session window.
  */
 object HealthMapper {
 
@@ -51,9 +50,9 @@ object HealthMapper {
                 name = session.title ?: type.replace('_', ' '),
                 startTime = session.startTime.toString(),
                 durationSec = Duration.between(session.startTime, session.endTime).seconds,
-                distanceM = sumWithin(session.startTime, session.endTime, snapshot.distance.map { it.endTime to it.distance.inMeters }),
-                calories = sumWithin(session.startTime, session.endTime, snapshot.activeCalories.map { it.endTime to it.energy.inKilocalories })
-                    ?.let { kotlin.math.round(it) },
+                // Health Connect does not link these raw intervals to this workout.
+                // A daily interval can end during a short workout, and overlapping
+                // providers can double count. Preserve missing workout totals as null.
                 notes = session.notes,
                 timezone = (session.startZoneOffset?.id ?: zone.id),
                 source = provenance(session.metadata),
@@ -89,8 +88,4 @@ object HealthMapper {
         recordingMethod = ExerciseTypes.recordingMethod(metadata.recordingMethod),
     )
 
-    private fun sumWithin(from: Instant, to: Instant, points: List<Pair<Instant, Double>>): Double? {
-        val inside = points.filter { !it.first.isBefore(from) && !it.first.isAfter(to) }
-        return if (inside.isEmpty()) null else inside.sumOf { it.second }
-    }
 }

@@ -120,16 +120,23 @@ brief:
 ## Notable data behavior
 
 - Steps use Health Connect daily aggregation instead of summing overlapping raw writers.
-- All pages are read, with a defensive cap of 20,000 records per type per sync.
+- All pages must finish within a defensive cap of 20,000 records per type per sync.
+  If the cap or a repeated continuation token prevents a complete read, the preview fails and
+  asks for a shorter range; a partial range is never presented as complete.
 - Exercise types use official `ExerciseSessionRecord.EXERCISE_TYPE_*` constants.
 - Source package, device manufacturer/model, recording method, and timezone are retained when
   Health Connect supplies them.
-- Exercise sessions can be enriched with selected distance and active-calorie records inside the
-  session window.
+- Distance and active-calorie records remain independent metrics. Exercise-session totals stay
+  absent because a raw record's end timestamp does not establish workout attribution or remove
+  overlap between providers.
 - Re-syncing an overlapping range is safe because external IDs are deterministic and the server
   deduplicates them.
 - Sleep, HRV, resting heart rate, and weight fill missing IronDesk days only. The server protects
   manual entries.
+- Failed network uploads retain the prepared batch in an encrypted outbox (up to five batches).
+  A full outbox preserves existing unsent batches and reports that the current preview could not
+  be queued. Encryption or storage failures are also reported, and revoked credentials do not
+  discard queued health data. No retry runs in the background.
 
 ## Project map
 

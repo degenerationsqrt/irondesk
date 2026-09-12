@@ -1,6 +1,7 @@
 package app.irondesk.health
 
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Locale
 
@@ -27,7 +28,10 @@ class SyncQueue(
     private val codec: Codec = PlainCodec,
 ) {
 
-    init { dir.mkdirs() }
+    init {
+        require(maxEntries > 0) { "The outbox must hold at least one batch." }
+        dir.mkdirs()
+    }
 
     inner class Entry(val file: File, val queuedAt: Long) {
         /** Null when the stored blob is corrupt or its key was invalidated. */
@@ -37,9 +41,19 @@ class SyncQueue(
     fun enqueue(payload: String, at: Long = System.currentTimeMillis()): Boolean {
         val digest = sha256(payload)
         if (entries().any { it.file.name.endsWith("-$digest.json") }) return false
-        val blob = codec.encode(payload) ?: return false
-        File(dir, "$at-$digest.json").writeText(blob)
-        trim()
+        if (size >= maxEntries) throw IOException("The outbox is full. Existing batches were kept.")
+        val blob = codec.encode(payload) ?: throw IOException("The batch could not be encrypted.")
+        val target = File(dir, "$at-$digest.json")
+        val temporary = File(dir, "$at-$digest.tmp")
+        try {
+            temporary.outputStream().use { stream ->
+                stream.write(blob.toByteArray(Charsets.UTF_8))
+                stream.fd.sync()
+            }
+            if (!temporary.renameTo(target)) throw IOException("The batch could not be saved in the outbox.")
+        } finally {
+            temporary.delete()
+        }
         return true
     }
 
@@ -53,13 +67,6 @@ class SyncQueue(
     fun remove(entry: Entry) { entry.file.delete() }
 
     fun clear() { entries().forEach { it.file.delete() } }
-
-    /** Oldest entries are dropped first once the cap is reached. */
-    private fun trim() {
-        val all = entries()
-        if (all.size <= maxEntries) return
-        all.take(all.size - maxEntries).forEach { it.file.delete() }
-    }
 
     private fun sha256(value: String): String =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))

@@ -1,5 +1,10 @@
 # IronDesk 2.0 — Project Notes
 
+> Historical implementation notes. Later phases supersede earlier mock-only,
+> no-network, placeholder, and release statements in this file. For the current
+> system, use [Architecture](docs/ARCHITECTURE.md) and the
+> [September 2026 audit](docs/ARCHITECTURE_AUDIT_2026-09-11.md).
+
 Training intelligence platform: training, conditioning, recovery, nutrition, progress analytics and coaching in a single dark, dense, athlete-facing shell.
 
 ## Structure

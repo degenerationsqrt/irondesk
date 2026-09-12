@@ -1,95 +1,52 @@
-# IronDesk Command
+# IronDesk
 
-Build IronDesk 2.0, a premium training intelligence web app for serious athletes and strength/conditioning users. Start with a polished responsive dashboard inspired by a high-end dark performance dashboard: near-black background, subtle card borders, electric blue primary accent, green for positive/goal-met status, amber for vigorous/intensity, red for peak/warning. Typography should feel condensed, athletic, sharp, and premium. Use TypeScript, Tailwind, shadcn/ui, Recharts or equivalent for charts, and responsive layouts that work beautifully on desktop and mobile.
+IronDesk combines workout logging, program assignments, recovery, nutrition and training analytics in a React/TanStack Start web app backed by Supabase. Garmin Connect IQ and Android Health Connect are separate clients. The AI Coach currently derives deterministic guidance; it does not call a live language model.
 
-PRODUCT GOAL
-IronDesk should feel like a professional athlete command center, not a generic fitness tracker. The app combines training, conditioning, recovery, nutrition, progress analytics, and AI coaching. Build the first working product shell with realistic mock data and a coherent design system. Prioritize visual quality, usability, and reusable components.
+See [Architecture](docs/ARCHITECTURE.md) for the current system and [September 2026 audit](docs/ARCHITECTURE_AUDIT_2026-09-11.md) for findings, fixes, validation and remaining debt. [PROJECT_NOTES.md](PROJECT_NOTES.md) retains historical implementation notes.
 
-NAVIGATION
-Create an app shell with desktop sidebar and mobile bottom navigation. Main routes: Dashboard, Workout, History, Exercises, Progress, Nutrition, Recovery, AI Coach, Settings.
+## Repository map
 
-DASHBOARD
-Build a dense but clean “Today’s Summary” page. Include:
-1. Top header with current date, status line such as “On target”, overall IronScore/strain score, and a grade badge.
-2. Activity Strain card with large score and brief interpretation.
-3. Cardio vs Muscular Strain horizontal split bar with percentages.
-4. Workouts panel with multiple activity cards. Include a cardio session and a weights session. Each activity card should show duration, calories, average heart rate, cardio load, active zone minutes, and zone distribution bars.
-5. Heart Rate analytics panel with line chart over time and colored zone threshold lines. Include average HR and a compact legend for Light, Moderate, Vigorous, Peak zones.
-6. Time in Heart Rate Zones horizontal bars with duration and percentage.
-7. Strength Metrics panel with total sets, total reps, total volume/tonnage, top lift, estimated 1RM delta, and PR indicators.
-8. Nutrition Summary with calories, protein, carbs, fat, meal snippets, and macro breakdown chart.
-9. Calories In vs Out card with intake estimate, exercise calories burned, net calories, and a semicircle/gauge style visual showing deficit/maintenance/surplus status.
-10. Daily Grade panel with Cardio, Strength, Nutrition, Recovery, Consistency, and Overall grades.
-11. Suggestions to Improve card with 3 to 5 actionable coaching suggestions.
-12. Key Takeaway card with one concise AI-style coaching summary.
-13. Add Weekly Load and Recent Progress mini cards if layout allows.
+| Location                                      | Responsibility                                                                     |
+| --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `src/routes`, `src/components/irondesk`       | Web routes, athlete UI, auth/data boundaries and PWA lifecycle                     |
+| `src/lib/irondesk`                            | Mode-aware service, repository, workout outbox, analytics, units and program rules |
+| `src/lib/mcp`                                 | Five authenticated IronDesk Command MCP tools                                      |
+| `src/lib/imports`                             | File parsing, provenance, import persistence and Health Connect synchronization    |
+| `src/lib/connect-iq`, `src/routes/api/public` | Token-authenticated device APIs                                                    |
+| `supabase/migrations`                         | Versioned PostgreSQL schema, RLS policies and transactional functions              |
+| `content/workouts`                            | Versioned Legacy Beta workout content and provenance                               |
+| `android-health-connect`                      | Kotlin companion: approved reads, explicit sync and preview-first workout export   |
+| `connectiq/irondesk`                          | Monkey C watch companion, durable queue, FIT recording and simulator tests         |
+| `mobile-android`                              | Native engineering preview with sample data and no network permission              |
 
-WORKOUT PAGE
-Create a realistic active workout experience: workout title, elapsed timer, exercise list, sets/reps/load/RPE entry, rest timer, previous-performance reference, quick add set, notes, exercise substitution, and live totals for volume, sets, reps, and estimated effort. Make this fast to use one-handed on mobile.
+## Development and verification
 
-HISTORY
-Build workout history cards and table view with filters for date, workout type, body part, and intensity. Add a session detail drawer/page.
-
-EXERCISES
-Exercise library with search, filters, muscle groups, equipment, favorites, recent exercises, and exercise detail page with history and performance trends.
-
-PROGRESS
-Create charts and cards for bodyweight, estimated 1RM, volume, weekly training load, cardio fitness, streaks, and PR history. Include date-range controls.
-
-NUTRITION
-Build macro targets, calories consumed, protein/carbs/fat progress, meals, hydration, goal adherence, and weight-goal context.
-
-RECOVERY
-Create a readiness score with sleep, resting HR, HRV placeholder, soreness, fatigue, stress, and training recommendation. Use clear language indicating placeholders where wearable data is not yet connected.
-
-AI COACH
-Build a dedicated AI Coach page with: Today’s Recommendation, Tomorrow’s Plan, Training Observations, Risk/Load Notes, Suggested Adjustments, and a natural-language ask box. Use realistic deterministic mock insights for now; do not imply live AI integration yet.
-
-SETTINGS
-Profile, units, goals, equipment, integrations, notifications, and privacy placeholders.
-
-DESIGN SYSTEM
-Create reusable components: StatCard, MetricTile, SectionCard, ScoreBadge, GradeBadge, ProgressBar, ZoneBar, WorkoutCard, InsightCard, ChartCard, EmptyState, Skeleton, MobileNav, Sidebar. Keep spacing tight but not cramped. Use rounded corners moderately, subtle shadows, thin borders, and layered dark surfaces. Avoid neon overload.
-
-BRAND
-Use the name “IronDesk” prominently. Create a simple text-based logo treatment for now. Brand voice is serious, disciplined, performance-focused, intelligent, and direct.
-
-MOCK DATA
-Seed realistic mock data throughout so every page feels alive. Make sure all navigation works and charts render.
-
-ARCHITECTURE
-Keep components modular and data structures typed. Add a mock data/service layer so real Supabase data can replace mocks later without a full rewrite. Add a README or project notes explaining page structure and component organization.
-
-IMPORTANT
-Do not merely create a landing page. Build the actual authenticated-app-style product shell and functional dashboard experience first. Make it feel like something that could compete visually with premium fitness and readiness platforms, while keeping IronDesk’s own identity.
-
-This project was built with [Lovable](https://lovable.dev).
-
-**Production deployment**: https://irondeskpro.lovable.app
-
-The Garmin Connect IQ companion and secure API are implemented under `connectiq/irondesk` and `src/routes/api/public/connect-iq`. The release package is pinned to the production HTTPS origin above; deploy and verify the accompanying Supabase migration and API routes before pairing a physical watch or submitting to the Connect IQ Store.
-
-The read-only Android Health Connect companion is under `android-health-connect/`. It is currently
-an engineering private beta, not a public installer. Start with
-`android-health-connect/docs/PRIVATE_BETA_SETUP.md` and complete every signing, physical-device,
-privacy, and Play gate in `android-health-connect/docs/RELEASE_CHECKLIST.md` before distributing it.
-The signed-out web guide lives at https://irondeskpro.lovable.app/health-connect.
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/eed18f2c-5219-4d27-b990-ff314dde9ed8).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Use Node.js 24 and Bun 1.4.2, as selected in web CI. Bun installs the committed lock; Node runs the application tools.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install --frozen-lockfile
+bun run dev
+bun run test
+bun run typecheck
+bun run build
 ```
+
+Copy `.env.example` to `.env.local` and fill the required Supabase URL and publishable-key variables. Server API routes additionally require the server-only service-role credential. Never put that credential in a `VITE_` variable. A local demo can use nonfunctional placeholder client configuration; authenticated workflows require real project configuration.
+
+`vitest.config.ts` isolates tests from application/deployment plugins. Tests include a PGlite PostgreSQL harness for selected committed migrations and cross-account policies. It does not emulate hosted Supabase auth or prove a complete database rebuild. See the audit's migration-history gap before creating a new database.
+
+Web CI runs locked install, typecheck, regression tests and production build for pull requests and main pushes. Separate workflows validate the Android companion and native preview. Full-repository lint contains legacy formatting debt; use scoped ESLint/Prettier checks for touched files.
+
+## Device development
+
+- Health Connect uses JDK 17 and Android SDK 36. Start at [its README](android-health-connect/README.md) and run `gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug` in that directory.
+- Garmin uses the Connect IQ SDK. Follow [its README](connectiq/irondesk/README.md) for device-specific builds and simulator tests.
+- The native preview has [its own constraints and build instructions](mobile-android/README.md). It is not the production mobile app.
+
+The Health Connect flow is explicit: preview completed workouts, grant exercise-write permission, then choose to write. Simulator/build success does not establish physical watch sync, Health Connect writes, deduplication or receiving-app display.
+
+## Deployment
+
+The canonical repository is [degenerationsqrt/irondesk](https://github.com/degenerationsqrt/irondesk). The web project is [IronDesk Command in Lovable](https://lovable.dev/projects/eed18f2c-5219-4d27-b990-ff314dde9ed8), with canonical web/Android origin [irondeskpro.com](https://irondeskpro.com). Garmin's existing packaged default still uses the Lovable origin; its origin-bound pairing requires separate verification before changing it.
+
+A tested Git branch, merged main, matching Lovable source, database migration application, published web assets and physical-device verification are separate states. Verify each state when releasing. Do not rewrite published Git history.

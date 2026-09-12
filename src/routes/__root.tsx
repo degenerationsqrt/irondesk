@@ -1,8 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
   Link,
-  createRootRouteWithContext,
+  createRootRoute,
   useRouter,
   HeadContent,
   Scripts,
@@ -11,6 +10,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { AuthGate } from "../components/irondesk/auth-gate";
+import { IdentityDataBoundary } from "../components/irondesk/identity-data-boundary";
 import { PwaProvider } from "../components/irondesk/pwa-manager";
 import { AuthProvider } from "../lib/auth/auth-provider";
 import { WorkoutMutationQueueProvider } from "../lib/irondesk/use-workout-mutation-queue";
@@ -76,7 +76,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -148,20 +148,18 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <PwaProvider>
-        <AuthProvider>
+    <PwaProvider>
+      <AuthProvider>
+        <IdentityDataBoundary>
           <WorkoutMutationQueueProvider>
             <AuthGate>
               {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
               <Outlet />
             </AuthGate>
           </WorkoutMutationQueueProvider>
-        </AuthProvider>
-      </PwaProvider>
-    </QueryClientProvider>
+        </IdentityDataBoundary>
+      </AuthProvider>
+    </PwaProvider>
   );
 }

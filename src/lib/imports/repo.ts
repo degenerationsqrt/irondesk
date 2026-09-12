@@ -114,11 +114,12 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
   if (jobError || !jobRow) throw asIronDeskError(jobError, "The import could not be started.");
 
   const jobId = jobRow.id;
+  let imported = 0;
+  let processed = 0;
 
   try {
     const activities = hashed.filter((entry) => entry.record.kind === "activity");
     const metrics = hashed.filter((entry) => entry.record.kind === "metric");
-    let imported = 0;
 
     for (let i = 0; i < activities.length; i += 500) {
       const chunk = activities.slice(i, i + 500).map(({ record, hash }) => {
@@ -152,6 +153,7 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
         .select("id");
       if (error) throw asIronDeskError(error, "Activities could not be written.");
       imported += data?.length ?? 0;
+      processed += chunk.length;
     }
 
     for (let i = 0; i < metrics.length; i += 500) {
@@ -180,12 +182,13 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
         .select("id");
       if (error) throw asIronDeskError(error, "Health metrics could not be written.");
       imported += data?.length ?? 0;
+      processed += chunk.length;
     }
 
     const { data: finished, error: finishError } = await supabase
       .from("import_jobs")
       .update({
-        status: "completed",
+        status: errors.length > 0 ? "partial" : "completed",
         finished_at: new Date().toISOString(),
         imported_count: imported,
         duplicate_count: Math.max(0, hashed.length - imported),
@@ -198,15 +201,33 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
     return jobFromRow(finished as unknown as Record<string, unknown>);
   } catch (error) {
     const failure = asIronDeskError(error, "The import failed.");
-    await supabase
-      .from("import_jobs")
-      .update({
-        status: "failed",
-        finished_at: new Date().toISOString(),
-        error_message: failure.message,
-      })
-      .eq("id", jobId);
-    throw failure;
+    const message =
+      imported > 0
+        ? `${failure.message} ${imported} records were saved before the failure. Review this batch in Connections; you can roll it back.`
+        : `${failure.message} No records were confirmed saved. Review this batch in Connections before retrying.`;
+    // These are acknowledged counts only. A lost response can leave additional
+    // rows committed; never classify the unacknowledged remainder as duplicates
+    // or claim that the operation rolled itself back.
+    try {
+      const { error: auditError } = await supabase
+        .from("import_jobs")
+        .update({
+          status: imported > 0 ? "partial" : "failed",
+          finished_at: new Date().toISOString(),
+          imported_count: imported,
+          duplicate_count: processed - imported,
+          error_message: message,
+        })
+        .eq("id", jobId);
+      if (auditError) throw auditError;
+    } catch {
+      throw new IronDeskError(
+        `${message} The batch status could not be updated.`,
+        failure.code,
+        failure.diagnostic,
+      );
+    }
+    throw new IronDeskError(message, failure.code, failure.diagnostic);
   }
 }
 
