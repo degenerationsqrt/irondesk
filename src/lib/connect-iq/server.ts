@@ -289,6 +289,13 @@ export function isOwnedActiveSession(row: ConnectIqSessionRow, userId: string): 
   return row.user_id === userId && !row.is_sample && row.status === "active";
 }
 
+// This legacy calf sequence exceeds the watch's 40-character field by six.
+// Preserve its training terms in the payload without changing stored guidance
+// or set values. Unknown long instructions still fail the normal snapshot gate.
+const WATCH_TARGET_REPS_COMPATIBILITY = new Map([
+  ["20 slow machine reps + 15 floor pulses per set", "20 slow machine reps+15 floor pulses/set"],
+]);
+
 export function toConnectIqSnapshot(
   row: ConnectIqSessionRow | null,
   userId: string,
@@ -307,7 +314,10 @@ export function toConnectIqSnapshot(
         .map((exercise) => ({
           id: exercise.id,
           name: exercise.exercise_name,
-          target_reps: exercise.target_reps,
+          target_reps:
+            exercise.target_reps == null
+              ? exercise.target_reps
+              : (WATCH_TARGET_REPS_COMPATIBILITY.get(exercise.target_reps) ?? exercise.target_reps),
           rest_seconds: exercise.rest_seconds,
           load_guidance: exercise.load_guidance,
           sets: exercise.workout_sets
