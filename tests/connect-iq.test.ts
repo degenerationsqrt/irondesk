@@ -309,6 +309,114 @@ describe("Connect IQ active-workout ownership", () => {
     expect(toConnectIqSnapshot(session({ is_sample: true }), "user-1").workout).toBeNull();
   });
 
+  it("projects the real legacy calf sequence without changing source guidance or any set fields", () => {
+    const library = JSON.parse(
+      readFileSync(
+        join(process.cwd(), "content/workouts/legacy-beta/workout-templates.json"),
+        "utf8",
+      ),
+    ) as {
+      templates: Array<{
+        id: string;
+        name: string;
+        focus: string;
+        notes: string;
+        exercises: Array<{
+          id: string;
+          name: string;
+          position: number;
+          targetSets: number;
+          targetReps: string;
+          restSeconds: number | null;
+          loadGuidance: string | null;
+          notes: string;
+        }>;
+      }>;
+    };
+    const template = library.templates.find(
+      (item) => item.id === "legacy-split-rev2-quads-calves-forearms-v1",
+    );
+    expect(template).toBeDefined();
+    if (!template) throw new Error("The canonical legacy calf sequence fixture is missing.");
+    const row = {
+      ...session({ title: template.name, focus: template.focus }),
+      notes: template.notes,
+      session_exercises: template.exercises.map((exercise) => ({
+        id: exercise.id,
+        exercise_name: exercise.name,
+        position: exercise.position,
+        target_reps: exercise.targetReps,
+        rest_seconds: exercise.restSeconds,
+        load_guidance: exercise.loadGuidance,
+        notes: exercise.notes,
+        workout_sets: Array.from({ length: exercise.targetSets }, (_, index) => ({
+          id: `${exercise.id}-set-${index + 1}`,
+          set_number: index + 1,
+          weight_kg: index === 0 ? null : 20 + index,
+          reps: index === 1 ? null : Number.parseInt(exercise.targetReps, 10),
+          rpe: index === 0 ? null : 7.5,
+          completed: index === 2,
+          is_warmup: index === 0,
+          rest_seconds: index === 0 ? null : 90,
+        })),
+      })),
+    };
+    const originalRow = structuredClone(row);
+    const originalTemplate = structuredClone(template);
+    const snapshot = toConnectIqSnapshot(row, "user-1");
+    const exercises = snapshot.workout!.exercises;
+
+    expect(exercises).toHaveLength(6);
+    expect(exercises.flatMap((exercise) => exercise.sets)).toHaveLength(24);
+    expect(row.session_exercises[5]!.target_reps).toBe(
+      "20 slow machine reps + 15 floor pulses per set",
+    );
+    expect(row.session_exercises[5]!.target_reps).toHaveLength(46);
+    expect(exercises[5]!.target_reps).toBe("20 slow machine reps+15 floor pulses/set");
+    expect(exercises[5]!.target_reps).toHaveLength(40);
+    expect(() => assertConnectIqSnapshotExecutable(snapshot)).not.toThrow();
+
+    for (const [index, exercise] of exercises.entries()) {
+      const source = originalRow.session_exercises[index]!;
+      expect(exercise).toEqual({
+        id: source.id,
+        name: source.exercise_name,
+        target_reps: index === 5 ? "20 slow machine reps+15 floor pulses/set" : source.target_reps,
+        rest_seconds: source.rest_seconds,
+        load_guidance: source.load_guidance,
+        sets: source.workout_sets,
+      });
+    }
+    expect(row).toEqual(originalRow);
+    expect(template).toEqual(originalTemplate);
+  });
+
+  it("preserves unknown and null rep guidance and keeps the exact 40-character limit", () => {
+    for (const guidance of [
+      null,
+      "8-10",
+      "x".repeat(40),
+      "20 slow machine reps+15 floor pulses/set",
+    ]) {
+      const row = session();
+      row.session_exercises[0]!.target_reps = guidance;
+      const snapshot = toConnectIqSnapshot(row, "user-1");
+      expect(
+        snapshot.workout!.exercises.find((exercise) => exercise.id === EXERCISE_ID)!.target_reps,
+      ).toBe(guidance);
+      expect(() => assertConnectIqSnapshotExecutable(snapshot)).not.toThrow();
+    }
+    const row = session();
+    row.session_exercises[0]!.target_reps = "x".repeat(41);
+    const snapshot = toConnectIqSnapshot(row, "user-1");
+    expect(
+      snapshot.workout!.exercises.find((exercise) => exercise.id === EXERCISE_ID)!.target_reps,
+    ).toBe("x".repeat(41));
+    expect(() => assertConnectIqSnapshotExecutable(snapshot)).toThrow(
+      /target-rep guidance to 40 characters or fewer/,
+    );
+  });
+
   it("accepts a normal snapshot and rejects structural watch-limit violations with 422", () => {
     expect(assertConnectIqSnapshotExecutable(toConnectIqSnapshot(session(), "user-1"))).toEqual(
       toConnectIqSnapshot(session(), "user-1"),
