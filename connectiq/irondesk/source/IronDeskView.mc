@@ -41,28 +41,46 @@ class IronDeskView extends WatchUi.View {
     private var _pendingFinishPayload = null;
     private var _pendingFinishOccurredAt = 0;
     private var _fitExpected = false;
+    private var _visible = false;
+    private var _snapshotGeneration = 0;
+    private var _nextSnapshotAt = 0;
+    private var _snapshotRetrySeconds = 15;
+    private var _snapshotAfterSync = false;
+    private var _liveSnapshotConflict = false;
+    private var _snapshotRequested = false;
+    private var _refreshStatus = "No GET response yet";
+    private var _refreshStatusGeneration = -1;
+    private var _refreshResponseCode = null;
 
-    function initialize() {
+    function initialize(dependencies) {
         View.initialize();
-        _store = new WorkoutStore();
-        _api = new IronDeskApi(_store);
-        _recorder = new FitRecorder();
+        _store = dependencies == null ? new WorkoutStore() : dependencies["store"];
+        _api = dependencies == null ? new IronDeskApi(_store) : dependencies["api"];
+        _recorder = dependencies == null ? new FitRecorder() : dependencies["recorder"];
         _timer = new Timer.Timer();
     }
 
     function onShow() {
+        _visible = true;
+        _nextSnapshotAt = 0;
         _timer.start(method(:onTick), 1000, true);
         if (!_hasBootstrapped) {
             _hasBootstrapped = true;
             bootstrap();
+        } else if (_snapshotRequested && WorkoutRefresh.canRefresh(_state)) {
+            syncNow();
         }
     }
 
     function onHide() {
+        _visible = false;
+        _snapshotGeneration += 1;
         _timer.stop();
     }
 
     function onAppStop() {
+        _visible = false;
+        _snapshotGeneration += 1;
         if (_state.equals("finishing")) {
             if (!_fitExpected || _interruptedFitSaved) {
                 _state = "finish_queue_error";
@@ -120,6 +138,11 @@ class IronDeskView extends WatchUi.View {
     }
 
     function bootstrap() {
+        _snapshotGeneration += 1;
+        _refreshStatusGeneration = -1;
+        _refreshStatus = "No GET response yet";
+        _refreshResponseCode = null;
+        _liveSnapshotConflict = false;
         _reconcilingResume = false;
         _resumeHadWarning = false;
         _resumeConflictWorkout = null;
@@ -270,7 +293,15 @@ class IronDeskView extends WatchUi.View {
             return;
         }
         if (cachedWorkout != null && incomingWorkout != null && isValidWorkout(cachedWorkout) && cachedWorkout["id"].equals(incomingWorkout["id"])) {
-            _workout = incomingWorkout;
+            var merged = WorkoutRefresh.merge(cachedWorkout, incomingWorkout, _store.getEvents());
+            if (merged == null) {
+                _resumeConflictWorkout = incomingWorkout;
+                _resumeConflictCanAccept = true;
+                _state = "resume_conflict";
+                _message = "Workout layout changed\nOpen MENU for options";
+                return;
+            }
+            _workout = merged;
             if (!_store.setWorkout(_workout)) {
                 _state = "error";
                 _message = "Workout is too large\nfor watch storage";
@@ -303,7 +334,11 @@ class IronDeskView extends WatchUi.View {
     }
 
     function canAcceptServerConflict() {
-        return _state.equals("resume_conflict") && _resumeConflictCanAccept;
+        return (_state.equals("resume_conflict") || _liveSnapshotConflict) && _resumeConflictCanAccept;
+    }
+
+    function hasLiveSnapshotConflict() {
+        return _liveSnapshotConflict;
     }
 
     function acceptServerConflict() {
@@ -311,6 +346,19 @@ class IronDeskView extends WatchUi.View {
             _message = "Reconnect before using\nserver workout";
             WatchUi.requestUpdate();
             return;
+        }
+        if (_liveSnapshotConflict) {
+            // This explicit choice can save the FIT; the GET never does so.
+            if (isWorkoutRunning()) {
+                interruptRecording();
+                if (_state.equals("interrupted_fit_error")) {
+                    _message = "FIT save failed\nWatch changes kept";
+                    return;
+                }
+            }
+            _liveSnapshotConflict = false;
+            _snapshotGeneration += 1;
+            _state = "resume_conflict";
         }
         if (!_store.clearEvents() || !_store.clearQuarantinedEvents()) {
             _storageOkay = false;
@@ -393,14 +441,26 @@ class IronDeskView extends WatchUi.View {
     }
 
     function onApiResult(kind, data, responseCode) {
+        if (kind.equals("events_acked")) {
+            WorkoutRefresh.acknowledge(_workout, data["events"]);
+            return;
+        }
         if (kind.equals("paired")) {
             refreshWorkout();
             return;
+        }
+        if (kind.equals("workout") || kind.equals("fetch_error") || kind.equals("unauthorized")
+            || kind.equals("workout_incompatible") || kind.equals("origin_changed")
+            || kind.equals("server_data_conflict") || kind.equals("storage_error") || kind.equals("sync_error")) {
+            _refreshStatusGeneration = -1;
+            _refreshResponseCode = responseCode;
+            _refreshStatus = kind.equals("workout") ? "GET received (200)" : requestFailureLabel(kind, data, responseCode);
         }
         if (kind.equals("workout")) {
             _online = true;
             var incomingWorkout = data["workout"];
             if (!isValidWorkout(incomingWorkout)) {
+                _refreshStatus = "Invalid response (200)";
                 if (_reconcilingResume) {
                     resumeOffline("Invalid server response");
                     return;
@@ -415,13 +475,15 @@ class IronDeskView extends WatchUi.View {
                 WatchUi.requestUpdate();
                 return;
             }
-            _workout = incomingWorkout;
+            _workout = WorkoutRefresh.prepareSnapshot(incomingWorkout);
+            _refreshStatus = _workout == null ? "No active workout (200)" : "Snapshot loaded (200)";
             if (_workout == null) {
                 _store.setWorkout(null);
                 _state = "no_workout";
                 _message = "Start a workout\nin IronDesk first";
             } else {
                 if (!_store.setWorkout(_workout)) {
+                    _refreshStatus = "Watch storage error";
                     _state = "error";
                     _message = "Workout is too large\nfor watch storage";
                     WatchUi.requestUpdate();
@@ -455,6 +517,14 @@ class IronDeskView extends WatchUi.View {
             } else if (_state.equals("finish_queue_error")) {
                 queueFinishedWorkout();
                 return;
+            }
+            if (_snapshotAfterSync) {
+                _snapshotAfterSync = false;
+                _nextSnapshotAt = 0;
+                _snapshotRequested = WorkoutRefresh.canRefresh(_state);
+                if (_snapshotRequested && requestLiveSnapshot(true)) {
+                    _snapshotRequested = false;
+                }
             }
         } else if (kind.equals("unauthorized")) {
             _refreshAfterSync = false;
@@ -492,8 +562,10 @@ class IronDeskView extends WatchUi.View {
             _reconcilingResume = false;
             _online = true;
             _state = "workout_incompatible";
-            _message = "Workout is too large\nEdit it in IronDesk";
+            _message = "Workout not compatible\nEdit it in IronDesk";
         } else if (kind.equals("sync_error")) {
+            _snapshotRetrySeconds = clamp(_snapshotRetrySeconds * 2, 15, 120);
+            _nextSnapshotAt = Time.now().value() + _snapshotRetrySeconds;
             var retryRefresh = _refreshAfterSync;
             _refreshAfterSync = false;
             _online = false;
@@ -562,6 +634,9 @@ class IronDeskView extends WatchUi.View {
                 _state = "ready";
                 _message = message;
             }
+            if (_store.getCheckpoint() != null && WorkoutRefresh.preserveLegacyDraft(_workout, currentSet())) {
+                _storageOkay = _store.setWorkout(_workout);
+            }
         }
         return true;
     }
@@ -601,6 +676,11 @@ class IronDeskView extends WatchUi.View {
     }
 
     function primaryAction() {
+        if (_liveSnapshotConflict) {
+            _message = "Server workout changed\nHold MENU to resolve";
+            WatchUi.requestUpdate();
+            return;
+        }
         if (_state.equals("not_paired") || _state.equals("server_missing") || _state.equals("error") || _state.equals("no_workout") || _state.equals("workout_incompatible")) {
             bootstrap();
         } else if (_state.equals("ready") || _state.equals("interrupted")) {
@@ -644,8 +724,9 @@ class IronDeskView extends WatchUi.View {
             return;
         }
         var reps = numberValue(set["reps"], 0) + delta;
-        set["reps"] = clamp(reps, 0, 500);
-        persistCheckpoint();
+        if (WorkoutRefresh.edit(set, "reps", clamp(reps, 0, 500))) {
+            persistCheckpoint();
+        }
         WatchUi.requestUpdate();
     }
 
@@ -659,8 +740,9 @@ class IronDeskView extends WatchUi.View {
         }
         var display = IronDeskMath.kgToDisplay(numberValue(set["weight_kg"], 0.0));
         display = clamp(display + delta, 0.0, IronDeskMath.maxDisplayWeight());
-        set["weight_kg"] = IronDeskMath.displayToKg(display);
-        persistCheckpoint();
+        if (WorkoutRefresh.edit(set, "weight_kg", IronDeskMath.displayToKg(display))) {
+            persistCheckpoint();
+        }
         WatchUi.requestUpdate();
     }
 
@@ -687,13 +769,14 @@ class IronDeskView extends WatchUi.View {
         if (set == null) {
             return;
         }
-        if (displayWeight == null) {
-            set["weight_kg"] = null;
-        } else {
+        var savedWeight = null;
+        if (displayWeight != null) {
             var safeDisplay = clamp(displayWeight, 0.0, IronDeskMath.maxDisplayWeight());
-            set["weight_kg"] = IronDeskMath.displayToKg(safeDisplay);
+            savedWeight = IronDeskMath.displayToKg(safeDisplay);
         }
-        persistCheckpoint();
+        if (WorkoutRefresh.edit(set, "weight_kg", savedWeight)) {
+            persistCheckpoint();
+        }
         WatchUi.requestUpdate();
     }
 
@@ -706,12 +789,30 @@ class IronDeskView extends WatchUi.View {
             return;
         }
         var rpe = numberValue(set["rpe"], 8.0) + delta;
-        set["rpe"] = clamp(rpe, 1.0, 10.0);
-        persistCheckpoint();
+        if (WorkoutRefresh.edit(set, "rpe", clamp(rpe, 1.0, 10.0))) {
+            persistCheckpoint();
+        }
         WatchUi.requestUpdate();
     }
 
     function syncNow() {
+        if (WorkoutRefresh.canRefresh(_state) && _store.getQuarantinedCount() == 0) {
+            _snapshotRequested = true;
+            _snapshotAfterSync = true;
+            _nextSnapshotAt = 0;
+            if (!_visible || _api.isBusy()) {
+                return;
+            }
+            if (_store.getEvents().size() > 0 && _api.flushEvents(method(:onApiResult))) {
+                _snapshotRequested = false;
+                return;
+            }
+            _snapshotAfterSync = false;
+            if (requestLiveSnapshot(true)) {
+                _snapshotRequested = false;
+            }
+            return;
+        }
         if (_state.equals("resume_conflict")) {
             retryResumeConflict();
             WatchUi.requestUpdate();
@@ -971,7 +1072,7 @@ class IronDeskView extends WatchUi.View {
     }
 
     function canEditCurrentSet() {
-        return _state.equals("active");
+        return _state.equals("active") && !_liveSnapshotConflict;
     }
 
     function canFinishFromMenu() {
@@ -1136,6 +1237,7 @@ class IronDeskView extends WatchUi.View {
         findNextIncomplete();
         if (_state.equals("all_done")) {
             persistCheckpoint();
+            _api.flushEvents(method(:onApiResult));
             return;
         }
         _restEndsAt = Time.now().value() + rest;
@@ -1310,7 +1412,151 @@ class IronDeskView extends WatchUi.View {
             }
             persistCheckpoint();
         }
+        if (_visible && _snapshotRequested && WorkoutRefresh.canRefresh(_state) && !_api.isBusy()) {
+            syncNow();
+        } else if (_visible && !_liveSnapshotConflict && WorkoutRefresh.canRefresh(_state)
+            && Time.now().value() >= _nextSnapshotAt && !_api.isBusy()) {
+            if (_store.getEvents().size() > 0) {
+                _snapshotAfterSync = true;
+                _nextSnapshotAt = Time.now().value() + _snapshotRetrySeconds;
+                _api.flushEvents(method(:onApiResult));
+            } else {
+                requestLiveSnapshot(false);
+            }
+        }
         WatchUi.requestUpdate();
+    }
+
+    function refreshStatusLabel() {
+        // Menu inspection must not bind a legacy origin or initiate a request.
+        return _refreshStatus;
+    }
+
+    private function requestFailureLabel(kind, data, responseCode) {
+        if (kind.equals("origin_changed") || kind.equals("server_data_conflict")) {
+            return "Server origin differs";
+        }
+        if (kind.equals("storage_error")) { return "Watch storage error"; }
+        if (kind.equals("workout_incompatible")) { return compatibilityReason(data); }
+        if (kind.equals("unauthorized")) { return "HTTP 401"; }
+        var request = kind.equals("sync_error") ? "Send" : "GET";
+        if (responseCode < 0) { return request + " network " + responseCode.toString(); }
+        if (responseCode == 0) { return request + " failed (0)"; }
+        if (responseCode == 200) { return "Invalid response (200)"; }
+        return request + " HTTP " + responseCode.toString();
+    }
+
+    private function compatibilityReason(data) {
+        var fallback = "Workout incompatible (422)";
+        if (!(data instanceof Dictionary) || !(data["error"] instanceof String)) {
+            return fallback;
+        }
+        // Bound allocation before making a character array. The 5-character
+        // prefix plus normalized reason never exceeds 120 display characters.
+        var raw = data["error"];
+        var bounded = raw.length() > 115 ? raw.substring(0, 115) : raw;
+        if (!(bounded instanceof String)) { return fallback; }
+        var chars = bounded.toCharArray();
+        var reason = "";
+        var spacePending = false;
+        for (var i = 0; i < chars.size(); i += 1) {
+            var code = chars[i].toNumber();
+            if (code <= 32 || (code >= 127 && code <= 160) || code == 8232 || code == 8233) {
+                spacePending = reason.length() > 0;
+            } else {
+                if (spacePending) { reason += " "; spacePending = false; }
+                reason += chars[i].toString();
+            }
+        }
+        return reason.length() == 0 ? fallback : "422: " + reason;
+    }
+
+    private function requestLiveSnapshot(force) {
+        if (!_visible || !WorkoutRefresh.canRefresh(_state) || _workout == null
+            || _api.isBusy()
+            || (!force && Time.now().value() < _nextSnapshotAt)) {
+            return false;
+        }
+        if (!_api.isPairedToCurrentBaseUrl()) {
+            _refreshStatus = _refreshResponseCode == 401 ? "401: pair after workout" : "Pair after workout";
+            return false;
+        }
+        if (!_api.isLocalDataForCurrentBaseUrl()) {
+            _refreshStatus = "Server origin differs";
+            return false;
+        }
+        if (_store.getQuarantinedCount() > 0) {
+            _refreshStatus = "Rejected changes held";
+            return false;
+        }
+        _nextSnapshotAt = Time.now().value() + _snapshotRetrySeconds;
+        _snapshotGeneration += 1;
+        _refreshStatusGeneration = _snapshotGeneration;
+        _refreshStatus = "GET in progress";
+        var delegate = new IronDeskSnapshotDelegate(self, _snapshotGeneration, _workout["id"]);
+        return _api.fetchActive(delegate.method(:onResult));
+    }
+
+    function onLiveSnapshotResult(generation, sessionId, kind, data, responseCode) {
+        // onHide invalidates snapshot application, but the latest request's
+        // outcome is still useful. Older callbacks cannot replace newer status.
+        var latestStatus = generation == _refreshStatusGeneration;
+        if (latestStatus) {
+            _refreshStatusGeneration = -1;
+            _refreshResponseCode = responseCode;
+            _refreshStatus = kind.equals("workout") ? "Response skipped (200)" : requestFailureLabel(kind, data, responseCode);
+        }
+        if (generation == _snapshotGeneration && _visible && WorkoutRefresh.canRefresh(_state)
+            && _workout != null && _workout["id"].equals(sessionId)
+            && _api.isLocalDataForCurrentBaseUrl()) {
+            if (kind.equals("workout") && isValidWorkout(data["workout"])) {
+                _online = true;
+                _snapshotRetrySeconds = 15;
+                var merged = WorkoutRefresh.merge(_workout, data["workout"], _store.getEvents());
+                if (merged == null) {
+                    if (latestStatus) { _refreshStatus = "Server workout changed"; }
+                    _liveSnapshotConflict = true;
+                    _resumeConflictWorkout = data["workout"];
+                    _resumeConflictCanAccept = true;
+                    _message = "Server workout changed - hold MENU";
+                } else {
+                    if (latestStatus) { _refreshStatus = "Snapshot applied (200)"; }
+                    // Keep live recorder, rest deadline and current ordered ID.
+                    // restoreCheckpoint() is only for recovery, never a live GET.
+                    _workout = merged;
+                    var set = currentSet();
+                    if (_state.equals("all_done")) {
+                        _state = "active";
+                        findNextIncomplete();
+                    } else if (_state.equals("active") || _state.equals("rest")) {
+                        if (set != null && set["completed"] == true) {
+                            findNextIncomplete();
+                        }
+                    }
+                    _liveSnapshotConflict = false;
+                    _resumeConflictWorkout = null;
+                    _resumeConflictCanAccept = false;
+                    _message = "Workout refreshed";
+                    if (_state.equals("ready")) {
+                        _storageOkay = _store.setWorkout(_workout);
+                    } else {
+                        persistCheckpoint();
+                    }
+                    if (latestStatus && !_storageOkay) { _refreshStatus = "Watch storage error"; }
+                }
+            } else {
+                if (latestStatus && kind.equals("workout")) { _refreshStatus = "Invalid response (200)"; }
+                _online = false;
+                _snapshotRetrySeconds = clamp(_snapshotRetrySeconds * 2, 15, 120);
+                _message = kind.equals("unauthorized") ? "Pair again after workout" : "Offline - local edits kept";
+            }
+            _nextSnapshotAt = Time.now().value() + _snapshotRetrySeconds;
+            WatchUi.requestUpdate();
+        }
+        // Confirmed events queued during GET still drain after hiding/finishing.
+        if (!_liveSnapshotConflict && _store.getEvents().size() > 0 && !_api.isBusy()) {
+            _api.flushEvents(method(:onApiResult));
+        }
     }
 
     function onUpdate(dc) {
@@ -1400,6 +1646,8 @@ class IronDeskView extends WatchUi.View {
         var message = "SELECT";
         if (!_storageOkay) {
             message = "STORAGE FULL - finish or sync";
+        } else if (_liveSnapshotConflict) {
+            message = "Server changed - HOLD MENU";
         } else if (_state.equals("active")) {
             dc.setColor(COLOR_MUTED, Graphics.COLOR_TRANSPARENT);
             dc.drawText(dc.getWidth() / 2, dc.getHeight() * 0.78, Graphics.FONT_XTINY, "UP/DN reps   START done", Graphics.TEXT_JUSTIFY_CENTER);
@@ -1497,5 +1745,21 @@ class IronDeskView extends WatchUi.View {
 
     function isWorkoutRunning() {
         return _state.equals("active") || _state.equals("rest") || _state.equals("all_done") || _state.equals("queue_full") || _state.equals("sync_conflict") || _state.equals("cleanup_error") || _state.equals("interrupted_fit_error");
+    }
+}
+
+class IronDeskSnapshotDelegate {
+    private var _view;
+    private var _generation;
+    private var _sessionId;
+
+    function initialize(view, generation, sessionId) {
+        _view = view;
+        _generation = generation;
+        _sessionId = sessionId;
+    }
+
+    function onResult(kind, data, responseCode) {
+        _view.onLiveSnapshotResult(_generation, _sessionId, kind, data, responseCode);
     }
 }

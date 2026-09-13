@@ -1,7 +1,7 @@
 <resources xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
     <properties>
         <property id="pairingCode" type="string"></property>
-        <property id="apiBaseUrl" type="string">https://irondeskpro.lovable.app</property>
+        <property id="apiBaseUrl" type="string">https://irondeskpro.com</property>
     </properties>
 
     <settings>

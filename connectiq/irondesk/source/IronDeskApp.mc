@@ -9,7 +9,7 @@ class IronDeskApp extends Application.AppBase {
     }
 
     function getInitialView() {
-        _view = new IronDeskView();
+        _view = new IronDeskView(null);
         return [_view, new IronDeskDelegate(_view)];
     }
 

@@ -2,7 +2,7 @@
 
 ## Current status
 
-The native watch app and its IronDesk API contract build successfully as a release candidate. The package is configured for `https://irondeskpro.lovable.app`. Do not complete Garmin's final submission until the production deployment, final package, and physical-device gates below are verified.
+The native watch app and its IronDesk API contract build successfully as a release candidate. New configurations use `https://irondeskpro.com` directly. Existing saved settings remain unchanged; the former `https://irondeskpro.lovable.app` default redirects to this origin in the September 12, 2026 production checks. Do not complete Garmin's final submission until the production deployment, final package, and physical-device gates below are verified.
 
 The public submission becomes safe only after all release gates below are complete.
 
@@ -10,7 +10,7 @@ The public submission becomes safe only after all release gates below are comple
 
 - [ ] Deploy the Supabase migration `supabase/migrations/20260830051646_connect_iq_workout_events.sql` to staging, then production.
 - [ ] Deploy the IronDesk web/API build to a stable HTTPS origin.
-- [ ] Replace the blank `apiBaseUrl` default with that exact production origin, or remove the editable setting and compile the origin into the release build.
+- [ ] Verify the `apiBaseUrl` default and new pairing use the direct production origin, and an update preserves existing saved settings. Finish/save/synchronize a real workout before changing an existing server URL and pairing again; never migrate its token or unsynced data to another origin automatically.
 - [ ] Pair a real watch and exercise the complete path: pair, download, start, edit, complete sets, rest, finish, Garmin FIT sync, IronDesk sync, replay, offline recovery, rejected-event recovery, and unpair.
 - [ ] Verify Bluetooth interruption, Wi-Fi/phone reconnection, low-storage behavior, app termination at every finish/FIT boundary, reboot recovery, a failed FIT save, and the explicit uncertain-FIT choices on physical hardware.
 - [ ] Verify changing the configured server during pair/fetch/flush never accepts a late response or transmits the prior origin's cached workout/events; test both restore-old-origin and confirmed-discard recovery paths.
@@ -41,7 +41,7 @@ IronDesk does not create programs, bypass workout-release gates, or start a sess
 
 1. In IronDesk, start or prepare an eligible workout.
 2. Open **Connections** and generate a Garmin pairing code.
-3. In Garmin Connect or the Connect IQ Store app, enter the one-time code in the IronDesk app settings. The production URL is prefilled.
+3. In Garmin Connect or the Connect IQ Store app, enter the one-time code in the IronDesk app settings. New configurations prefill `https://irondeskpro.com`; existing installations retain their saved URL. Follow the README's finish/save/synchronize sequence before changing an existing URL and pairing again.
 4. Open IronDesk from the watch activity list and select **START**.
 5. Use Up/Down for reps, hold Menu and choose **Edit weight** for a dedicated load editor, and Select to confirm a set. The weight editor uses Up/Down for repeated changes, Select to save, Back to cancel, and hold Menu to toggle coarse/fine increments.
 6. Finish to save the Garmin FIT activity and synchronize IronDesk.
