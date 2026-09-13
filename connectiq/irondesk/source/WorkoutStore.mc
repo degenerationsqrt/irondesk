@@ -246,6 +246,11 @@ class WorkoutStore {
         }
     }
 
+    function acknowledgeDrafts(events) {
+        var workout = getWorkout();
+        return !WorkoutRefresh.acknowledge(workout, events) || setWorkout(workout);
+    }
+
     function getQuarantinedEvents() {
         try {
             var events = Storage.getValue(KEY_QUARANTINED);

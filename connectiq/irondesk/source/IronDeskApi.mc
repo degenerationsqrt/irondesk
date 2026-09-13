@@ -8,6 +8,7 @@ class IronDeskApi {
     private var _callback = null;
     private var _busy = false;
     private var _sentEventIds = [];
+    private var _sentEvents = [];
     private var _drainingEvents = false;
     private var _syncWarning = false;
     private var _requestGeneration = 0;
@@ -176,6 +177,7 @@ class IronDeskApi {
             _syncWarning = false;
         }
         _sentEventIds = [];
+        _sentEvents = events;
         for (var i = 0; i < events.size(); i += 1) {
             _sentEventIds.add(events[i]["event_id"]);
         }
@@ -196,6 +198,19 @@ class IronDeskApi {
                 finishDrainWithError(data, responseCode);
                 return;
             }
+            var acknowledgedEvents = [];
+            for (var a = 0; a < _sentEvents.size(); a += 1) {
+                if (!containsId(rejectedIds, _sentEvents[a]["event_id"])) {
+                    acknowledgedEvents.add(_sentEvents[a]);
+                }
+            }
+            // Persist dirty-field clearance before dropping acknowledged events.
+            // If storage fails, retrying the same event IDs remains idempotent.
+            if (!_store.acknowledgeDrafts(acknowledgedEvents)) {
+                finishDrainWithError(data, responseCode);
+                return;
+            }
+            notify("events_acked", {"events" => acknowledgedEvents}, responseCode);
             if (rejectedIds.size() > 0) {
                 _syncWarning = true;
                 if (!_store.quarantineEventsByIds(rejectedIds, responseCode)) {
@@ -208,6 +223,7 @@ class IronDeskApi {
                 return;
             }
             _sentEventIds = [];
+            _sentEvents = [];
             if (_store.getEvents().size() > 0 && flushEvents(_callback)) {
                 return;
             }
@@ -215,12 +231,14 @@ class IronDeskApi {
             notify(_syncWarning ? "sync_warning" : "synced", data, responseCode);
         } else if (responseCode == 401) {
             _sentEventIds = [];
+            _sentEvents = [];
             _drainingEvents = false;
             clearPairing();
             notify("unauthorized", data, responseCode);
         } else if (responseCode == 400 || responseCode == 404 || responseCode == 409 || responseCode == 413) {
             if (_store.quarantineEventsByIds(_sentEventIds, responseCode)) {
                 _sentEventIds = [];
+                _sentEvents = [];
                 _drainingEvents = false;
                 _syncWarning = true;
                 notify("sync_warning", data, responseCode);
@@ -249,6 +267,7 @@ class IronDeskApi {
         if (!(currentBaseUrl instanceof String) || !requestedBaseUrl.equals(currentBaseUrl)) {
             if (kind.equals("flush")) {
                 _sentEventIds = [];
+                _sentEvents = [];
                 _drainingEvents = false;
                 _syncWarning = false;
             }
@@ -317,6 +336,7 @@ class IronDeskApi {
 
     private function finishDrainWithError(data, responseCode) {
         _sentEventIds = [];
+        _sentEvents = [];
         _drainingEvents = false;
         notify("sync_error", data, responseCode);
     }
@@ -353,6 +373,7 @@ class IronDeskApi {
         _activeRequestDelegate = null;
         _busy = false;
         _sentEventIds = [];
+        _sentEvents = [];
         _drainingEvents = false;
         _syncWarning = false;
     }

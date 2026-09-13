@@ -45,6 +45,7 @@ class IronDeskDelegate extends WatchUi.BehaviorDelegate {
 class IronDeskMenu extends WatchUi.Menu2 {
     function initialize(view) {
         Menu2.initialize({:title => "IronDesk"});
+        addItem(new WatchUi.MenuItem("Refresh status", view.refreshStatusLabel(), :refreshStatus, {}));
         if (view.hasUncertainFinalFit()) {
             addItem(new WatchUi.MenuItem("FIT already saved", "I verified Garmin Activities", :confirmFitSaved, {}));
             addItem(new WatchUi.MenuItem("Continue without FIT", "Finish IronDesk only", :continueWithoutFit, {}));
@@ -62,7 +63,7 @@ class IronDeskMenu extends WatchUi.Menu2 {
         }
         if (view.canAcceptServerConflict()) {
             addItem(new WatchUi.MenuItem("Retry changes", "Keep local watch data", :sync, {}));
-            addItem(new WatchUi.MenuItem("Use server workout", "Discard rejected watch changes", :acceptServer, {}));
+            addItem(new WatchUi.MenuItem("Use server workout", view.hasLiveSnapshotConflict() ? "Save FIT; use server state" : "Discard rejected watch changes", :acceptServer, {}));
             return;
         }
         if (view.isCompletionPending()) {
@@ -75,7 +76,7 @@ class IronDeskMenu extends WatchUi.Menu2 {
             addItem(new WatchUi.MenuItem("RPE -", "- 0.5", :rpeDown, {}));
         }
         if (view.canSyncFromMenu()) {
-            addItem(new WatchUi.MenuItem("Sync", "Send pending", :sync, {}));
+            addItem(new WatchUi.MenuItem("Sync", "Send + refresh", :sync, {}));
         }
         if (view.canFinishFromMenu()) {
             addItem(new WatchUi.MenuItem("Finish", "Save workout", :finish, {}));
@@ -99,6 +100,10 @@ class IronDeskMenuDelegate extends WatchUi.Menu2InputDelegate {
 
     function onSelect(item) {
         var id = item.getId();
+        if (id == :refreshStatus) {
+            // Informational only: do not refresh, close the menu or write data.
+            return;
+        }
         if (id == :editWeight) {
             WatchUi.popView(WatchUi.SLIDE_DOWN);
             var editor = new IronDeskWeightEditor(_view);
