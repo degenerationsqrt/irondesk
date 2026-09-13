@@ -2,6 +2,7 @@ import Toybox.Lang;
 import Toybox.Activity;
 import Toybox.Test;
 
+(:debug)
 class IronDeskTestWeightHost {
     var initialWeight;
     var savedWeight;
