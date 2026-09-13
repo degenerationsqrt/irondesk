@@ -34,6 +34,7 @@ import { TemplateLibrary } from "@/components/irondesk/template-library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/lib/auth/auth-provider";
 import type { ManualCardioInput } from "@/lib/irondesk/cardio-log";
 import { safeTimeZone } from "@/lib/irondesk/dates";
 import {
@@ -123,6 +124,15 @@ import {
 } from "@/lib/irondesk/units";
 import { useIronDeskInvalidate, useModeData, useServiceMode } from "@/lib/irondesk/use-data";
 import { useUnits } from "@/lib/irondesk/use-units";
+import {
+  canApplyWorkoutRead,
+  captureWorkoutDraftValues,
+  clearSavedSetDraft,
+  reconcileWorkoutExercises,
+  workoutQueueVersion,
+  type SetDraftField,
+  type SetDraftValues,
+} from "@/lib/irondesk/workout-reconciliation";
 
 export const Route = createFileRoute("/workout")({
   head: () => ({
@@ -160,9 +170,6 @@ function uid() {
 }
 
 type SaveState = "saved" | "saving" | "queued" | "error";
-
-type SetDraftField = "weight" | "reps" | "rpe";
-type SetDraftValues = Partial<Record<SetDraftField, string>>;
 
 function setDraftKey(setId: string, field: SetDraftField) {
   return `${setId}:${field}`;
@@ -301,12 +308,31 @@ function WorkoutServerData({
 }: {
   mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
 }) {
+  const { user } = useAuth();
   const mode = useServiceMode();
   const active = useModeData(workoutQuery);
   const library = useModeData(exercisesQuery);
+  const ownerKey = `${mode}:${user?.id ?? "anonymous"}`;
+  const [protectedSession, setProtectedSession] = useState<{
+    ownerKey: string;
+    session: ActiveWorkout;
+  } | null>(null);
+  const protectLocalIntent = useCallback(
+    (session: ActiveWorkout | null) => {
+      setProtectedSession((current) =>
+        session ? { ownerKey, session } : current?.ownerKey === ownerKey ? null : current,
+      );
+    },
+    [ownerKey],
+  );
+  useEffect(() => {
+    setProtectedSession((current) => (current && current.ownerKey !== ownerKey ? null : current));
+  }, [ownerKey]);
+  const displayedActive =
+    (protectedSession?.ownerKey === ownerKey ? protectedSession.session : null) ?? active;
   const appliedFinish = newestAppliedFinishReceipt(mutationQueue.terminalReceipts);
 
-  if (!active && appliedFinish) {
+  if (!displayedActive && appliedFinish) {
     return (
       <PendingWorkoutCompletion
         key={appliedFinish.itemId}
@@ -315,15 +341,16 @@ function WorkoutServerData({
       />
     );
   }
-  if (!active) return <WorkoutStart library={library} live={mode === "live"} />;
+  if (!displayedActive) return <WorkoutStart library={library} live={mode === "live"} />;
   return (
     <div className="space-y-4">
       <WorkoutConsole
-        key={active.id}
-        initial={active}
+        key={`${ownerKey}:${displayedActive.id}`}
+        initial={displayedActive}
         library={library}
         live={mode === "live"}
         mutationQueue={mutationQueue}
+        protectLocalIntent={protectLocalIntent}
       />
       {/* Browsable while training; starting is blocked until this session ends. */}
       <TemplateLibrary
@@ -678,12 +705,15 @@ function WorkoutConsole({
   library,
   live,
   mutationQueue,
+  protectLocalIntent,
 }: {
   initial: ActiveWorkout;
   library: Exercise[];
   live: boolean;
   mutationQueue: ReturnType<typeof useWorkoutMutationQueue>;
+  protectLocalIntent: (session: ActiveWorkout | null) => void;
 }) {
+  const { user } = useAuth();
   const invalidate = useIronDeskInvalidate();
   const units = useUnits();
   const unit = weightUnit(units);
@@ -733,6 +763,7 @@ function WorkoutConsole({
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>(initial.exercises);
   const [notes, setNotes] = useState(initial.notes);
+  const [acceptedNotes, setAcceptedNotes] = useState(initial.notes);
   const [elapsed, setElapsed] = useState(initial.elapsedSec);
   const [running, setRunning] = useState(true);
   const [rest, setRest] = useState<number | null>(null);
@@ -771,6 +802,11 @@ function WorkoutConsole({
   const [setDraftErrors, setSetDraftErrors] = useState<Record<string, string>>({});
   const setInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const setDraftTimers = useRef<Map<string, number>>(new Map());
+  const setDraftVersions = useRef<Map<string, number>>(new Map());
+  const localWriteRevision = useRef(0);
+  const activeWrites = useRef(0);
+  const [remoteReadError, setRemoteReadError] = useState(false);
+  const [remoteClosed, setRemoteClosed] = useState(false);
   const selectedExerciseIds = useMemo(
     () =>
       new Set(
@@ -798,6 +834,181 @@ function WorkoutConsole({
   const currentPendingCount = currentQueueItems.filter((item) => item.state === "pending").length;
   const currentBlockedItem = currentQueueItems.find((item) => item.state === "blocked") ?? null;
   const otherQueueCount = Math.max(0, mutationQueue.items.length - currentQueueCount);
+
+  useEffect(() => {
+    protectLocalIntent(
+      activeWrites.current > 0 ||
+        currentQueueCount > 0 ||
+        Object.keys(setDrafts).length > 0 ||
+        notes !== acceptedNotes
+        ? initial
+        : null,
+    );
+  }, [
+    currentQueueCount,
+    setDrafts,
+    notes,
+    acceptedNotes,
+    initial,
+    protectLocalIntent,
+    saveState,
+    exercises,
+  ]);
+
+  const remoteState = useRef({
+    generation: `${user?.id ?? "demo"}:${initial.id}`,
+    exercises,
+    methodByExercise,
+    methodConfigByExercise,
+    items: mutationQueue.items,
+    lastAppliedAt: mutationQueue.lastAppliedAt,
+    notesPending: notes !== acceptedNotes,
+  });
+  useEffect(() => {
+    remoteState.current = {
+      generation: `${user?.id ?? "demo"}:${initial.id}`,
+      exercises,
+      methodByExercise,
+      methodConfigByExercise,
+      items: mutationQueue.items,
+      lastAppliedAt: mutationQueue.lastAppliedAt,
+      notesPending: notes !== acceptedNotes,
+    };
+  }, [
+    user?.id,
+    initial.id,
+    exercises,
+    methodByExercise,
+    methodConfigByExercise,
+    mutationQueue.items,
+    mutationQueue.lastAppliedAt,
+    notes,
+    acceptedNotes,
+  ]);
+
+  useEffect(() => {
+    if (!live || !user?.id) return;
+    let disposed = false;
+    let request: AbortController | null = null;
+    const generation = `${user.id}:${initial.id}`;
+    const readVersion = () => ({
+      generation: remoteState.current.generation,
+      writes: localWriteRevision.current,
+      queue: workoutQueueVersion(remoteState.current.items, remoteState.current.lastAppliedAt),
+    });
+    const refresh = async () => {
+      if (
+        disposed ||
+        request ||
+        document.visibilityState !== "visible" ||
+        activeWrites.current > 0 ||
+        terminalStageStarted.current
+      )
+        return;
+      const controller = new AbortController();
+      request = controller;
+      const started = readVersion();
+      let timedOut = false;
+      const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        if (!disposed) setRemoteReadError(true);
+      }, 10_000);
+      try {
+        const incoming = await repo.getWorkout(initial.id, { signal: controller.signal });
+        if (
+          disposed ||
+          controller.signal.aborted ||
+          activeWrites.current > 0 ||
+          generation !== remoteState.current.generation ||
+          !canApplyWorkoutRead(started, readVersion(), terminalStageStarted.current)
+        )
+          return;
+        setRemoteReadError(false);
+        if (!incoming || incoming.status === "completed" || incoming.status === "cancelled") {
+          terminalStageStarted.current = true;
+          for (const timer of setDraftTimers.current.values()) window.clearTimeout(timer);
+          setDraftTimers.current.clear();
+          setRunning(false);
+          setRemoteClosed(true);
+          const protectedWrites = remoteState.current.items.some(
+            (item) => item.sessionId === initial.id || item.sessionId === null,
+          );
+          if (
+            !protectedWrites &&
+            Object.keys(setDraftsRef.current).length === 0 &&
+            !remoteState.current.notesPending
+          )
+            invalidate();
+          return;
+        }
+        if (incoming.id !== initial.id) return;
+        const current = remoteState.current;
+        const merged = reconcileWorkoutExercises(
+          current.exercises.map((exercise) => ({
+            ...exercise,
+            trainingMethodId:
+              current.methodByExercise[exercise.id] ?? exercise.trainingMethodId ?? null,
+            trainingMethodConfig:
+              current.methodConfigByExercise[exercise.id] ?? exercise.trainingMethodConfig,
+          })),
+          incoming.exercises,
+          current.items
+            .filter((item) => item.sessionId === initial.id || item.sessionId === null)
+            .map((item) => item.mutation),
+          setDraftsRef.current,
+        );
+        // Update the ref with the same snapshot before a subsequent focus event.
+        const methods = Object.fromEntries(
+          merged
+            .filter((exercise) => exercise.trainingMethodId)
+            .map((exercise) => [exercise.id, exercise.trainingMethodId!]),
+        );
+        const configs = Object.fromEntries(
+          merged.map((exercise) => [exercise.id, parseMethodConfig(exercise.trainingMethodConfig)]),
+        );
+        remoteState.current = {
+          ...current,
+          exercises: merged,
+          methodByExercise: methods,
+          methodConfigByExercise: configs,
+        };
+        setExercises(merged);
+        setMethodByExercise(methods);
+        setMethodConfigByExercise(configs);
+        if (
+          !current.notesPending &&
+          !current.items.some(
+            (item) =>
+              item.mutation.kind === "session.meta" &&
+              item.mutation.sessionId === initial.id &&
+              item.mutation.patch.notes !== undefined,
+          )
+        ) {
+          setNotes(incoming.notes);
+          setAcceptedNotes(incoming.notes);
+        }
+      } catch {
+        if (!disposed && (!controller.signal.aborted || timedOut)) setRemoteReadError(true);
+      } finally {
+        window.clearTimeout(timeout);
+        if (request === controller) request = null;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const timer = window.setInterval(() => void refresh(), 5_000);
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      disposed = true;
+      request?.abort();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [initial.id, invalidate, live, user?.id]);
 
   useEffect(() => {
     if (!finishReceipt?.summary || !finishReceipt.sessionId) return;
@@ -858,6 +1069,8 @@ function WorkoutConsole({
   const persist = useCallback(
     async (task: () => Promise<void>, options?: { rethrow?: boolean }) => {
       if (!live) return;
+      localWriteRevision.current += 1;
+      activeWrites.current += 1;
       pending.current += 1;
       setSaveState("saving");
       try {
@@ -869,6 +1082,8 @@ function WorkoutConsole({
         setSaveState("error");
         if (options?.rethrow) throw caught;
       } finally {
+        localWriteRevision.current += 1;
+        activeWrites.current -= 1;
         pending.current -= 1;
       }
     },
@@ -886,32 +1101,41 @@ function WorkoutConsole({
       options?: { requireAcknowledgment?: boolean; terminalSummary?: WorkoutTerminalSummary },
     ): Promise<WorkoutMutationCommitResult> => {
       if (!live) return { itemId: "demo", status: "applied", outcome: "applied" };
-      setSaveState("saving");
-      const result = await commitWorkoutMutation(mutation, {
-        sessionId: initial.id,
-        ...(options?.requireAcknowledgment ? { requireAcknowledgment: true } : {}),
-        ...(options?.terminalSummary ? { terminalSummary: options.terminalSummary } : {}),
-      });
-      if (result.status === "applied") {
-        setSaveError(null);
-        if (pending.current === 0) setSaveState("saved");
+      localWriteRevision.current += 1;
+      activeWrites.current += 1;
+      try {
+        setSaveState("saving");
+        const result = await commitWorkoutMutation(mutation, {
+          sessionId: initial.id,
+          ...(options?.requireAcknowledgment ? { requireAcknowledgment: true } : {}),
+          ...(options?.terminalSummary ? { terminalSummary: options.terminalSummary } : {}),
+        });
+        if (mutation.kind === "session.meta" && mutation.patch.notes !== undefined)
+          setAcceptedNotes(mutation.patch.notes ?? "");
+        if (result.status === "applied") {
+          setSaveError(null);
+          if (pending.current === 0) setSaveState("saved");
+          return result;
+        }
+        if (result.status === "queued") {
+          setSaveError(
+            queueIsDurable
+              ? "Connection interrupted. Your change is safely queued on this device."
+              : "Connection interrupted. This change is kept only while this page stays open.",
+          );
+          setSaveState("queued");
+          if (options?.requireAcknowledgment) throw new DeferredWorkoutMutationError();
+          return result;
+        }
+        setSaveError("A queued change needs your attention.");
+        setSaveState("error");
+        if (options?.requireAcknowledgment)
+          throw new Error("That change could not be saved. Review the queued-change warning.");
         return result;
+      } finally {
+        localWriteRevision.current += 1;
+        activeWrites.current -= 1;
       }
-      if (result.status === "queued") {
-        setSaveError(
-          queueIsDurable
-            ? "Connection interrupted. Your change is safely queued on this device."
-            : "Connection interrupted. This change is kept only while this page stays open.",
-        );
-        setSaveState("queued");
-        if (options?.requireAcknowledgment) throw new DeferredWorkoutMutationError();
-        return result;
-      }
-      setSaveError("A queued change needs your attention.");
-      setSaveState("error");
-      if (options?.requireAcknowledgment)
-        throw new Error("That change could not be saved. Review the queued-change warning.");
-      return result;
     },
     [commitWorkoutMutation, initial.id, live, queueIsDurable],
   );
@@ -952,13 +1176,13 @@ function WorkoutConsole({
 
   // Debounced session-notes autosave.
   useEffect(() => {
-    if (!live || notes === initial.notes || terminalStageStarted.current) return;
+    if (!live || notes === acceptedNotes || terminalStageStarted.current) return;
     const t = setTimeout(() => {
       if (terminalStageStarted.current) return;
       void persistMutation({ kind: "session.meta", sessionId: initial.id, patch: { notes } });
     }, 700);
     return () => clearTimeout(t);
-  }, [notes, live, initial.id, initial.notes, persistMutation]);
+  }, [notes, live, initial.id, acceptedNotes, persistMutation]);
 
   const totals = useMemo(() => {
     const done = exercises.flatMap((e) => e.sets.filter((s) => s.done));
@@ -1636,6 +1860,7 @@ function WorkoutConsole({
     );
 
   const editSet = async (exId: string, setId: string, patch: Partial<SetEntry>) => {
+    if (terminalStageStarted.current) throw new Error("This workout is already closed.");
     patchLocal(exId, setId, patch);
     if (setId.startsWith("local-")) return;
     return persistMutation({
@@ -1654,7 +1879,10 @@ function WorkoutConsole({
   };
 
   const updateSetDraft = (setId: string, field: SetDraftField, value: string) => {
+    if (terminalStageStarted.current) return;
     const key = setDraftKey(setId, field);
+    const revision = (setDraftVersions.current.get(key) ?? 0) + 1;
+    setDraftVersions.current.set(key, revision);
     const nextDrafts = {
       ...setDraftsRef.current,
       [setId]: { ...setDraftsRef.current[setId], [field]: value },
@@ -1671,6 +1899,7 @@ function WorkoutConsole({
     if (previousTimer !== undefined) window.clearTimeout(previousTimer);
     const timer = window.setTimeout(() => {
       setDraftTimers.current.delete(key);
+      if (terminalStageStarted.current) return;
       const exercise = exercises.find((candidate) =>
         candidate.sets.some((set) => set.id === setId),
       );
@@ -1692,12 +1921,13 @@ function WorkoutConsole({
       void editSet(exercise.id, setId, patch)
         .then(() => {
           setSetDrafts((previous) => {
-            if (previous[setId]?.[field] !== value) return previous;
-            const fields = { ...previous[setId] };
-            delete fields[field];
-            const next = { ...previous };
-            if (Object.keys(fields).length === 0) delete next[setId];
-            else next[setId] = fields;
+            const next = clearSavedSetDraft(
+              previous,
+              setId,
+              field,
+              revision,
+              setDraftVersions.current.get(key) ?? 0,
+            );
             setDraftsRef.current = next;
             return next;
           });
@@ -1726,7 +1956,9 @@ function WorkoutConsole({
     field: SetDraftField,
     focusOnError = false,
   ): Promise<boolean> => {
+    if (terminalStageStarted.current) return false;
     const key = setDraftKey(set.id, field);
+    const revision = setDraftVersions.current.get(key) ?? 0;
     const pendingTimer = setDraftTimers.current.get(key);
     if (pendingTimer !== undefined) {
       window.clearTimeout(pendingTimer);
@@ -1760,17 +1992,28 @@ function WorkoutConsole({
           : field === "reps"
             ? { reps: parsed.value as number }
             : { rpe: parsed.value as number | null };
-      await editSet(exId, set.id, patch);
+      try {
+        await editSet(exId, set.id, patch);
+      } catch (caught) {
+        setSaveError(
+          caught instanceof Error ? caught.message : "That set value could not be saved.",
+        );
+        setSaveState("error");
+        return false;
+      }
       setSetDrafts((previous) => {
-        const fields = { ...previous[set.id] };
-        delete fields[field];
-        const next = { ...previous };
-        if (Object.keys(fields).length === 0) delete next[set.id];
-        else next[set.id] = fields;
+        const next = clearSavedSetDraft(
+          previous,
+          set.id,
+          field,
+          revision,
+          setDraftVersions.current.get(key) ?? 0,
+        );
         setDraftsRef.current = next;
         return next;
       });
     }
+    if ((setDraftVersions.current.get(key) ?? 0) !== revision) return false;
     setSetDraftErrors((previous) => {
       if (!(key in previous)) return previous;
       const next = { ...previous };
@@ -1791,66 +2034,59 @@ function WorkoutConsole({
     return true;
   };
 
-  const setWithCommittedDrafts = (set: SetEntry): SetEntry => {
-    const drafts = setDraftsRef.current[set.id];
-    if (!drafts) return set;
-    let next = set;
-    if (drafts.weight !== undefined) {
-      const parsed = parseWeightDraft(drafts.weight, (value) => toKg(value, units));
-      if (parsed.ok) next = { ...next, weightKg: parsed.value };
-    }
-    if (drafts.reps !== undefined) {
-      const parsed = parseRepsDraft(drafts.reps);
-      if (parsed.ok) next = { ...next, reps: parsed.value };
-    }
-    if (drafts.rpe !== undefined) {
-      const parsed = parseRpeDraft(drafts.rpe);
-      if (parsed.ok) next = { ...next, rpe: parsed.value };
-    }
-    return next;
-  };
-
   const commitAllSetDrafts = async (): Promise<WorkoutExercise[] | null> => {
+    // Capture values before the awaited writes clear their raw drafts. The
+    // render's exercises array itself does not change across these awaits.
+    const committed = captureWorkoutDraftValues(exercises, setDraftsRef.current, (value) =>
+      toKg(value, units),
+    );
+    const versions = new Map(setDraftVersions.current);
     for (const exercise of exercises) {
       for (const set of exercise.sets) {
         if (!(await commitSetDrafts(exercise.id, set, true))) return null;
       }
     }
-    return exercises.map((exercise) => ({
-      ...exercise,
-      sets: exercise.sets.map(setWithCommittedDrafts),
-    }));
+    if ([...setDraftVersions.current].some(([key, version]) => versions.get(key) !== version))
+      return null;
+    return committed;
   };
 
   const toggleSet = async (exId: string, setId: string) => {
-    const set = exercises.find((e) => e.id === exId)?.sets.find((s) => s.id === setId);
-    if (!set) return;
-    if (!(await commitSetDrafts(exId, set, true))) return;
-    const next = !set.done;
-    patchLocal(exId, setId, { done: next });
-    if (next) {
-      // The set's own method segment prescribes its rest; template rest is next.
-      setRest(
-        restSecondsForCompletedSet({
-          segmentConfig: set.methodSegmentConfig,
-          exerciseRestSeconds: exercises.find((e) => e.id === exId)?.restSeconds ?? null,
-        }),
-      );
-      setRestStarted(Date.now());
-    }
+    localWriteRevision.current += 1;
+    activeWrites.current += 1;
+    try {
+      const set = exercises.find((e) => e.id === exId)?.sets.find((s) => s.id === setId);
+      if (!set) return;
+      if (!(await commitSetDrafts(exId, set, true))) return;
+      const next = !set.done;
+      patchLocal(exId, setId, { done: next });
+      if (next) {
+        // The set's own method segment prescribes its rest; template rest is next.
+        setRest(
+          restSecondsForCompletedSet({
+            segmentConfig: set.methodSegmentConfig,
+            exerciseRestSeconds: exercises.find((e) => e.id === exId)?.restSeconds ?? null,
+          }),
+        );
+        setRestStarted(Date.now());
+      }
 
-    if (setId.startsWith("local-")) return;
-    const restSeconds =
-      next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
-    await persistMutation({
-      kind: "set.update",
-      setId,
-      patch: {
-        completed: next,
-        completedAt: next ? new Date().toISOString() : null,
-        ...(restSeconds ? { restSeconds } : {}),
-      },
-    });
+      if (setId.startsWith("local-")) return;
+      const restSeconds =
+        next && restStarted ? Math.round((Date.now() - restStarted) / 1000) : undefined;
+      await persistMutation({
+        kind: "set.update",
+        setId,
+        patch: {
+          completed: next,
+          completedAt: next ? new Date().toISOString() : null,
+          ...(restSeconds ? { restSeconds } : {}),
+        },
+      });
+    } finally {
+      localWriteRevision.current += 1;
+      activeWrites.current -= 1;
+    }
   };
 
   const addSetWithValues = async (
@@ -1992,94 +2228,101 @@ function WorkoutConsole({
   };
 
   const finish = async () => {
-    setConfirming(null);
-    const committedExercises = await commitAllSetDrafts();
-    if (!committedExercises) return;
-    terminalStageStarted.current = true;
-    finishRequestedAt.current ??= new Date().toISOString();
-    setRunning(false);
-    setExercises(committedExercises);
-    const completedSets = committedExercises.flatMap((exercise) =>
-      exercise.sets.filter((set) => set.done),
-    );
-    const completedAverageRpe = averageCompletedRpe(completedSets);
-    const terminalSummary: WorkoutTerminalSummary = finishSummary.current ?? {
-      title: initial.title,
-      durationMin: Math.round(elapsed / 60),
-      sets: completedSets.length,
-      reps: completedSets.reduce((sum, set) => sum + set.reps, 0),
-      tonnageKg: completedSets.reduce((sum, set) => sum + set.reps * set.weightKg, 0),
-      avgRpe: completedAverageRpe == null ? null : Number(completedAverageRpe.toFixed(1)),
-    };
-    finishSummary.current = terminalSummary;
-    const localSummary: repo.WorkoutSummary = {
-      sessionId: initial.id,
-      ...terminalSummary,
-    };
-    if (!live) {
-      setSummary(localSummary);
-      return;
-    }
-    if (!queueIsDurable && typeof navigator !== "undefined" && navigator.onLine === false) {
-      const message =
-        "This browser cannot use durable workout storage and is offline. Your workout is not yet safely completed. Reconnect, keep this page open, and retry.";
-      setFinishStorageError(message);
-      setSaveError(message);
-      setSaveState("error");
-      return;
-    }
+    localWriteRevision.current += 1;
+    activeWrites.current += 1;
     try {
-      if (notes !== initial.notes) {
-        await persistMutation(
-          { kind: "session.meta", sessionId: initial.id, patch: { notes } },
-          !queueIsDurable ? { requireAcknowledgment: true } : undefined,
-        );
-      }
-      const committed = await persistMutation(
-        {
-          kind: "session.finish",
-          sessionId: initial.id,
-          completedAt: finishRequestedAt.current,
-        },
-        {
-          terminalSummary,
-          ...(!queueIsDurable ? { requireAcknowledgment: true } : {}),
-        },
+      setConfirming(null);
+      const committedExercises = await commitAllSetDrafts();
+      if (!committedExercises) return;
+      terminalStageStarted.current = true;
+      finishRequestedAt.current ??= new Date().toISOString();
+      setRunning(false);
+      setExercises(committedExercises);
+      const completedSets = committedExercises.flatMap((exercise) =>
+        exercise.sets.filter((set) => set.done),
       );
-      setFinishStorageError(null);
-      if (committed.status === "queued") {
-        if (committed.durable === true) {
-          setSummary(localSummary);
-        } else {
-          const message =
-            "IronDesk could not persist completion in durable browser storage. Your workout is not yet safely completed; keep this page open and retry online.";
-          setFinishStorageError(message);
-          setSaveError(message);
-          setSaveState("error");
-        }
-      }
-      if (committed.status === "applied") {
+      const completedAverageRpe = averageCompletedRpe(completedSets);
+      const terminalSummary: WorkoutTerminalSummary = finishSummary.current ?? {
+        title: initial.title,
+        durationMin: Math.round(elapsed / 60),
+        sets: completedSets.length,
+        reps: completedSets.reduce((sum, set) => sum + set.reps, 0),
+        tonnageKg: completedSets.reduce((sum, set) => sum + set.reps * set.weightKg, 0),
+        avgRpe: completedAverageRpe == null ? null : Number(completedAverageRpe.toFixed(1)),
+      };
+      finishSummary.current = terminalSummary;
+      const localSummary: repo.WorkoutSummary = {
+        sessionId: initial.id,
+        ...terminalSummary,
+      };
+      if (!live) {
         setSummary(localSummary);
-        try {
-          const result = await repo.getWorkoutSummary(initial.id);
-          setSummary(result);
-          invalidate();
-        } catch (caught) {
-          setSaveError(
-            caught instanceof Error
-              ? `Workout synced, but the server summary could not be refreshed yet: ${caught.message}`
-              : "Workout synced, but the server summary could not be refreshed yet.",
+        return;
+      }
+      if (!queueIsDurable && typeof navigator !== "undefined" && navigator.onLine === false) {
+        const message =
+          "This browser cannot use durable workout storage and is offline. Your workout is not yet safely completed. Reconnect, keep this page open, and retry.";
+        setFinishStorageError(message);
+        setSaveError(message);
+        setSaveState("error");
+        return;
+      }
+      try {
+        if (notes !== initial.notes) {
+          await persistMutation(
+            { kind: "session.meta", sessionId: initial.id, patch: { notes } },
+            !queueIsDurable ? { requireAcknowledgment: true } : undefined,
           );
         }
+        const committed = await persistMutation(
+          {
+            kind: "session.finish",
+            sessionId: initial.id,
+            completedAt: finishRequestedAt.current,
+          },
+          {
+            terminalSummary,
+            ...(!queueIsDurable ? { requireAcknowledgment: true } : {}),
+          },
+        );
+        setFinishStorageError(null);
+        if (committed.status === "queued") {
+          if (committed.durable === true) {
+            setSummary(localSummary);
+          } else {
+            const message =
+              "IronDesk could not persist completion in durable browser storage. Your workout is not yet safely completed; keep this page open and retry online.";
+            setFinishStorageError(message);
+            setSaveError(message);
+            setSaveState("error");
+          }
+        }
+        if (committed.status === "applied") {
+          setSummary(localSummary);
+          try {
+            const result = await repo.getWorkoutSummary(initial.id);
+            setSummary(result);
+            invalidate();
+          } catch (caught) {
+            setSaveError(
+              caught instanceof Error
+                ? `Workout synced, but the server summary could not be refreshed yet: ${caught.message}`
+                : "Workout synced, but the server summary could not be refreshed yet.",
+            );
+          }
+        }
+      } catch (caught) {
+        const detail = caught instanceof Error ? caught.message : "Could not finish the session.";
+        const message = queueIsDurable
+          ? detail
+          : `Durable workout storage is unavailable, so IronDesk cannot claim this workout is complete yet. ${detail}`;
+        setFinishStorageError(queueIsDurable ? null : message);
+        setSaveError(message);
+        setSaveState("error");
       }
-    } catch (caught) {
-      const detail = caught instanceof Error ? caught.message : "Could not finish the session.";
-      const message = queueIsDurable
-        ? detail
-        : `Durable workout storage is unavailable, so IronDesk cannot claim this workout is complete yet. ${detail}`;
-      setFinishStorageError(queueIsDurable ? null : message);
-      setSaveError(message);
-      setSaveState("error");
+    } finally {
+      localWriteRevision.current += 1;
+      activeWrites.current -= 1;
     }
   };
 
@@ -2214,6 +2457,49 @@ function WorkoutConsole({
     );
   }
 
+  if (remoteClosed) {
+    return (
+      <SectionCard title="Workout closed on another device" eyebrow="Local changes preserved">
+        <p className="text-sm text-muted-foreground">
+          This session is no longer active. Saved changes remain in your account.{" "}
+          {currentQueueCount} queued changes remain available for review.
+        </p>
+        {Object.keys(setDrafts).length > 0 && (
+          <div className="mt-3 space-y-2 rounded-lg border border-warning/40 p-3">
+            <p className="text-sm font-semibold">Unsubmitted edits</p>
+            <p className="text-xs text-muted-foreground">
+              These values were not sent after the workout closed. Keep this page open to review or
+              copy them before leaving.
+            </p>
+            {exercises.flatMap((exercise) =>
+              exercise.sets
+                .filter((set) => setDrafts[set.id])
+                .map((set, index) => (
+                  <p key={set.id} className="text-sm break-words">
+                    {exercise.name}, set {set.setNumber ?? index + 1}:{" "}
+                    {Object.entries(setDrafts[set.id] ?? {})
+                      .map(
+                        ([field, value]) =>
+                          `${field === "weight" ? `weight (${unit})` : field}: ${value === "" ? "blank" : value}`,
+                      )
+                      .join(" · ")}
+                  </p>
+                )),
+            )}
+          </div>
+        )}
+        {notes !== acceptedNotes && (
+          <p className="mt-3 whitespace-pre-wrap text-sm">
+            <strong>Unsubmitted notes:</strong> {notes}
+          </p>
+        )}
+        <Button className="mt-3" variant="secondary" onClick={invalidate}>
+          Refresh saved data
+        </Button>
+      </SectionCard>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-4">
       <PageHeader
@@ -2239,6 +2525,13 @@ function WorkoutConsole({
           </div>
         }
       />
+
+      {remoteReadError && (
+        <p role="status" className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+          Changes from other devices could not be refreshed. Your local edits are preserved;
+          IronDesk will retry while this page is open.
+        </p>
+      )}
 
       <div className="panel sticky top-14 z-10 grid gap-3 p-3.5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:p-4">
         <div className="flex items-center gap-3">
